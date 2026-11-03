@@ -32,6 +32,7 @@ dependencies = [
     "tifffile>=2026.10.15",
     "torch>=2.14.1",
     "torchvision>=0.29.1",
+    "tqdm>=4.70.1",
     "umap-learn>=0.5.12",
 ]
 
