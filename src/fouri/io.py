@@ -7,13 +7,10 @@ import numpy as np
 from tifffile import imread
 
 
-def make_dir(path, what="output"):
-    """Create ``path`` (and parents) if needed and say whether it was created."""
-    if os.path.isdir(path):
-        print(f"Directory for {what} exists: {path}")
-    else:
+def make_dir(path):
+    """Create ``path`` (and parents) if needed."""
+    if not os.path.isdir(path):
         os.makedirs(path)
-        print(f"Directory for {what} created: {path}")
 
 
 def nd2_info(path):
