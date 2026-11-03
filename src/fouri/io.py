@@ -4,7 +4,7 @@ import os
 
 import nd2
 import numpy as np
-from tifffile import imread
+from tifffile import imread, imwrite
 
 
 def make_dir(path):
@@ -36,3 +36,7 @@ def read_labels(path_labels, well, indices=None):
     if indices is not None:
         names = [names[int(i)] for i in indices]
     return np.array([imread(os.path.join(path_labels, well, n)) for n in names])
+
+
+def write_tiff(path, array):
+    imwrite(path, array, compression="zlib")
