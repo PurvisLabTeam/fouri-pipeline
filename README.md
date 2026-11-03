@@ -9,10 +9,13 @@ A step-by-step guide for lab members is in [`docs/pipeline_guide.html`](docs/pip
    ```
    uv sync
    uv run nbstripout --install
+   git config filter.nbstripout.extrakeys metadata.language_info.version
    ```
    `uv sync` creates the `.venv` environment with Python 3.12 and every package the notebooks need
    (Cellpose-SAM with the CUDA build of PyTorch on Windows, napari, scanpy, PHATE, delve, ...).
-   `nbstripout --install` makes git drop notebook outputs when you commit.
+   `nbstripout --install` makes git drop notebook outputs when you commit. The `git config` line also
+   drops the Python version a notebook records each time it runs, so running a notebook never shows it
+   as changed. Set up before that line was added? Run it once in your copy of the repository.
 3. Open the notebooks in VS Code (or `uv run jupyter lab`) and select the `.venv` kernel.
 
 To pick up changes later: `git pull`, then `uv sync`.

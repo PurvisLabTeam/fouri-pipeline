@@ -197,8 +197,9 @@ cd 4i_pipeline</pre><button type="button">Copy</button></div>
       <h3>Create the environment</h3>
       <p>This installs Python 3.12 and every package the notebooks use (Cellpose-SAM with the GPU build of PyTorch, napari, scanpy, PHATE, delve). It takes a few minutes the first time.</p>
       <div class="code"><pre>uv sync
-uv run nbstripout --install</pre><button type="button">Copy</button></div>
-      <p>The second command makes git leave notebook outputs out of commits, so your runs never show up as code changes.</p>
+uv run nbstripout --install
+git config filter.nbstripout.extrakeys metadata.language_info.version</pre><button type="button">Copy</button></div>
+      <p>The last two commands make git leave notebook outputs, and the Python version a notebook records when it runs, out of commits, so your runs never show up as code changes.</p>
     </div></li>
     <li><div class="body">
       <h3>Open the notebooks in VS Code</h3>
@@ -434,6 +435,7 @@ uv sync</pre><button type="button">Copy</button></div>
       <tr><td><code>Data preparation passed tests</code> is missing in 00</td><td>A round has no DNA channel or more than one. Check <code>info_exp.csv</code>.</td></tr>
       <tr><td><code>Duplicate round/signal names</code> in 06</td><td>Two rounds in <code>info_exp.csv</code> use the same round name and signal. Make them unique and rerun from 00.</td></tr>
       <tr><td>Notebook outputs show up in <code>git diff</code></td><td>Run <code>uv run nbstripout --install</code> once in this copy of the repository.</td></tr>
+      <tr><td>A notebook you only ran shows as changed, and the change is a <code>"version"</code> line</td><td>Run <code>git config filter.nbstripout.extrakeys metadata.language_info.version</code> once in this copy of the repository.</td></tr>
     </tbody>
   </table></div>
 </section>
