@@ -43,6 +43,10 @@ To pick up changes later: `git pull`, then `uv sync`.
 If the raw data or the info file live somewhere else, set *data folder* / *info file* in the form
 (stored as `paths` in `experiment.json`, relative to the experiment folder or as a full path).
 
+Every round is aligned onto the first round in `info_exp.csv`, and cells are outlined on it. To use
+another round, add `"anchor_round": 1` to `experiment.json` by hand (counting from 0, so 1 is the second
+round). Notebooks 02, 03 and 06 all read it, and the form keeps it when it saves.
+
 ## Metadata CSV
 One row per well; only `well` is required (`B2` and `B02` both work):
 ```

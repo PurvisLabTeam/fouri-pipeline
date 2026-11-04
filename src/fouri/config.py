@@ -17,6 +17,8 @@ well_metadata, ...). Fields added here are optional:
 - ``condition_columns``: metadata columns that define a sample_ID
 - ``derived_features``: ``[{"name": ..., "formula": ...}]`` used by notebook 07
 - ``paths``: per-folder overrides, absolute or relative to base_dir
+- ``anchor_round``: the round every other round is aligned onto and cells are
+  outlined on (notebooks 02, 03, 06), counted from 0; default 0, the first round
 """
 
 import json
@@ -91,6 +93,22 @@ class Experiment:
                 if c not in cols:
                     cols.append(c)
         return sorted(cols, key=lambda c: (c != "sample_ID", c not in DEFAULT_CONDITION_COLUMNS, cols.index(c)))
+
+    # -- alignment ------------------------------------------------------------
+    @property
+    def anchor_round(self):
+        """Round every other round is aligned onto and cells are outlined on (02, 03, 06).
+
+        Counted from 0 in info_exp.csv order: the NNN in ``labels_{well}_round_NNN.tif``.
+        Set by the optional ``anchor_round`` in experiment.json; default 0, the first round.
+        """
+        value = self.config.get("anchor_round", 0)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(
+                f'"anchor_round" in {self.config_path} is {value!r}. It must be a whole number counting '
+                "from 0: 0 is the first round in info_exp.csv, 1 the second."
+            )
+        return value
 
     @property
     def condition_columns(self):

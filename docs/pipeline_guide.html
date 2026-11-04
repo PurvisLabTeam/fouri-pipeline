@@ -341,9 +341,9 @@ total_area_DNA = R0_DNA_nuc_mean * nuc_area</pre><button type="button">Copy</but
     <article class="nb">
       <div class="top"><span class="num">02</span><h3>Find transforms</h3></div>
       <dl>
-        <dt>Does</dt><dd>Registers every round's segmentation to the first round (rigid: shift and rotation) and saves the transforms.</dd>
+        <dt>Does</dt><dd>Registers every round's segmentation to the anchor round (rigid: shift and rotation) and saves the transforms. The anchor round is the first round in <code>info_exp.csv</code>; to use another, add <code>"anchor_round": 1</code> to <code>experiment.json</code> (counting from 0, so 1 is the second round). Notebooks 03 and 06 use the same round.</dd>
         <dt>You set</dt><dd><code>downscale_factor</code> (1 = full size; 2 if it runs out of memory on very large images).</dd>
-        <dt>Writes</dt><dd><code>output_df\tmat_&lt;well&gt;.pkl</code></dd>
+        <dt>Writes</dt><dd><code>output_df\tmat_&lt;well&gt;.npy</code>. Experiments run before this change have <code>tmat_&lt;well&gt;.pkl</code> instead; 03 and 04 still read those.</dd>
       </dl>
       <p>The last cells (“Optional - test transformations”) open napari to inspect the alignment of the first well; skip them unless you want to look.</p>
     </article>
@@ -351,8 +351,8 @@ total_area_DNA = R0_DNA_nuc_mean * nuc_area</pre><button type="button">Copy</but
       <div class="top"><span class="num">03</span><h3>Fix an alignment by hand</h3><span class="tag">only if needed</span></div>
       <dl>
         <dt>Does</dt><dd>Opens two rounds of one well in napari with the Affinder plugin so you can set the transform by clicking matching points, then replaces that round's transform.</dd>
-        <dt>You set</dt><dd><code>myWell</code> (e.g. <code>'D03'</code>), <code>myRound</code> (the round to fix, as named in the folders) and <code>anchor_round_selected</code>. In Affinder choose the reference image, the image to transform and “similarity”.</dd>
-        <dt>Writes</dt><dd>Updates <code>output_df\tmat_&lt;well&gt;.pkl</code>; rerun 04 for that well afterwards.</dd>
+        <dt>You set</dt><dd><code>myWell</code> (e.g. <code>'D03'</code>), <code>myRound</code> (the round to fix, as named in the folders). It is aligned onto the anchor round, the same one 02 used. In Affinder choose the reference image, the image to transform and “similarity”.</dd>
+        <dt>Writes</dt><dd>Updates <code>output_df\tmat_&lt;well&gt;.npy</code>; rerun 04 for that well afterwards.</dd>
       </dl>
     </article>
     <article class="nb">

@@ -47,6 +47,9 @@ through `save_config` and keeps the previous version as `experiment.json.bak`.
 - The format stays readable as Lauryn's older `project_config` files (`experiment_key`, `base_dir`,
   `mac_base_dir`, `well_list`, `well_metadata`); `Experiment.__getitem__`/`.get` exist for code written
   against that dict. New fields must be optional.
+- Optional `anchor_round`: the round every other round is aligned onto, counted from 0 like `alignRound`;
+  default 0, the first round in `info_exp.csv`. It is not in the setup form, which keeps any key it does
+  not manage when it saves.
 - Wells are always zero-padded (`B02`), normalized by `metadata.normalize_well`, sorted by `plate_sort_key`.
 - Committed notebooks keep the placeholder `CONFIG = r'Z:\PATH\TO\EXPERIMENT\experiment.json'`; do not
   commit a local path.
@@ -60,8 +63,8 @@ the writing and the reading side, so change them together.
 |------|--------|---------|
 | 00 | `output_df/df_{well}.pkl` (+ `.csv`): one row per round × channel listed in `info_exp.csv`. `output_images/{well}/im2segment_{well}_round_{NNN}.tif`: each round's alignment channel, cropped to the smallest image | 01, 02, 04 |
 | 01 | `segmented/{well}/labels_{well}_round_{NNN}.tif` (Cellpose-SAM) | 02, 03, 06 |
-| 02 | `output_df/tmat_{well}.pkl`: rigid transforms indexed by `alignRound`, identity for the anchor | 03, 04 |
-| 03 | replaces one entry of `tmat_{well}.pkl` with a hand alignment from Affinder | 04 |
+| 02 | `output_df/tmat_{well}.npy`: rigid transforms (rounds × 3 × 3) indexed by `alignRound`, identity for the anchor | 03, 04 |
+| 03 | replaces one entry of `tmat_{well}.npy` with a hand alignment from Affinder | 04 |
 | 04 | `aligned_tiffs/{well}/Round_{nameRound}_well{well}_{signal}.tif`; rewrites `df_{well}.pkl` adding `aligned_file_name` | 05, 06 |
 | 05 | `masks/mask_{well}.pkl`: napari shape polygons to exclude (optional) | 06 |
 | 06 | `cell_data/cell_data_{well}_df.{pkl,csv}` | 07 |
@@ -69,6 +72,10 @@ the writing and the reading side, so change them together.
 | 08 | `standard_adata_sub_filtered.h5ad`, PowerPoint and PNG plots in `base_dir` | — |
 
 `NNN` is the 0-based `alignRound`, zero-padded to 3 digits.
+
+The transforms file is only read and written through `fouri.align.load_transforms` and `save_transforms`
+(the name lives in `tmat_path`). Reading falls back to the `tmat_{well}.pkl` that 02 and 03 wrote before
+the switch to `.npy`, so older experiments still align without rerunning 02.
 
 ## Inputs, naming and couplings
 
@@ -81,8 +88,9 @@ the writing and the reading side, so change them together.
   `_total_nuc_protein`, `_nuc_cyto_ratio`, plus `nuc_area`, `ring_area`. `metadata.channel_names` rebuilds
   the same prefixes from `info_exp.csv` to suggest derived features; keep the two in step.
 - Cells are outlined once, on the anchor round's segmentation, and measured in every aligned channel.
-  02 hard-codes `anchor_round = 0` (its `anchor_round_selected` setting is unused) and 06 reads outlines
-  from `label_round = 0`; these must name the same round. 03 still defaults `anchor_round_selected = 1`.
+  The anchor round is `exp.anchor_round`, so 02, 03 and 06 cannot disagree: `fouri.align.find_transforms`
+  aligns every round onto it, 03 aligns the hand-fixed round onto it, and 06 outlines cells on it
+  (`label_round`).
 - Cytoplasmic rings in 06 come from `fouri.rings.make_rings(labels, width=6, gap=1)`, which drops pixels
   that could belong to two cells.
 
