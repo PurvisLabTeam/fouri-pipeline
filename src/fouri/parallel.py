@@ -1,0 +1,42 @@
+"""Helpers for parallel processing in the notebooks"""
+
+import math
+import os
+import warnings
+
+import psutil
+
+MEM_PER_WORKER = 8e9  # In bytes, equals 8 GB per worker
+MEM_MIN_FREE = 4e9  # In bytes, equals 4 GB
+MIN_CPU_FREE = 2
+
+
+def worker_count(min_count=1):
+    mem_available = psutil.virtual_memory().available
+    cores = physical if (physical := psutil.cpu_count(logical=False)) is not None else os.cpu_count()
+
+    cpu_bound = cores - MIN_CPU_FREE
+    mem_bound = math.floor((mem_available - MEM_MIN_FREE) / MEM_PER_WORKER)
+
+    raw_min = min(cpu_bound, mem_bound)
+    if raw_min < min_count:
+        workers = min_count
+        bottleneck = "forced minimum"
+        warnings.warn(
+            f"Severe resource constraints detected (CPU bound: {cpu_bound}. Mem bound: "
+            f"{_to_gb(mem_available):.1f}). Forcing worker count to {min_count}. Expect "
+            "degraded performance."
+        )
+    else:
+        workers = raw_min
+        bottleneck = "cpu" if workers == cpu_bound else "memory"
+
+    print(
+        f"Running {workers} job(s) in parallel (limited by {bottleneck}: {_to_gb(mem_available):.1f}GB "
+        f"available memory, {cores} total cores)"
+    )
+    return workers
+
+
+def _to_gb(num_bytes):
+    return num_bytes / 1e9
