@@ -4,6 +4,8 @@ import os
 
 import pandas as pd
 
+from fouri.report import say
+
 # column names notebook 07 has always used in fullest_df / adata.obs
 _OBS_NAMES = {"treatment_time": "treatment time"}
 
@@ -12,13 +14,15 @@ def build_fullest_df(exp):
     """Concatenate every well's cell_data CSV and add its metadata from the config."""
     frames = []
     for well, meta in exp.well_metadata.items():
-        print(f"starting Well {well}")
         df = pd.read_csv(os.path.join(exp.cell_data, f"cell_data_{well}_df.csv"), sep=",")
-        meta_df = pd.DataFrame({_OBS_NAMES.get(c, c): [v] * len(df) for c, v in meta.items()}, index=df.index)
+        meta_df = pd.DataFrame(
+            {_OBS_NAMES.get(c, c): [v] * len(df) for c, v in meta.items()},
+            index=df.index,
+        )
         frames.append(pd.concat([df, meta_df], axis=1))
-        print(len(frames[-1]))
+        say(f"Well {well}: {len(frames[-1])} cells")
     fullest_df = pd.concat(frames, ignore_index=True)
-    print(f"{len(fullest_df)} cells in {len(frames)} wells")
+    say(f"{len(fullest_df)} cells in {len(frames)} wells")
     return fullest_df
 
 
@@ -39,9 +43,9 @@ def add_derived_features(df, derived_features):
         name, formula = spec["name"], spec["formula"]
         try:
             df[name] = df.eval(formula)
-            print(f"added {name} = {formula}")
+            say(f"added {name} = {formula}")
         except (pd.errors.UndefinedVariableError, KeyError) as e:
-            print(f"SKIPPED {name} = {formula}  ({e})")
+            say(f"SKIPPED {name} = {formula}  ({e})")
     return df
 
 

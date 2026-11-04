@@ -1,4 +1,4 @@
-"""@TODO."""
+"""Utils for StackReg alignment."""
 
 import functools
 import pickle
@@ -13,11 +13,11 @@ import pandas as pd
 from pystackreg import StackReg
 from skimage.transform import downscale_local_mean, warp
 from tifffile import imread
-from tqdm.auto import tqdm
 
 from fouri.config import Experiment
 from fouri.io import label_paths, read_labels
 from fouri.parallel import worker_count
+from fouri.report import progress
 
 
 def register_round(
@@ -120,7 +120,7 @@ def find_transforms(
     with ProcessPoolExecutor(n_workers, mp_context=get_context("spawn")) as executor:
         register = functools.partial(register_round, downscale_factor=downscale_factor)
         results = executor.map(register, anchors, moving)
-        for job, result in tqdm(
+        for job, result in progress(
             zip(jobs, results, strict=True),
             total=len(jobs),
             desc="Aligning images",

@@ -3,6 +3,7 @@
 from .config import Experiment, load_config, save_config
 from .io import make_dir, nd2_info, read_labels, read_nd2_channel, write_tiff
 from .parallel import worker_count
+from .report import progress, say
 from .segment import segment_image
 
 __all__ = [
@@ -10,9 +11,11 @@ __all__ = [
     "load_config",
     "make_dir",
     "nd2_info",
+    "progress",
     "read_labels",
     "read_nd2_channel",
     "save_config",
+    "say",
     "segment_image",
     "worker_count",
     "write_tiff",
