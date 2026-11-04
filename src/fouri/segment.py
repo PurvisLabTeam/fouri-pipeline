@@ -50,8 +50,6 @@ def segment_image(model, im, diameter, desc=None):
         transforms.make_tiles = original_make_tiles
         bar.close()
 
-    peak_gb = (
-        torch.cuda.max_memory_reserved(model.device) / (1024**3) if on_gpu else None
-    )
+    peak_gb = torch.cuda.max_memory_reserved(model.device) / (1024**3) if on_gpu else None
 
     return labels, peak_gb

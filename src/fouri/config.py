@@ -178,8 +178,7 @@ def load_config(path, announce=True):
     config_path = config_path_for(path)
     if not os.path.exists(config_path):
         raise FileNotFoundError(
-            f"No experiment config at {config_path}. "
-            "Create one with setup_experiment.ipynb, or check the CONFIG path."
+            f"No experiment config at {config_path}. Create one with setup_experiment.ipynb, or check the CONFIG path."
         )
     with open(config_path, encoding="utf-8") as f:
         config = json.load(f)

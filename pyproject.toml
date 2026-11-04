@@ -41,7 +41,10 @@ dependencies = [
 dev = [
     "mypy>=2.4.1",
     "nbstripout>=0.8",
+    "pandas-stubs>=3.1.0.261029",
     "ruff>=0.17.3",
+    "types-psutil>=7.2.2.20260906",
+    "types-tqdm>=4.70.0.20261102",
 ]
 
 [build-system]
@@ -60,3 +63,33 @@ delve-fs = { git = "https://github.com/omar-merhebi/delve", rev = "v0.1.7+purvis
 name = "pytorch-cu130"
 url = "https://download.pytorch.org/whl/cu130"
 explicit = true
+
+[tool.ruff]
+line-length = 119
+target-version = "py312"
+
+[tool.ruff.lint]
+# The rule families foursight uses.
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF", "D", "C4"]
+extend-select = ["W505"]
+# A docstring is optional (module, package, class, function, method), but one that exists is checked.
+ignore = ["D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107"]
+
+[tool.ruff.lint.per-file-ignores]
+# Notebooks import in a cell after the CONFIG cell, by design.
+"*.ipynb" = ["E402"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ruff.lint.pycodestyle]
+max-doc-length = 100
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src/fouri"]
+
+[[tool.mypy.overrides]]
+# These ship no type information and have no stub package.
+module = ["pystackreg", "pystackreg.*", "cellpose", "cellpose.*", "ipywidgets", "ipywidgets.*"]
+ignore_missing_imports = true

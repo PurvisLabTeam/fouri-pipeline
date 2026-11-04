@@ -16,13 +16,19 @@ uv sync                        # create/update .venv (Python 3.12, locked by uv.
 uv run nbstripout --install    # once per clone: git strips notebook outputs on commit
 git config filter.nbstripout.extrakeys metadata.language_info.version  # once per clone: and the Python version a notebook records
 uv run jupyter lab             # or VS Code with the .venv kernel
+uv run ruff check              # lint src/fouri and the notebooks
+uv run ruff format             # format them
+uv run mypy                    # type-check src/fouri
 
 # run one notebook top to bottom without touching the file in the repo
 uv run jupyter nbconvert --to notebook --execute --output-dir /tmp/nbrun 06_calculate_cell_properties.ipynb
 ```
 
-There is no test suite, linter or formatter. `fouri` is installed editable, so changes under
-`src/fouri/` apply after a kernel restart.
+There is no test suite yet. ruff and mypy are configured in `pyproject.toml`: ruff uses foursight's rule
+families, with docstrings optional but checked when present, and lets notebooks import after their
+`CONFIG` cell; mypy checks `src/fouri` (not strict) and skips pystackreg, cellpose and ipywidgets, which
+ship no type information. `fouri` is installed editable, so changes under `src/fouri/` apply after a
+kernel restart.
 
 Not every notebook runs headless: `01` needs a CUDA GPU (it raises if PyTorch has none); `03` and `05`
 are hand work in napari; `02` ends with an optional napari check; `07` has two alternative threshold
@@ -102,7 +108,14 @@ the writing and the reading side, so change them together.
 - The readers are lab members, not programmers. `README.md` and `docs/pipeline_guide.html` (a
   step-by-step guide opened in a browser) describe the same workflow; a change to setup or to how a
   notebook is run needs both updated. Messages printed by `fouri` say in plain words what to do next.
-- Logic used by more than one notebook goes in `fouri`, not copied between notebooks.
+- Logic used by more than one notebook goes in `fouri`, not copied between notebooks. Notebooks are
+  moving towards settings, one `fouri` call per step, and displays (napari, plots); 02's functions
+  are the first to have moved, into `fouri/align.py`.
+- Work run side by side: `fouri.worker_count()` picks how many at once on the current PC (memory at
+  8 GB per process, and cores) and prints why. Worker processes start with `spawn` on every platform,
+  so a run on Linux behaves like the Windows lab PCs; a worker is handed file paths, not arrays, and
+  prints nothing (on Windows its prints never reach the notebook). Progress bars use `tqdm.auto`, and
+  nothing prints while one is running.
 - `.gitignore` ignores every dotfile except `.gitignore`, `.gitattributes` and `.python-version`, so a new
   dot-folder (e.g. `.claude/`) is not committed unless that rule changes.
 

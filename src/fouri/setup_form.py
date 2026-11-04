@@ -30,8 +30,18 @@ from .metadata import (
 ROWS = "ABCDEFGH"
 COLS = range(1, 13)
 SAMPLE_COLORS = [
-    "#8dd3c7", "#fdb462", "#bebada", "#fb8072", "#80b1d3", "#b3de69",
-    "#fccde5", "#bc80bd", "#ccebc5", "#ffed6f", "#d9d9d9", "#e5c494",
+    "#8dd3c7",
+    "#fdb462",
+    "#bebada",
+    "#fb8072",
+    "#80b1d3",
+    "#b3de69",
+    "#fccde5",
+    "#bc80bd",
+    "#ccebc5",
+    "#ffed6f",
+    "#d9d9d9",
+    "#e5c494",
 ]
 NO_DATA_COLOR = "#f2f2f2"
 EXCLUDED_COLOR = "#ffffff"
@@ -50,31 +60,52 @@ class SetupForm:
     def __init__(self, folder=""):
         self.base_dir = ""
         self.config = {}
-        self.data_wells = []        # wells with ND2 files
-        self.included = set()       # wells in the experiment
-        self.selected = set()       # wells picked for "Apply"
-        self.meta = {}              # well -> {column: value}
+        self.data_wells = []  # wells with ND2 files
+        self.included = set()  # wells in the experiment
+        self.selected = set()  # wells picked for "Apply"
+        self.meta = {}  # well -> {column: value}
         self.extra_columns = []
 
         lay = w.Layout(width="520px")
-        self.folder = w.Text(value=folder, description="Folder", placeholder=r"Z:\Name\experiment folder", layout=w.Layout(width="620px"))
+        self.folder = w.Text(
+            value=folder,
+            description="Folder",
+            placeholder=r"Z:\Name\experiment folder",
+            layout=w.Layout(width="620px"),
+        )
         self.load_btn = w.Button(description="Load folder", button_style="primary")
         self.load_btn.on_click(lambda _: self.load_folder())
 
-        self.info = {k: w.Text(description=label, layout=lay, style={"description_width": "120px"}) for k, label in INFO_FIELDS}
-        self.notes = w.Textarea(description="Notes", layout=w.Layout(width="520px", height="60px"), style={"description_width": "120px"})
-        self.data_path = w.Text(description="data folder", layout=lay, style={"description_width": "120px"},
-                                placeholder="data  (relative to the experiment folder, or a full path)")
-        self.info_path = w.Text(description="info file", layout=lay, style={"description_width": "120px"},
-                                placeholder="info_exp.csv")
+        self.info = {
+            k: w.Text(description=label, layout=lay, style={"description_width": "120px"}) for k, label in INFO_FIELDS
+        }
+        self.notes = w.Textarea(
+            description="Notes", layout=w.Layout(width="520px", height="60px"), style={"description_width": "120px"}
+        )
+        self.data_path = w.Text(
+            description="data folder",
+            layout=lay,
+            style={"description_width": "120px"},
+            placeholder="data  (relative to the experiment folder, or a full path)",
+        )
+        self.info_path = w.Text(
+            description="info file", layout=lay, style={"description_width": "120px"}, placeholder="info_exp.csv"
+        )
         self.data_path.observe(lambda _: self.rescan(), names="value")
 
         # plate
-        self.mode = w.ToggleButtons(options=[("Include / exclude wells", "include"), ("Select wells for a condition", "select")],
-                                    value="include")
+        self.mode = w.ToggleButtons(
+            options=[("Include / exclude wells", "include"), ("Select wells for a condition", "select")],
+            value="include",
+        )
         self.mode.observe(lambda _: self.refresh(), names="value")
         self.buttons = {}
-        grid = [w.HBox([w.Label("", layout=w.Layout(width="22px"))] + [w.Label(f"{c:02d}", layout=w.Layout(width="46px")) for c in COLS])]
+        grid = [
+            w.HBox(
+                [w.Label("", layout=w.Layout(width="22px"))]
+                + [w.Label(f"{c:02d}", layout=w.Layout(width="46px")) for c in COLS]
+            )
+        ]
         for r in ROWS:
             row = [w.Label(r, layout=w.Layout(width="22px"))]
             for c in COLS:
@@ -91,9 +122,15 @@ class SetupForm:
         self.clear_sel_btn.on_click(lambda _: self.clear_selection())
 
         # condition entry
-        self.cond = {c: w.Text(description=c, layout=w.Layout(width="300px")) for c in ("treatment", "dose", "treatment_time")}
-        self.extra_names = w.Text(description="Extra columns", placeholder="e.g. replicate, cell_line",
-                                  layout=w.Layout(width="420px"), style={"description_width": "100px"})
+        self.cond = {
+            c: w.Text(description=c, layout=w.Layout(width="300px")) for c in ("treatment", "dose", "treatment_time")
+        }
+        self.extra_names = w.Text(
+            description="Extra columns",
+            placeholder="e.g. replicate, cell_line",
+            layout=w.Layout(width="420px"),
+            style={"description_width": "100px"},
+        )
         self.extra_names.observe(lambda _: self.update_extra_columns(), names="value")
         self.extra_box = w.VBox()
         self.extra_fields = {}
@@ -102,15 +139,21 @@ class SetupForm:
         self.apply_btn.on_click(lambda _: self.apply_condition())
 
         # CSV
-        self.csv_path = w.Text(description="CSV", placeholder="metadata.csv (in the folder, or a full path)", layout=w.Layout(width="520px"))
+        self.csv_path = w.Text(
+            description="CSV",
+            placeholder="metadata.csv (in the folder, or a full path)",
+            layout=w.Layout(width="520px"),
+        )
         self.import_btn = w.Button(description="Import CSV")
         self.import_btn.on_click(lambda _: self.import_csv())
         self.export_btn = w.Button(description="Export CSV template")
         self.export_btn.on_click(lambda _: self.export_csv())
 
         # derived features
-        self.features = w.Textarea(layout=w.Layout(width="620px", height="90px"),
-                                   placeholder="one per line:  name = formula   e.g.  pRB_RB_ratio = R0_pRB_nuc_mean / R0_RB_nuc_mean")
+        self.features = w.Textarea(
+            layout=w.Layout(width="620px", height="90px"),
+            placeholder="one per line:  name = formula   e.g.  pRB_RB_ratio = R0_pRB_nuc_mean / R0_RB_nuc_mean",
+        )
         self.channels_html = w.HTML()
 
         self.preview = w.HTML()
@@ -126,28 +169,40 @@ class SetupForm:
     # -- layout -----------------------------------------------------------------
     def widget(self):
         h = lambda text: w.HTML(f"<h3 style='margin:12px 0 4px'>{text}</h3>")
-        return w.VBox([
-            h("1. Experiment folder"),
-            w.HBox([self.folder, self.load_btn]),
-            h("2. Experiment details"),
-            *self.info.values(), self.notes,
-            w.HTML("<i>Leave these empty to use the standard layout inside the experiment folder:</i>"),
-            self.data_path, self.info_path,
-            h("3. Wells and conditions"),
-            w.HTML("Grey wells have no ND2 files. Coloured wells are included; the colour is the sample_ID. "
-                   "To set a condition: switch to <b>Select wells</b>, click wells, fill in the fields, then <b>Apply</b>."),
-            self.mode, self.plate, w.HBox([self.all_btn, self.clear_sel_btn]),
-            w.HBox([w.VBox(list(self.cond.values())), w.VBox([self.extra_names, self.extra_box])]),
-            self.apply_btn,
-            w.HTML("<b>Columns that define a condition</b> (wells with the same values get the same sample_ID):"),
-            self.condition_checks,
-            w.HTML("<b>Or import a metadata CSV</b> (one row per well; only <code>well</code> is required):"),
-            w.HBox([self.csv_path, self.import_btn, self.export_btn]),
-            h("4. Derived features for notebook 07"),
-            self.features, self.channels_html,
-            h("5. Check and save"),
-            self.preview, self.messages, self.save_btn, self.out,
-        ])
+        return w.VBox(
+            [
+                h("1. Experiment folder"),
+                w.HBox([self.folder, self.load_btn]),
+                h("2. Experiment details"),
+                *self.info.values(),
+                self.notes,
+                w.HTML("<i>Leave these empty to use the standard layout inside the experiment folder:</i>"),
+                self.data_path,
+                self.info_path,
+                h("3. Wells and conditions"),
+                w.HTML(
+                    "Grey wells have no ND2 files. Coloured wells are included; the colour is the sample_ID. "
+                    "To set a condition: switch to <b>Select wells</b>, click wells, fill in the fields, then <b>Apply</b>."
+                ),
+                self.mode,
+                self.plate,
+                w.HBox([self.all_btn, self.clear_sel_btn]),
+                w.HBox([w.VBox(list(self.cond.values())), w.VBox([self.extra_names, self.extra_box])]),
+                self.apply_btn,
+                w.HTML("<b>Columns that define a condition</b> (wells with the same values get the same sample_ID):"),
+                self.condition_checks,
+                w.HTML("<b>Or import a metadata CSV</b> (one row per well; only <code>well</code> is required):"),
+                w.HBox([self.csv_path, self.import_btn, self.export_btn]),
+                h("4. Derived features for notebook 07"),
+                self.features,
+                self.channels_html,
+                h("5. Check and save"),
+                self.preview,
+                self.messages,
+                self.save_btn,
+                self.out,
+            ]
+        )
 
     # -- loading ----------------------------------------------------------------
     def _resolve(self, value, default):
@@ -200,10 +255,13 @@ class SetupForm:
         info = self._resolve(self.info_path.value, DEFAULT_PATHS["info_file"])
         if os.path.exists(info):
             names = channel_names(info)
-            self.channels_html.value = ("<small>Columns available per cell (add <code>_nuc_mean</code>, "
-                                        "<code>_ring_mean</code>, <code>_total_nuc_protein</code> or "
-                                        "<code>_nuc_cyto_ratio</code>; also <code>nuc_area</code>, <code>ring_area</code>): "
-                                        + ", ".join(names) + "</small>")
+            self.channels_html.value = (
+                "<small>Columns available per cell (add <code>_nuc_mean</code>, "
+                "<code>_ring_mean</code>, <code>_total_nuc_protein</code> or "
+                "<code>_nuc_cyto_ratio</code>; also <code>nuc_area</code>, <code>ring_area</code>): "
+                + ", ".join(names)
+                + "</small>"
+            )
         else:
             self.channels_html.value = f"<small>info file not found: {html.escape(info)}</small>"
         self.refresh()
@@ -296,8 +354,11 @@ class SetupForm:
                 self.meta[row["well"]]["sample_ID"] = row["sample_ID"]
         extras = [c for c in table.columns if c not in ["well", *STANDARD_COLUMNS]]
         self.extra_names.value = ", ".join(extras)
-        self._msg("ok", f"Imported {len(table)} wells from {self._csv_file()}"
-                  + (" (using the CSV's sample_IDs)" if given_ids else " (sample_IDs generated)"))
+        self._msg(
+            "ok",
+            f"Imported {len(table)} wells from {self._csv_file()}"
+            + (" (using the CSV's sample_IDs)" if given_ids else " (sample_IDs generated)"),
+        )
         self.refresh()
 
     def export_csv(self):
@@ -347,11 +408,15 @@ class SetupForm:
         rows = []
         for sid, grp in table.groupby("sample_ID", sort=False):
             cond = " · ".join(f"{c}={html.escape(str(grp.iloc[0][c]))}" for c in cols if str(grp.iloc[0][c]))
-            rows.append(f"<tr><td style='background:{colors[sid]};padding:2px 8px'><b>{sid}</b></td>"
-                        f"<td style='padding:2px 8px'>{cond or '<i>no condition set</i>'}</td>"
-                        f"<td style='padding:2px 8px'>{', '.join(grp['well'])}</td></tr>")
-        self.preview.value = ("<table style='border-collapse:collapse'><tr><th>sample_ID</th><th>condition</th>"
-                              "<th>wells</th></tr>" + "".join(rows) + "</table>")
+            rows.append(
+                f"<tr><td style='background:{colors[sid]};padding:2px 8px'><b>{sid}</b></td>"
+                f"<td style='padding:2px 8px'>{cond or '<i>no condition set</i>'}</td>"
+                f"<td style='padding:2px 8px'>{', '.join(grp['well'])}</td></tr>"
+            )
+        self.preview.value = (
+            "<table style='border-collapse:collapse'><tr><th>sample_ID</th><th>condition</th>"
+            "<th>wells</th></tr>" + "".join(rows) + "</table>"
+        )
 
     # -- saving -----------------------------------------------------------------
     def parse_features(self):
@@ -411,10 +476,17 @@ class SetupForm:
         self.config = config
         warn = [m for lvl, m in issues if lvl == "warning"]
         cond_cols = [c for c in self.condition_columns if c in table.columns]
-        blank = [wl for wl, row in zip(table["well"], table[cond_cols].itertuples(index=False)) if not any(map(str, row))] if cond_cols else []
+        blank = (
+            [wl for wl, row in zip(table["well"], table[cond_cols].itertuples(index=False)) if not any(map(str, row))]
+            if cond_cols
+            else []
+        )
         if blank and len(blank) < len(table):
             warn.append(f"Wells with no condition set (they share one sample_ID): {blank}")
-        self._msg("ok", f"Saved {cfg_path}" + ("<br>Warnings:<br>" + "<br>".join(html.escape(m) for m in warn) if warn else ""))
+        self._msg(
+            "ok",
+            f"Saved {cfg_path}" + ("<br>Warnings:<br>" + "<br>".join(html.escape(m) for m in warn) if warn else ""),
+        )
         with self.out:
             print("Put this line at the top of each pipeline notebook:")
             print(f"CONFIG = r'{cfg_path}'")
