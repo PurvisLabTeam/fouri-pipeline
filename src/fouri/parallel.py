@@ -1,4 +1,4 @@
-"""Helpers for parallel processing in the notebooks"""
+"""Helpers for parallel processing in the notebooks."""
 
 import math
 import os
@@ -25,7 +25,8 @@ def worker_count(min_count=1):
         warnings.warn(
             f"Severe resource constraints detected (CPU bound: {cpu_bound}. Mem bound: "
             f"{_to_gb(mem_available):.1f}). Forcing worker count to {min_count}. Expect "
-            "degraded performance."
+            "degraded performance.",
+            stacklevel=2,
         )
     else:
         workers = raw_min
