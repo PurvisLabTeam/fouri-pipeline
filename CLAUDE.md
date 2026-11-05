@@ -26,11 +26,12 @@ uv run jupyter nbconvert --to notebook --execute --output-dir /tmp/nbrun 06_calc
 
 There is no test suite yet. ruff and mypy are configured in `pyproject.toml`: ruff uses foursight's rule
 families, with docstrings optional but checked when present, and lets notebooks import after their
-`CONFIG` cell; mypy checks `src/fouri` (not strict) and skips pystackreg, cellpose and ipywidgets, which
-ship no type information. `fouri` is installed editable, so changes under `src/fouri/` apply after a
+`CONFIG` cell; mypy checks `src/fouri` (not strict) and skips pystackreg, cellpose, ipywidgets and napari,
+which ship no type information. `fouri` is installed editable, so changes under `src/fouri/` apply after a
 kernel restart.
 
-Not every notebook runs headless: `01` needs a CUDA GPU (it raises if PyTorch has none); `03` and `05`
+Not every notebook runs headless: `01` needs a CUDA GPU (it raises if Cellpose can't use one, unless its
+`allow_cpu` setting is `True`: about 20 minutes per image on the processor); `03` and `05`
 are hand work in napari; `02` ends with an optional napari check; `07` has two alternative threshold
 cells (one cutoff or two) meant to be run one or the other, so a top-to-bottom run keeps the two-cutoff labels.
 
@@ -47,7 +48,7 @@ through `save_config` and keeps the previous version as `experiment.json.bak`.
 - The format stays readable as Lauryn's older `project_config` files (`experiment_key`, `base_dir`,
   `mac_base_dir`, `well_list`, `well_metadata`); `Experiment.__getitem__`/`.get` exist for code written
   against that dict. New fields must be optional.
-- Optional `anchor_round`: the round every other round is aligned onto, counted from 0 like `alignRound`;
+- Optional `anchor_round`: the round every other round is aligned onto, counted from 0 like `round_index`;
   default 0, the first round in `info_exp.csv`. It is not in the setup form, which keeps any key it does
   not manage when it saves.
 - Wells are always zero-padded (`B02`), normalized by `metadata.normalize_well`, sorted by `plate_sort_key`.
@@ -61,17 +62,23 @@ the writing and the reading side, so change them together.
 
 | Step | Writes | Read by |
 |------|--------|---------|
-| 00 | `output_df/df_{well}.pkl` (+ `.csv`): one row per round × channel listed in `info_exp.csv`. `output_images/{well}/im2segment_{well}_round_{NNN}.tif`: each round's alignment channel, cropped to the smallest image | 01, 02, 04 |
+| 00 | `output_df/round_table_{well}.csv`: one row per round × channel listed in `info_exp.csv`, with its ND2 file, acquisition settings, `is_align_channel` and `raw_file_name`. `output_images/{well}/Round_{round_name}_well{well}_{signal}.tif` (the `raw_file_name`): every channel of every round, cropped to the smallest image, with an OME header (pixel size, wavelengths, exposure); 0.3–0.9 GB per well | table: 01–06; images: 01 (the `is_align_channel` ones) |
 | 01 | `segmented/{well}/labels_{well}_round_{NNN}.tif` (Cellpose-SAM) | 02, 03, 06 |
-| 02 | `output_df/tmat_{well}.npy`: rigid transforms (rounds × 3 × 3) indexed by `alignRound`, identity for the anchor | 03, 04 |
-| 03 | replaces one entry of `tmat_{well}.npy` with a hand alignment from Affinder | 04 |
+| 02 | `output_df/tmat_{well}.npy`: rigid transforms (rounds × 3 × 3) indexed by `round_index`, identity for the anchor | 03, 04 |
+| 03 | replaces one entry of `tmat_{well}.npy` with a hand alignment: matching cells clicked in napari (`fouri.align.start_hand_alignment`) | 04 |
 | 04 | `aligned_tiffs/{well}/Round_{nameRound}_well{well}_{signal}.tif`; rewrites `df_{well}.pkl` adding `aligned_file_name` | 05, 06 |
 | 05 | `masks/mask_{well}.pkl`: napari shape polygons to exclude (optional) | 06 |
 | 06 | `cell_data/cell_data_{well}_df.{pkl,csv}` | 07 |
 | 07 | `fullest_df.csv`, `standard_adata.h5ad`, `standard_adata_sub.h5ad` in `base_dir` | 08 |
 | 08 | `standard_adata_sub_filtered.h5ad`, PowerPoint and PNG plots in `base_dir` | — |
 
-`NNN` is the 0-based `alignRound`, zero-padded to 3 digits.
+`NNN` is the 0-based `round_index`, zero-padded to 3 digits.
+
+The round table is only read through `fouri.preprocess.read_round_table` (the name lives in
+`round_table_path`). Reading falls back to the `df_{well}.pkl` that 00 wrote before the switch, renaming
+`nameRound` → `round_name`, `alignRound` → `round_index` and `alignIm` → `is_align_channel`, so 02–06 still
+run on older experiments. 01 needs `raw_file_name`, which only the new table has: `alignment_paths` stops
+with "rerun 00" for an older one.
 
 The transforms file is only read and written through `fouri.align.load_transforms` and `save_transforms`
 (the name lives in `tmat_path`). Reading falls back to the `tmat_{well}.pkl` that 02 and 03 wrote before
@@ -79,11 +86,14 @@ the switch to `.npy`, so older experiments still align without rerunning 02.
 
 ## Inputs, naming and couplings
 
-- `info_exp.csv`: first column `myRound` (`R0`, `R1`, …); every other column is an ND2 optical
-  configuration name and its cell is the signal (antibody) in that round, empty if unused. 00 finds the
-  round folder in `data/` by the substring `Round_{myRound}_` and the file by `Well{well}_Channel`.
-- 00's `sel_2_align` picks the alignment channel per round (default `signal == 'DNA'`); there must be
-  exactly one per round.
+- `info_exp.csv`: one row per round; the first column is the round name (`R0`, `R1`, …), read as
+  `round_name` whatever its header (`myRound` in existing files); every other column is an ND2 optical
+  configuration name and its cell is the signal (antibody) in that round, empty if unused. Every channel
+  in an ND2 file needs a column. 00 finds the round folder in `data/` by the substring
+  `Round_{round_name}_` and the file by `Well{well}_` and the `.nd2` suffix.
+- 00's `align_signal` setting (default `"DNA"`) marks each round's alignment channel as
+  `is_align_channel`; `round_table` refuses a well unless every round has exactly one. 01 segments those
+  channels, listed in round order by `fouri.preprocess.alignment_paths`.
 - Feature columns from 06 are `{nameRound}_{signal}_{suffix}`, e.g. `R0_pRB_nuc_mean`, `_ring_mean`,
   `_total_nuc_protein`, `_nuc_cyto_ratio`, plus `nuc_area`, `ring_area`. `metadata.channel_names` rebuilds
   the same prefixes from `info_exp.csv` to suggest derived features; keep the two in step.
@@ -117,8 +127,11 @@ the switch to `.npy`, so older experiments still align without rerunning 02.
   step-by-step guide opened in a browser) describe the same workflow; a change to setup or to how a
   notebook is run needs both updated. Messages printed by `fouri` say in plain words what to do next.
 - Logic used by more than one notebook goes in `fouri`, not copied between notebooks. Notebooks are
-  moving towards settings, one `fouri` call per step, and displays (napari, plots); 02's functions
-  are the first to have moved, into `fouri/align.py`.
+  moving towards settings, one `fouri` call per step, and displays (napari, plots); 00 to 03 have
+  moved, into `fouri/preprocess.py`, `segment.py` and `align.py`. Napari and its plugins are imported
+  inside the functions that use them, so importing `fouri` stays fast.
+- 03 no longer uses the Affinder plugin: Affinder 0.5.0 calls `viewer._canvas_size`, which napari 0.9
+  removed, so its Start button fails.
 - Work run side by side: `fouri.worker_count()` picks how many at once on the current PC (memory at
   8 GB per process, and cores) and prints why. Worker processes start with `spawn` on every platform,
   so a run on Linux behaves like the Windows lab PCs; a worker is handed file paths, not arrays, and

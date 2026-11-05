@@ -242,7 +242,7 @@ git config filter.nbstripout.extrakeys metadata.language_info.version</pre><butt
     </div></li>
     <li><div class="body">
       <h3>Write <code>info_exp.csv</code></h3>
-      <p>One row per round. The first column is the round name used in the folder names; the other column headers are the optical configuration (OC) names from Elements; each cell says what that channel stained in that round. Leave a cell empty if an OC wasn't used in that round. Every round needs a <code>DNA</code> channel, which is used for alignment.</p>
+      <p>One row per round. The first column is the round name used in the folder names; the other column headers are the optical configuration (OC) names from Elements; each cell says what that channel stained in that round. Leave a cell empty if an OC wasn't used in that round. Every OC in the ND2 files needs a column. Every round needs exactly one <code>DNA</code> channel, which is used for alignment (to align on another stain, set <code>align_signal</code> in 00).</p>
       <div class="tablewrap"><table>
         <thead><tr><th>myRound</th><th>DAPI_4i</th><th>AF488</th><th>AF568</th><th>AF647</th></tr></thead>
         <tbody>
@@ -324,19 +324,19 @@ total_area_DNA = R0_DNA_nuc_mean * nuc_area</pre><button type="button">Copy</but
     <article class="nb">
       <div class="top"><span class="num">00</span><h3>Preprocess data</h3></div>
       <dl>
-        <dt>Does</dt><dd>Builds a table of every round and channel for each well and saves the DNA image of each round, trimmed to a common size, for segmentation. It prints “Data preparation passed tests” when every round has exactly one DNA channel.</dd>
-        <dt>You set</dt><dd>Nothing besides <code>CONFIG</code>.</dd>
-        <dt>Writes</dt><dd><code>output_df\df_&lt;well&gt;.pkl</code>, <code>output_images\&lt;well&gt;\</code></dd>
+        <dt>Does</dt><dd>Converts every channel of every round into its own TIFF, all trimmed to a common size, keeping the pixel size, wavelengths and exposure the microscope recorded. Saves a table of every round and channel for each well. Several wells run at once. It stops with an error if a round doesn't have exactly one <code>DNA</code> channel.</dd>
+        <dt>You set</dt><dd><code>align_signal</code>: the stain used to align the rounds, written exactly as in <code>info_exp.csv</code> (default <code>"DNA"</code>).</dd>
+        <dt>Writes</dt><dd><code>output_df\round_table_&lt;well&gt;.csv</code>, <code>output_images\&lt;well&gt;\Round_&lt;round&gt;_well&lt;well&gt;_&lt;stain&gt;.tif</code> (0.3 to 0.9 GB per well)</dd>
       </dl>
     </article>
     <article class="nb">
       <div class="top"><span class="num">01</span><h3>Cellpose segmentation</h3><span class="tag">GPU</span></div>
       <dl>
-        <dt>Does</dt><dd>Segments nuclei in each round's DNA image with Cellpose-SAM. It stops right away with an error if PyTorch can't see the GPU.</dd>
-        <dt>You set</dt><dd><code>selected_diameter</code> (default 30 pixels). SAM handles a range of sizes, so change it only if nuclei come out clearly too large or too small.</dd>
+        <dt>Does</dt><dd>Segments nuclei in each round's DNA image with Cellpose-SAM, about 1 minute per image. It stops right away with an error if Cellpose can't use the GPU. Experiments run through an older version of 00 need 00 run again first.</dd>
+        <dt>You set</dt><dd><code>selected_diameter</code> (default 30 pixels). SAM handles a range of sizes, so change it only if nuclei come out clearly too large or too small. <code>allow_cpu</code> (default <code>False</code>): set it to <code>True</code> only if the GPU can't be fixed; the processor takes about 20 minutes per image.</dd>
         <dt>Writes</dt><dd><code>segmented\&lt;well&gt;\labels_&lt;well&gt;_round_000.tif</code>, …</dd>
       </dl>
-      <div class="callout note"><p>The first run on a computer downloads the SAM model (about 1 GB). Run <code>nvidia-smi</code> in PowerShell while it works to see GPU use. If it fails with <b>CUDA out of memory</b>, add <code>batch_size=4</code> (or 2) to the <code>model.eval(...)</code> call.</p></div>
+      <div class="callout note"><p>The first run on a computer downloads the SAM model (about 1 GB). Run <code>nvidia-smi</code> in PowerShell while it works to see GPU use. If it fails with <b>CUDA out of memory</b>, close any other notebook that has Cellpose loaded (each keeps its GPU memory until its kernel is restarted), restart this kernel and run 01 again.</p></div>
     </article>
     <article class="nb">
       <div class="top"><span class="num">02</span><h3>Find transforms</h3></div>
@@ -350,8 +350,8 @@ total_area_DNA = R0_DNA_nuc_mean * nuc_area</pre><button type="button">Copy</but
     <article class="nb">
       <div class="top"><span class="num">03</span><h3>Fix an alignment by hand</h3><span class="tag">only if needed</span></div>
       <dl>
-        <dt>Does</dt><dd>Opens two rounds of one well in napari with the Affinder plugin so you can set the transform by clicking matching points, then replaces that round's transform.</dd>
-        <dt>You set</dt><dd><code>myWell</code> (e.g. <code>'D03'</code>), <code>myRound</code> (the round to fix, as named in the folders). It is aligned onto the anchor round, the same one 02 used. In Affinder choose the reference image, the image to transform and “similarity”.</dd>
+        <dt>Does</dt><dd>Opens the anchor round (magenta) and the round to fix (green) of one well in napari. You click a cell in magenta, then the same cell in green, for at least 3 cells spread across the image; the green round moves onto the magenta one as you go, and the top of the viewer says which round to click next. Then it replaces that round's transform, and the last cells (optional) show every round with the saved transforms.</dd>
+        <dt>You set</dt><dd><code>well</code> (e.g. <code>'D03'</code>) and <code>round_name</code>, the round to fix as written in <code>info_exp.csv</code> (e.g. <code>"R1"</code>). It is aligned onto the anchor round, the same one 02 used, which can't be fixed itself.</dd>
         <dt>Writes</dt><dd>Updates <code>output_df\tmat_&lt;well&gt;.npy</code>; rerun 04 for that well afterwards.</dd>
       </dl>
     </article>
@@ -429,10 +429,12 @@ uv sync</pre><button type="button">Copy</button></div>
     <tbody>
       <tr><td><code>No experiment config at …</code></td><td>The <code>CONFIG</code> line still has the placeholder or a wrong path. Paste the line the setup form printed.</td></tr>
       <tr><td>All wells on the setup plate are grey</td><td>No folder is loaded, or no ND2 files were found. Check the message at the bottom of the form, the folder path, and that <code>data\</code> holds <code>Round_…</code> folders with <code>Well…_Channel…nd2</code> files.</td></tr>
-      <tr><td><code>No GPU available to PyTorch</code> in 01</td><td>Run <code>uv sync</code> in the repository folder and restart the kernel. If it persists, check <code>nvidia-smi</code> and update the NVIDIA driver.</td></tr>
-      <tr><td><code>CUDA out of memory</code> in 01</td><td>Add <code>batch_size=4</code> (or 2) to <code>model.eval(...)</code>.</td></tr>
+      <tr><td><code>No GPU available to PyTorch</code> in 01</td><td>Run <code>uv sync</code> in the repository folder and restart the kernel. If it persists, check <code>nvidia-smi</code> and update the NVIDIA driver. If the GPU can't be fixed, set <code>allow_cpu = True</code> in 01 (about 20 minutes per image).</td></tr>
+      <tr><td><code>CUDA out of memory</code> in 01</td><td>Close any other notebook that has Cellpose loaded, restart the kernel and run 01 again. If it still fails, tell whoever maintains the pipeline which well and round it stopped on.</td></tr>
       <tr><td>Kernel list doesn't show <code>.venv</code></td><td>Open the repository folder (not a single file) in VS Code, or choose <b>Enter interpreter path</b> and pick <code>.venv\Scripts\python.exe</code>.</td></tr>
-      <tr><td><code>Data preparation passed tests</code> is missing in 00</td><td>A round has no DNA channel or more than one. Check <code>info_exp.csv</code>.</td></tr>
+      <tr><td><code>Some rounds have an invalid number of 'DNA' channels</code> in 00</td><td>A round has no DNA channel or more than one. Check <code>info_exp.csv</code>, or set <code>align_signal</code> to the name it uses.</td></tr>
+      <tr><td><code>column for channel … does not exist</code> in 00</td><td>An ND2 file has an optical configuration that <code>info_exp.csv</code> has no column for. Add the column, empty for rounds that didn't use it.</td></tr>
+      <tr><td><code>round table was made using an old version of the pipeline</code> in 01</td><td>The experiment went through an older version of 00. Run 00 again, then 01.</td></tr>
       <tr><td><code>Duplicate round/signal names</code> in 06</td><td>Two rounds in <code>info_exp.csv</code> use the same round name and signal. Make them unique and rerun from 00.</td></tr>
       <tr><td>Notebook outputs show up in <code>git diff</code></td><td>Run <code>uv run nbstripout --install</code> once in this copy of the repository.</td></tr>
       <tr><td>A notebook you only ran shows as changed, and the change is a <code>"version"</code> line</td><td>Run <code>git config filter.nbstripout.extrakeys metadata.language_info.version</code> once in this copy of the repository.</td></tr>

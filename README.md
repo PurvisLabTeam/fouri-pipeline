@@ -66,9 +66,13 @@ These contain feature data for each round of imaging and are used for downstream
 # Notebook Descriptions
 `setup_experiment` creates or edits the experiment's `experiment.json` (wells, conditions, derived features).
 
-Notebook 00 prepares images for processing by ensuring uniform size and extracting the channel to be used for alignment.
+Notebook 00 converts the ND2 files into one TIFF per channel in `output_images`, all cut to the same size and keeping the
+microscope's pixel size, wavelengths and exposure, and saves a table per well listing every round and channel. Its one
+setting, `align_signal` (default `DNA`), names the channel used to align the rounds. It needs 0.3 to 0.9 GB of disk per well.
 
-Notebook 01 performs the segmentation with Cellpose-SAM on the GPU (it stops with an error if no GPU is available).
+Notebook 01 performs the segmentation with Cellpose-SAM on the GPU. It stops with an error if no GPU is available, unless
+`allow_cpu` is set to `True` (about 20 minutes per image instead of 1). Experiments run through an older version of 00 need 00
+run again before 01.
 
 Notebook 02 uses the segmentation masks to determine the transformation required to align all channels of the images
 
