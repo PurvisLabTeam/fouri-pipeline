@@ -64,6 +64,11 @@ def _clean(value):
     return str(value).strip()
 
 
+def feature_prefix(round_name: str, signal: str) -> str:
+    """Return the column prefix 06 gives a round's channel, e.g. ``R0_pRB``."""
+    return f"{str(round_name).zfill(2)}_{signal}"
+
+
 def read_metadata_table(source):
     """Read per-well metadata from a CSV/TSV path or a DataFrame.
 
@@ -204,7 +209,7 @@ def channel_names(info_file):
         for col in info.columns[1:]:
             signal = row[col]
             if signal == signal and str(signal).strip():  # skip empty cells
-                names.append(f"{str(row.iloc[0]).zfill(2)}_{signal}")
+                names.append(feature_prefix(row.iloc[0], signal))
     return names
 
 

@@ -1,9 +1,8 @@
 """Helpers for notebook 07 (cell data -> AnnData)."""
 
-import os
-
 import pandas as pd
 
+from fouri.io import cell_data_path
 from fouri.report import say
 
 # column names notebook 07 has always used in fullest_df / adata.obs
@@ -14,7 +13,7 @@ def build_fullest_df(exp):
     """Concatenate every well's cell_data CSV and add its metadata from the config."""
     frames = []
     for well, meta in exp.well_metadata.items():
-        df = pd.read_csv(os.path.join(exp.cell_data, f"cell_data_{well}_df.csv"), sep=",")
+        df = pd.read_csv(cell_data_path(exp, well), sep=",")
         meta_df = pd.DataFrame(
             {_OBS_NAMES.get(c, c): [v] * len(df) for c, v in meta.items()},
             index=df.index,
@@ -23,6 +22,7 @@ def build_fullest_df(exp):
         say(f"Well {well}: {len(frames[-1])} cells")
     fullest_df = pd.concat(frames, ignore_index=True)
     say(f"{len(fullest_df)} cells in {len(frames)} wells")
+    fullest_df = fullest_df.drop(columns="Unnamed: 0", errors="ignore")
     return fullest_df
 
 
