@@ -1,48 +1,37 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Mon Apr 19 17:25:37 2021
+"""Utils for building cytoplasmic rings around each nucleus.
 
-@author: Katarzyna Kedziora
+Method by Katarzyna Kedziora (2021): a pixel is assigned to a nucleus's ring
+only if no other nucleus would have an overlapping ring. Reimplemented with
+OpenCV in 2026.
 """
 
+import cv2
 import numpy as np
-
-from skimage.morphology import dilation
+import numpy.typing as npt
 from skimage.morphology import disk
 
 
-def make_rings(image, width=5, gap=0):
+def make_rings(image: npt.NDArray, width: int = 5, gap: int = 0) -> npt.NDArray:
+    """Return a ring of cytoplasm around each nucleus, with its label.
+
+    Parameters
+    ----------
+    image : ndarray of int
+        Label image of the nuclei: 0 for background, one number per nucleus, e.g. the anchor
+        round's segmentation after ``clear_border``.
+    width : int, optional
+        How far a ring reaches from its nucleus's edge, in pixels. A pixel within ``width`` of
+        two or more nuclei joins no ring. By default 5.
+    gap : int, optional
+        Pixels this close to any nucleus are left out, so a ring starts ``gap + 1`` pixels from
+        its nucleus's edge. By default 0, a ring touching its nucleus.
     """
-    This function creates rings but excludes regions that could belong to more than one object.
+    reach = disk(width)
+    image_f32 = image.astype(np.float32)
 
-    input:
-    image - image of labels
-    width - width of the ring
-    gap - how many pixels between the object and its ring
+    dilated = cv2.dilate(image_f32, reach)
+    eroded = cv2.erode(np.where(image_f32 > 0, image_f32, np.inf), reach)
+    too_close = cv2.dilate((image_f32 > 0).astype(np.uint8), disk(gap)) > 0
 
-    output:
-    rings - image of the rings (labels preserved)
-    """
-
-    selem = disk(width)
-
-    eroded = dilation(image, selem)
-
-    rings = eroded.copy()
-    rings[rings == image] = 0
-
-    # do the same but in oposite direction
-    image_rev = (np.max(image) + 1) - image
-    image_rev[image_rev == (np.max(image) + 1)] = 0
-
-    eroded = dilation(image_rev, selem)
-    eroded = (np.max(image) + 1) - eroded
-    eroded[eroded == (np.max(eroded) + 1)] = 0
-
-    # combine
-    rings[rings != eroded] = 0
-
-    eroded_gap = dilation(image, disk(gap))
-    rings[eroded_gap > 0] = 0
-
-    return rings
+    in_ring = (dilated == eroded) & (dilated > 0) & ~too_close
+    return np.where(in_ring, dilated, 0).astype(image.dtype)
