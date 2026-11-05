@@ -31,8 +31,8 @@ which ship no type information. `fouri` is installed editable, so changes under 
 kernel restart.
 
 Not every notebook runs headless: `01` needs a CUDA GPU (it raises if Cellpose can't use one, unless its
-`allow_cpu` setting is `True`: about 20 minutes per image on the processor); `03` and `05`
-are hand work in napari; `02` ends with an optional napari check; `07` has two alternative threshold
+`allow_cpu` setting is `True`: about 20 minutes per image on the processor); `03` is hand work in napari;
+`05` is not used for now (see the file table); `02` ends with an optional napari check; `07` has two alternative threshold
 cells (one cutoff or two) meant to be run one or the other, so a top-to-bottom run keeps the two-cutoff labels.
 
 ## experiment.json drives every notebook
@@ -62,25 +62,28 @@ the writing and the reading side, so change them together.
 
 | Step | Writes | Read by |
 |------|--------|---------|
-| 00 | `output_df/round_table_{well}.csv`: one row per round × channel listed in `info_exp.csv`, with its ND2 file, acquisition settings, `is_align_channel` and `raw_file_name`. `output_images/{well}/Round_{round_name}_well{well}_{signal}.tif` (the `raw_file_name`): every channel of every round, cropped to the smallest image, with an OME header (pixel size, wavelengths, exposure); 0.3–0.9 GB per well | table: 01–06; images: 01 (the `is_align_channel` ones) |
-| 01 | `segmented/{well}/labels_{well}_round_{NNN}.tif` (Cellpose-SAM) | 02, 03, 06 |
-| 02 | `output_df/tmat_{well}.npy`: rigid transforms (rounds × 3 × 3) indexed by `round_index`, identity for the anchor | 03, 04 |
-| 03 | replaces one entry of `tmat_{well}.npy` with a hand alignment: matching cells clicked in napari (`fouri.align.start_hand_alignment`) | 04 |
-| 04 | `aligned_tiffs/{well}/Round_{nameRound}_well{well}_{signal}.tif`; rewrites `df_{well}.pkl` adding `aligned_file_name` | 05, 06 |
-| 05 | `masks/mask_{well}.pkl`: napari shape polygons to exclude (optional) | 06 |
-| 06 | `cell_data/cell_data_{well}_df.{pkl,csv}` | 07 |
+| 00 | `output_df/round_table_{well}.csv`: one row per round × channel listed in `info_exp.csv`, with its ND2 file, acquisition settings, `is_align_channel` and `raw_file_name`. `output_images/{well}/Round_{round_name}_well{well}_{signal}.tif` (the `raw_file_name`): every channel of every round, cropped to the smallest image, with an OME header (pixel size, wavelengths, exposure); 0.3–0.9 GB per well | table: 01, 02, 03, 06; images: 01 (the `is_align_channel` ones), 06 (all) |
+| 01 | `segmented/{well}/labels_{well}_round_{NNN}.tif` (Cellpose-SAM) | 02, 03, 06 (anchor round only) |
+| 02 | `output_df/tmat_{well}.npy`: rigid transforms (rounds × 3 × 3) indexed by `round_index`, identity for the anchor | 03, 06 |
+| 03 | replaces one entry of `tmat_{well}.npy` with a hand alignment: matching cells clicked in napari (`fouri.align.start_hand_alignment`) | 06 |
+| 04 | removed: 06 moves the anchor's outlines into each round instead of measuring aligned copies of the images | — |
+| 05 | not used for now: it draws masks on 04's aligned images and its masks never removed cells (07 dropped `nuc_mask`/`ring_mask`). Masks return with the artifact U-Net, and will remove the cells they cover | — |
+| 06 | `cell_data/cell_data_{well}_df.csv` (no row-number column; older ones have `Unnamed: 0`) | 07 |
 | 07 | `fullest_df.csv`, `standard_adata.h5ad`, `standard_adata_sub.h5ad` in `base_dir` | 08 |
 | 08 | `standard_adata_sub_filtered.h5ad`, PowerPoint and PNG plots in `base_dir` | — |
 
 `NNN` is the 0-based `round_index`, zero-padded to 3 digits.
 
-The round table is only read through `fouri.preprocess.read_round_table` (the name lives in
-`round_table_path`). Reading falls back to the `df_{well}.pkl` that 00 wrote before the switch, renaming
-`nameRound` → `round_name`, `alignRound` → `round_index` and `alignIm` → `is_align_channel`, so 02–06 still
-run on older experiments. 01 needs `raw_file_name`, which only the new table has: `alignment_paths` stops
-with "rerun 00" for an older one.
+File names live in `fouri/io.py` (`round_table_path`, `tmat_path`, `cell_data_path`, `label_paths`), with the
+functions that read and write those files.
 
-The transforms file is only read and written through `fouri.align.load_transforms` and `save_transforms`
+The round table is only read through `fouri.io.read_round_table`. Reading falls back to the `df_{well}.pkl`
+that 00 wrote before the switch, renaming `nameRound` → `round_name`, `alignRound` → `round_index` and
+`alignIm` → `is_align_channel`, so 02 and 03 still run on older experiments. 01 and 06 open 00's TIFFs, so
+they need `raw_file_name`, which only the new table has: `io.require_raw_files` stops with "rerun 00" for an
+older one.
+
+The transforms file is only read and written through `fouri.io.load_transforms` and `save_transforms`
 (the name lives in `tmat_path`). Reading falls back to the `tmat_{well}.pkl` that 02 and 03 wrote before
 the switch to `.npy`, so older experiments still align without rerunning 02.
 
@@ -93,22 +96,27 @@ the switch to `.npy`, so older experiments still align without rerunning 02.
   `Round_{round_name}_` and the file by `Well{well}_` and the `.nd2` suffix.
 - 00's `align_signal` setting (default `"DNA"`) marks each round's alignment channel as
   `is_align_channel`; `round_table` refuses a well unless every round has exactly one. 01 segments those
-  channels, listed in round order by `fouri.preprocess.alignment_paths`.
-- Feature columns from 06 are `{nameRound}_{signal}_{suffix}`, e.g. `R0_pRB_nuc_mean`, `_ring_mean`,
-  `_total_nuc_protein`, `_nuc_cyto_ratio`, plus `nuc_area`, `ring_area`. `metadata.channel_names` rebuilds
-  the same prefixes from `info_exp.csv` to suggest derived features; keep the two in step.
-- Cells are outlined once, on the anchor round's segmentation, and measured in every aligned channel.
-  The anchor round is `exp.anchor_round`, so 02, 03 and 06 cannot disagree: `fouri.align.find_transforms`
-  aligns every round onto it, 03 aligns the hand-fixed round onto it, and 06 outlines cells on it
-  (`label_round`).
-- Cytoplasmic rings in 06 come from `fouri.rings.make_rings(labels, width=6, gap=1)`, which drops pixels
-  that could belong to two cells.
+  channels, listed in round order by `fouri.io.alignment_paths`. `round_table` also refuses a round that
+  names the same signal twice, since both channels would be written to the same TIFF.
+- Feature columns from 06 are `{prefix}_{suffix}` with the prefix from `metadata.feature_prefix(round_name,
+  signal)`, e.g. `R0_pRB_nuc_mean`, `_ring_mean`, `_total_nuc_protein`, `_nuc_cyto_ratio`; plus the anchor's
+  shape columns from skimage's `regionprops` (`axis_major_length`, … with `area` renamed `nuc_area` and
+  `ring_area`). `metadata.channel_names` builds its suggestions with the same `feature_prefix`.
+- Cells are outlined once, on the anchor round's segmentation (`exp.anchor_round`, so 02, 03 and 06
+  cannot disagree). `fouri.measure.measure_well` moves those outlines and their rings into each other
+  round with `align.move_labels` (inverse of the round's transform, nearest pixel, cv2), blanks pixels
+  where every channel of the round is 0 (no image data in the montage), and measures 00's TIFFs. Cells
+  missing from any round's table (moved outside the image, or no ring) are dropped by the inner joins.
+- Cytoplasmic rings come from `fouri.rings.make_rings(labels, width, gap)` (06's `ring_width`/`ring_gap`
+  settings, 6 and 1): a pixel joins a ring only if exactly one nucleus lies within `width`, so pixels two
+  cells could claim are dropped. cv2 dilate/erode, identical to the original skimage version.
 
 ## Metadata and notebook 07
 
 - `sample_ID` is filled by `metadata.assign_sample_ids` unless every well already has one: wells with the
   same values in `condition_columns` share an ID, numbered in plate order.
-- `features.build_fullest_df` joins each well's CSV with its `well_metadata`; `treatment_time` is renamed
+- `features.build_fullest_df` joins each well's CSV (via `io.cell_data_path`, dropping an old `Unnamed: 0`
+  column if present) with its `well_metadata`; `treatment_time` is renamed
   `treatment time` in `fullest_df` and `adata.obs` (`_OBS_NAMES`), the name 07 has always used.
 - `derived_features` are `pandas.eval` formulas applied in order, so one may use an earlier one; a formula
   naming a missing column is skipped with a printed message rather than raising.
@@ -120,6 +128,8 @@ the switch to `.npy`, so older experiments still align without rerunning 02.
 - `torch`/`torchvision` come from the PyTorch CUDA 13.0 index on Windows only (`[tool.uv.sources]`);
   other platforms take PyPI builds.
 - `delve-fs` is pinned to a tag on the omar-merhebi fork until the upstream change is merged.
+- OpenCV is `opencv-python-headless`, the build Cellpose also uses; the plain `opencv-python` bundles its
+  own Qt, which can clash with napari's.
 
 ## Writing for this repo
 
@@ -127,12 +137,14 @@ the switch to `.npy`, so older experiments still align without rerunning 02.
   step-by-step guide opened in a browser) describe the same workflow; a change to setup or to how a
   notebook is run needs both updated. Messages printed by `fouri` say in plain words what to do next.
 - Logic used by more than one notebook goes in `fouri`, not copied between notebooks. Notebooks are
-  moving towards settings, one `fouri` call per step, and displays (napari, plots); 00 to 03 have
-  moved, into `fouri/preprocess.py`, `segment.py` and `align.py`. Napari and its plugins are imported
-  inside the functions that use them, so importing `fouri` stays fast.
+  moving towards settings, one `fouri` call per step, and displays (napari, plots); 00 to 03 and 06 have
+  moved, into `fouri/preprocess.py`, `segment.py`, `align.py` and `measure.py`. Napari, torch and Cellpose
+  are imported inside the functions that use them, so importing `fouri` stays fast.
 - 03 no longer uses the Affinder plugin: Affinder 0.5.0 calls `viewer._canvas_size`, which napari 0.9
   removed, so its Start button fails.
-- Work run side by side: `fouri.worker_count()` picks how many at once on the current PC (memory at
+- Work run side by side: `fouri.parallel.parallel_map(function, items, …)` runs a top-level function (or a
+  `functools.partial` of one) over items in spawned processes with a progress bar, results in order; 00, 02
+  and 06 use it. `fouri.worker_count()` picks how many at once on the current PC (memory at
   8 GB per process, and cores) and prints why. Worker processes start with `spawn` on every platform,
   so a run on Linux behaves like the Windows lab PCs; a worker is handed file paths, not arrays, and
   prints nothing (on Windows its prints never reach the notebook). Progress bars use `tqdm.auto`, and
@@ -146,3 +158,11 @@ On Omar's workstation, `~/data/4i_refactor_test/experiment.json` is a one-well (
 `paths` point at the raw data and pre-refactor segmentation in `~/data/4i_baseline/`.
 `~/data/4i_baseline/old/` holds the pre-refactor outputs to compare against, e.g.
 `old/cell_data/cell_data_B02_df.csv` against `~/data/4i_refactor_test/cell_data/cell_data_B02_df.csv`.
+
+`~/data/4i_local_test/experiment.json` is the 5-well experiment (B02, B09, C02, E02, E09) run through the
+new 00–06; its outputs are safe to overwrite. Its segmentation is a newer Cellpose run than `old/`, so cell
+numbers don't match the old tables. To compare 06 with `old/cell_data/cell_data_B02_df.csv`, use a scratch
+experiment whose `segmented` is `old/segmented`, whose `output_df` holds the new `round_table_B02.csv` plus
+`old/output_df/tmat_B02.pkl`, and whose `output_images` is the local test's. Expected (checked 2026-11-05):
+same 5,388 cells and columns, shape and R0 nucleus means identical, R0 ring means identical except rings on
+no-data pixels; rounds 1–5 away from the edge differ by a median 0.3 % (nuclei) and 0.4 % (rings).

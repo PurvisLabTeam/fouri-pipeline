@@ -163,13 +163,11 @@ footer { color: var(--muted); font-size: 0.88rem; border-top: 1px solid var(--li
     <div class="stage"><b>01</b><span>segment (GPU)</span></div><span class="arrow">→</span>
     <div class="stage"><b>02</b><span>find transforms</span></div><span class="arrow">→</span>
     <div class="stage optional"><b>03</b><span>fix alignment</span></div><span class="arrow">→</span>
-    <div class="stage"><b>04</b><span>align</span></div><span class="arrow">→</span>
-    <div class="stage optional"><b>05</b><span>mask debris</span></div><span class="arrow">→</span>
     <div class="stage"><b>06</b><span>cell properties</span></div><span class="arrow">→</span>
     <div class="stage"><b>07</b><span>AnnData</span></div><span class="arrow">→</span>
     <div class="stage"><b>08</b><span>PHATE</span></div>
   </div>
-  <p class="legend-line">Dashed boxes are only needed sometimes: 03 when an automatic alignment is wrong, 05 when a well has debris or artifacts to exclude.</p>
+  <p class="legend-line">The dashed box is only needed sometimes: 03 when an automatic alignment is wrong. There is no 04 any more (06 moves each cell's outline into every round instead), and 05 is not used in this version.</p>
 </header>
 
 <!-- PART 1 -->
@@ -229,7 +227,7 @@ git config filter.nbstripout.extrakeys metadata.language_info.version</pre><butt
       WellB03_Channel...nd2
     Round_R1_DNA_CDK4_E2F1_CyclinA2\
       ...
-  output_df\  output_images\  segmented\  aligned_tiffs\  masks\  cell_data\   <span class="c">created by 00–06</span>
+  output_df\  output_images\  segmented\  cell_data\   <span class="c">created by 00–06</span>
   fullest_df.csv  standard_adata.h5ad  standard_adata_sub.h5ad                  <span class="c">created by 07</span></pre></div>
   <ol class="steps">
     <li><div class="body">
@@ -343,7 +341,7 @@ total_area_DNA = R0_DNA_nuc_mean * nuc_area</pre><button type="button">Copy</but
       <dl>
         <dt>Does</dt><dd>Registers every round's segmentation to the anchor round (rigid: shift and rotation) and saves the transforms. The anchor round is the first round in <code>info_exp.csv</code>; to use another, add <code>"anchor_round": 1</code> to <code>experiment.json</code> (counting from 0, so 1 is the second round). Notebooks 03 and 06 use the same round.</dd>
         <dt>You set</dt><dd><code>downscale_factor</code> (1 = full size; 2 if it runs out of memory on very large images).</dd>
-        <dt>Writes</dt><dd><code>output_df\tmat_&lt;well&gt;.npy</code>. Experiments run before this change have <code>tmat_&lt;well&gt;.pkl</code> instead; 03 and 04 still read those.</dd>
+        <dt>Writes</dt><dd><code>output_df\tmat_&lt;well&gt;.npy</code>. Experiments run before this change have <code>tmat_&lt;well&gt;.pkl</code> instead; 03 and 06 still read those.</dd>
       </dl>
       <p>The last cells (“Optional - test transformations”) open napari to inspect the alignment of the first well; skip them unless you want to look.</p>
     </article>
@@ -352,31 +350,21 @@ total_area_DNA = R0_DNA_nuc_mean * nuc_area</pre><button type="button">Copy</but
       <dl>
         <dt>Does</dt><dd>Opens the anchor round (magenta) and the round to fix (green) of one well in napari. You click a cell in magenta, then the same cell in green, for at least 3 cells spread across the image; the green round moves onto the magenta one as you go, and the top of the viewer says which round to click next. Then it replaces that round's transform, and the last cells (optional) show every round with the saved transforms.</dd>
         <dt>You set</dt><dd><code>well</code> (e.g. <code>'D03'</code>) and <code>round_name</code>, the round to fix as written in <code>info_exp.csv</code> (e.g. <code>"R1"</code>). It is aligned onto the anchor round, the same one 02 used, which can't be fixed itself.</dd>
-        <dt>Writes</dt><dd>Updates <code>output_df\tmat_&lt;well&gt;.npy</code>; rerun 04 for that well afterwards.</dd>
+        <dt>Writes</dt><dd>Updates <code>output_df\tmat_&lt;well&gt;.npy</code>; rerun 06 afterwards.</dd>
       </dl>
     </article>
     <article class="nb">
-      <div class="top"><span class="num">04</span><h3>Align all channels</h3></div>
+      <div class="top"><span class="num">05</span><h3>Mask debris and artifacts</h3><span class="tag">not used now</span></div>
       <dl>
-        <dt>Does</dt><dd>Applies the transforms to every channel of every round and saves one aligned TIFF per channel.</dd>
-        <dt>You set</dt><dd>Nothing besides <code>CONFIG</code>.</dd>
-        <dt>Writes</dt><dd><code>aligned_tiffs\&lt;well&gt;\Round_R0_wellB02_pRB.tif</code>, …</dd>
-      </dl>
-    </article>
-    <article class="nb">
-      <div class="top"><span class="num">05</span><h3>Mask debris and artifacts</h3><span class="tag">only if needed</span></div>
-      <dl>
-        <dt>Does</dt><dd>Opens a well's aligned images in napari. Draw shapes on the <b>mask</b> layer over regions to exclude; use <b>Choose channel</b> to look through the channels.</dd>
-        <dt>You set</dt><dd><code>selected_well</code> (one well at a time) and <code>use_existing</code> (True adds to a saved mask).</dd>
-        <dt>Writes</dt><dd><code>masks\mask_&lt;well&gt;.pkl</code>. Click <b>Save Mask</b> before closing napari.</dd>
+        <dt>Does</dt><dd>Nothing in this version: its masks never removed cells from the analysis, and the notebook needs 04's aligned images, which are no longer made. Masking comes back with automatic artifact detection, which will remove the cells it covers.</dd>
       </dl>
     </article>
     <article class="nb">
       <div class="top"><span class="num">06</span><h3>Calculate cell properties</h3></div>
       <dl>
-        <dt>Does</dt><dd>Measures every nucleus and a cytoplasmic ring around it in every channel: area, shape, mean intensities, total nuclear protein and nuclear/cytoplasm ratios. Cells touching the image border or without DNA signal are dropped, and the mask is recorded per cell. It stops if two rounds have the same round/signal name.</dd>
-        <dt>You set</dt><dd><code>label_round</code> (which round's segmentation defines the cells; default 0).</dd>
-        <dt>Writes</dt><dd><code>cell_data\cell_data_&lt;well&gt;_df.csv</code> and <code>.pkl</code></dd>
+        <dt>Does</dt><dd>Outlines every nucleus and a cytoplasmic ring around it on the anchor round, moves those outlines to where the cells sit in every other round (using the transforms from 02 or 03), and measures every channel on 00's images: area, shape, mean intensities, total nuclear protein and nuclear/cytoplasm ratios. Cells touching the image border, cells with no ring and cells that fall outside a round's image are left out. Several wells run at once, about 10–20 seconds per well.</dd>
+        <dt>You set</dt><dd><code>ring_width</code> and <code>ring_gap</code> (6 and 1): the ring reaches <code>ring_width</code> pixels out from the nucleus and starts <code>ring_gap + 1</code> pixels from its edge. Use the same values for experiments you want to compare.</dd>
+        <dt>Writes</dt><dd><code>cell_data\cell_data_&lt;well&gt;_df.csv</code>. The numbers differ slightly from versions before November 2026, so don't combine older and newer cell data in 07.</dd>
       </dl>
     </article>
     <article class="nb">
@@ -435,7 +423,7 @@ uv sync</pre><button type="button">Copy</button></div>
       <tr><td><code>Some rounds have an invalid number of 'DNA' channels</code> in 00</td><td>A round has no DNA channel or more than one. Check <code>info_exp.csv</code>, or set <code>align_signal</code> to the name it uses.</td></tr>
       <tr><td><code>column for channel … does not exist</code> in 00</td><td>An ND2 file has an optical configuration that <code>info_exp.csv</code> has no column for. Add the column, empty for rounds that didn't use it.</td></tr>
       <tr><td><code>round table was made using an old version of the pipeline</code> in 01</td><td>The experiment went through an older version of 00. Run 00 again, then 01.</td></tr>
-      <tr><td><code>Duplicate round/signal names</code> in 06</td><td>Two rounds in <code>info_exp.csv</code> use the same round name and signal. Make them unique and rerun from 00.</td></tr>
+      <tr><td><code>Duplicate round/signal names</code> in 00</td><td>Two channels in the same round of <code>info_exp.csv</code> have the same signal name. Give each its own name and run 00 again.</td></tr>
       <tr><td>Notebook outputs show up in <code>git diff</code></td><td>Run <code>uv run nbstripout --install</code> once in this copy of the repository.</td></tr>
       <tr><td>A notebook you only ran shows as changed, and the change is a <code>"version"</code> line</td><td>Run <code>git config filter.nbstripout.extrakeys metadata.language_info.version</code> once in this copy of the repository.</td></tr>
     </tbody>

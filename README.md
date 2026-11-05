@@ -29,7 +29,8 @@ To pick up changes later: `git pull`, then `uv sync`.
    CONFIG = r'Z:\Clara\1.3_20260310_Working Folder 4i\experiment.json'
    ```
    Every folder and the well list come from the config; nothing else needs editing.
-3. Run the notebooks in order (03 and 05 only when needed).
+3. Run the notebooks in order: 00, 01, 02, 03 (only when an alignment is wrong), 06, 07, 08. There is no 04 any more,
+   and 05 is not used in this version.
 
 ## Experiment folder layout
 ```
@@ -37,7 +38,7 @@ To pick up changes later: `git pull`, then `uv sync`.
     experiment.json      written by setup_experiment.ipynb
     info_exp.csv         optical configuration -> channel names, one row per round
     data/                one subfolder per round (Round_<name>_...) with Well<W>_Channel...nd2 files
-    output_df/ output_images/ segmented/ aligned_tiffs/ masks/ cell_data/    created by the notebooks
+    output_df/ output_images/ segmented/ cell_data/                          created by the notebooks
     fullest_df.csv  standard_adata.h5ad  standard_adata_sub.h5ad             created by 07
 ```
 If the raw data or the info file live somewhere else, set *data folder* / *info file* in the form
@@ -60,7 +61,7 @@ B03,abema_fulv,100nM,96h,
 - *Export CSV template* in the form writes a CSV listing the wells with data, ready to fill in with Excel.
 
 # Expected outputs
-The pipeline takes images from the Purvis lab Photon microscope system and outputs .csv and .pkl files for each well.
+The pipeline takes images from the Purvis lab Photon microscope system and outputs a .csv file for each well.
 These contain feature data for each round of imaging and are used for downstream analysis.
 
 # Notebook Descriptions
@@ -78,11 +79,17 @@ Notebook 02 uses the segmentation masks to determine the transformation required
 
 Notebook 03 is only used if the automatic transformations are incorrect, usually as a result of underlying issues with the data
 
-Notebook 04 applies the transformation matrixes generated in notebook 02 or 03 to all channels of the images, generating a set of aligned tiffs
+There is no notebook 04 any more: instead of saving aligned copies of every image, 06 moves each cell's outline into
+every round.
 
-Notebook 05 uses a Napari interface to mask out debris and other artifacts ensuring the quality of the data
+Notebook 05 (masking debris by hand) is not used in this version: its masks never removed cells from the analysis, and it
+needs 04's aligned images. Masking comes back with automatic artifact detection, which will remove the cells it covers.
 
-Notebook 06 calculates the properties of individual cells and outputs a .csv and a .pkl file for each well of the 96 well plate imaged.
+Notebook 06 outlines each nucleus and a cytoplasmic ring around it on the anchor round, moves those outlines into every
+round with the transforms from 02 or 03, and measures every channel on 00's images. It saves one CSV per well in
+`cell_data` (shape, nucleus and ring means, total nuclear protein, nucleus/cytoplasm ratios). Its settings `ring_width`
+and `ring_gap` (6 and 1) set the ring; use the same values for experiments you want to compare. Its numbers differ
+slightly from versions before November 2026, so don't combine older and newer cell data in 07.
 
 Notebook 07 combines the wells into one table with each well's metadata, adds the derived features from the config
 (e.g. pRB/RB ratio), optionally labels cells pRB high/low, z-scores the features and writes `standard_adata.h5ad`
