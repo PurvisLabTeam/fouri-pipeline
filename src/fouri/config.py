@@ -1,9 +1,9 @@
-"""Experiment configuration: one ``experiment.json`` per experiment.
+r"""Experiment configuration: one ``experiment.json`` per experiment.
 
 Every pipeline notebook starts with::
 
     from fouri import load_config
-    CONFIG = r'Z:\\Clara\\1.3_20260310_Working Folder 4i\\experiment.json'
+    CONFIG = r'Z:\PATH\TO\EXPERIMENT\experiment.json'
     exp = load_config(CONFIG)
 
 and takes all of its paths and the well list from ``exp``. Create or edit the

@@ -209,7 +209,7 @@ def channel_names(info_file):
 
 
 def default_derived_features(info_file):
-    """Starting derived features for 07, based on the channels that exist."""
+    """Return the starting derived features for 07, based on the channels that exist."""
     names = channel_names(info_file)
     features = []
     for n in names:
