@@ -1,7 +1,7 @@
 """Purvis lab 4i pipeline helpers."""
 
 from .config import Experiment, load_config, save_config
-from .io import make_dir, read_labels, read_nd2_channel, write_tiff
+from .io import make_dir, read_labels, write_tiff
 from .parallel import worker_count
 from .report import progress, say
 from .segment import segment_image
@@ -12,7 +12,6 @@ __all__ = [
     "make_dir",
     "progress",
     "read_labels",
-    "read_nd2_channel",
     "save_config",
     "say",
     "segment_image",

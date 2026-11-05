@@ -1,23 +1,19 @@
 """Utils for StackReg alignment."""
 
 import functools
-import pickle
-from concurrent.futures import ProcessPoolExecutor
-from multiprocessing import get_context
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import cv2
 import numpy as np
 import numpy.typing as npt
 from pystackreg import StackReg
-from skimage.transform import EuclideanTransform, downscale_local_mean, warp
+from skimage.transform import EuclideanTransform, downscale_local_mean
 from tifffile import imread
 
 from fouri.config import Experiment
-from fouri.io import label_paths, read_labels
-from fouri.parallel import worker_count
-from fouri.preprocess import read_round_table
-from fouri.report import progress
+from fouri.io import label_paths, load_transforms, read_labels, read_round_table, save_transforms
+from fouri.parallel import parallel_map
 
 if TYPE_CHECKING:
     import napari
@@ -42,6 +38,14 @@ def register_round(
     return rescale_transform(matrix, downscale_factor)
 
 
+def _register_pair(paths: tuple[Path, Path], downscale_factor: int) -> npt.NDArray[np.float64]:
+    """Register one (anchor, moving) pair.
+
+    Allows parallel_map to hand each job as a single argument.
+    """
+    return register_round(*paths, downscale_factor=downscale_factor)
+
+
 def rescale_transform(matrix: npt.NDArray[np.float64], factor: float) -> npt.NDArray[np.float64]:
     """Rescale the transform to ``factor`` times larger.
 
@@ -53,14 +57,28 @@ def rescale_transform(matrix: npt.NDArray[np.float64], factor: float) -> npt.NDA
     return rescaled
 
 
+def move_labels(labels: npt.NDArray[Any], transform: npt.NDArray[np.float64]) -> npt.NDArray[Any]:
+    return cv2.warpAffine(
+        labels.astype(np.float32),
+        np.linalg.inv(transform)[:2],
+        labels.shape[::-1],
+        flags=cv2.INTER_NEAREST | cv2.WARP_INVERSE_MAP,
+    ).astype(labels.dtype)
+
+
 def apply_transforms(matrices: npt.NDArray[Any], images: npt.NDArray) -> npt.NDArray[Any]:
     """Warp each image with the matrix at the same position in ``matrices``.
 
     For the visual check at the end of notebook 02; returns warped images as
-    floats. Works on a single matrix or a stack.
+    input type. Works on a single matrix or a stack.
     """
     return np.array(
-        [warp(image, matrix, output_shape=image.shape) for image, matrix in zip(images, matrices, strict=True)]
+        [
+            cv2.warpAffine(
+                image.astype(np.float32), matrix[:2], image.shape[::-1], flags=cv2.INTER_NEAREST | cv2.WARP_INVERSE_MAP
+            ).astype(image.dtype)
+            for image, matrix in zip(images, matrices, strict=True)
+        ]
     )
 
 
@@ -69,16 +87,7 @@ def find_transforms(
     downscale_factor: int = 1,
     n_workers: int | None = None,
 ) -> dict[str, npt.NDArray[np.float64]]:
-    """Align every round of every well onto the experiment's anchor round and save.
-
-    The anchor round is ``exp.anchor_round``, the one 03 and 06 also use. Saves to
-    ``output_df/tmat_{well}.npy``. Each round is aligned in its own
-    process, ``n_workers`` at a time. Returns
-    ``{well: array of shape (rounds, 3, 3)}`` with the identity at the
-    anchor round and saves those same arrays.
-    """
     anchor_round = exp.anchor_round
-    n_workers = n_workers if n_workers is not None else worker_count()
     paths_of: dict[str, list[Path]] = {}
     mismatched: dict[str, tuple[int, int]] = {}
     for well in exp.well_list:
@@ -119,21 +128,19 @@ def find_transforms(
         for r, label in enumerate(labels)
         if r != anchor_round
     ]
-    anchors = [j[2] for j in jobs]
-    moving = [j[3] for j in jobs]
+    pairs = [(j[2], j[3]) for j in jobs]
     transforms = {well: np.array([np.identity(3) for _ in range(len(paths))]) for well, paths in paths_of.items()}
 
-    with ProcessPoolExecutor(n_workers, mp_context=get_context("spawn")) as executor:
-        register = functools.partial(register_round, downscale_factor=downscale_factor)
-        results = executor.map(register, anchors, moving)
-        for job, result in progress(
-            zip(jobs, results, strict=True),
-            total=len(jobs),
-            desc="Aligning images",
-            unit="image",
-        ):
-            well, r, _, _ = job
-            transforms[well][r] = result
+    results = parallel_map(
+        function=functools.partial(_register_pair, downscale_factor=downscale_factor),
+        items=pairs,
+        desc="Aligning images",
+        unit="image",
+        n_workers=n_workers,
+    )
+    for job, result in zip(jobs, results, strict=True):
+        well, rnd, _, _ = job
+        transforms[well][rnd] = result
 
     for well, matrix in transforms.items():
         save_transforms(exp, well, matrix)
@@ -151,35 +158,6 @@ def alignment_preview(
     transforms = rescale_transform(transforms, 1 / downscale_factor)
     after = apply_transforms(transforms, before)
     return before[exp.anchor_round], before, after
-
-
-def load_transforms(exp: Experiment, well: str) -> npt.NDArray[np.float64]:
-    current_path = tmat_path(exp, well, ".npy")
-    deprecated_path = tmat_path(exp, well, ".pkl")
-
-    if current_path.exists():
-        transforms = np.load(current_path)
-    elif deprecated_path.exists():
-        with open(deprecated_path, "rb") as fh:
-            transforms = pickle.load(fh)
-        transforms = np.array([getattr(transform, "params", transform) for transform in transforms])
-    else:
-        raise FileNotFoundError(f"Could not find transforms for well {well}")
-
-    return transforms
-
-
-def save_transforms(exp: Experiment, well: str, transforms: npt.NDArray[np.float64]) -> Path:
-    save_path = tmat_path(exp, well, ".npy")
-    np.save(save_path, transforms)
-    return save_path
-
-
-def tmat_path(exp: Experiment, well: str, suffix: str | None = None) -> Path:
-    pth = Path(exp.output_df) / f"tmat_{well}"
-    if suffix is not None:
-        pth = pth.with_suffix(suffix)
-    return pth
 
 
 def manual_alignment_images(
@@ -263,6 +241,11 @@ def start_hand_alignment(viewer: "napari.Viewer", anchor_layer: "Image", round_l
     wait_for(anchor_clicks, "Click a cell in the anchor round (magenta).")
 
 
+def _swap_xy(matrix: npt.NDArray[Any]) -> npt.NDArray[Any]:
+    swap_order = [1, 0, 2]
+    return matrix[np.ix_(swap_order, swap_order)]
+
+
 def save_manual_transform(
     exp: Experiment, well: str, round_index: int, napari_affine: npt.NDArray[np.float64]
 ) -> Path:
@@ -270,8 +253,3 @@ def save_manual_transform(
     transforms = load_transforms(exp, well)
     transforms[round_index] = manual
     return save_transforms(exp, well, transforms)
-
-
-def _swap_xy(matrix: npt.NDArray[Any]) -> npt.NDArray[Any]:
-    swap_order = [1, 0, 2]
-    return matrix[np.ix_(swap_order, swap_order)]

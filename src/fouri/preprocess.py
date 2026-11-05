@@ -3,31 +3,20 @@
 from __future__ import annotations
 
 import functools
-from concurrent.futures import ProcessPoolExecutor
-from multiprocessing import get_context
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
 from fouri.config import Experiment
-from fouri.io import nd2_metadata, read_info_file, read_nd2, write_tiff
-from fouri.parallel import worker_count
-from fouri.report import progress
-
-
-def alignment_paths(exp: Experiment, well: str) -> list[Path]:
-    table = read_round_table(exp, well)
-    if "raw_file_name" not in table.columns:
-        raise ValueError(
-            f"Well {well}'s round table was made using an old version of the pipeline. "
-            "Rerun the preprocessing step first."
-        )
-    parent = Path(exp.output_images) / well
-    return [
-        parent / str(row.raw_file_name)
-        for row in table.query("is_align_channel").sort_values("round_index").itertuples()
-    ]
+from fouri.io import (
+    nd2_metadata,
+    read_info_file,
+    read_nd2,
+    save_round_table,
+    write_tiff,
+)
+from fouri.parallel import parallel_map
 
 
 def convert_well(exp: Experiment, well: str, align_signal: str = "DNA") -> None:
@@ -47,46 +36,19 @@ def convert_well(exp: Experiment, well: str, align_signal: str = "DNA") -> None:
 
 
 def preprocess(exp: Experiment, align_signal: str = "DNA", n_workers: int | None = None) -> None:
-    n_workers = n_workers if n_workers is not None else worker_count()
     path_df = Path(exp.output_df)
     path_images = Path(exp.output_images)
 
     path_df.mkdir(parents=True, exist_ok=True)
     path_images.mkdir(parents=True, exist_ok=True)
 
-    with ProcessPoolExecutor(n_workers, mp_context=get_context("spawn")) as executor:
-        convert = functools.partial(convert_well, exp, align_signal=align_signal)
-        results = executor.map(convert, exp.well_list)
-        for _ in progress(results, desc="Converting wells", unit="well", total=len(exp.well_list)):
-            pass
-
-
-def round_table_path(exp: Experiment, well: str) -> Path:
-    return Path(exp.output_df) / f"round_table_{well}.csv"
-
-
-def save_round_table(exp: Experiment, well: str, table: pd.DataFrame) -> None:
-    path = round_table_path(exp, well)
-    table.to_csv(path, index=False)
-
-
-def read_round_table(exp: Experiment, well: str) -> pd.DataFrame:
-    current = round_table_path(exp, well)
-    deprecated = current.parent / f"df_{well}.pkl"
-
-    if current.is_file():
-        return pd.read_csv(current)
-
-    if deprecated.is_file():
-        table = pd.read_pickle(deprecated)
-        table = table.rename(
-            columns={"nameRound": "round_name", "alignRound": "round_index", "alignIm": "is_align_channel"}
-        )
-        table["is_align_channel"] = table["is_align_channel"].astype(bool)
-        table["round_index"] = table["round_index"].astype(int)
-        return table
-
-    raise FileNotFoundError(f"Could not find the round table .csv or .pkl for well {well}")
+    parallel_map(
+        function=functools.partial(convert_well, exp, align_signal=align_signal),
+        items=exp.well_list,
+        desc="Converting wells",
+        unit="well",
+        n_workers=n_workers,
+    )
 
 
 def round_table(exp: Experiment, well: str, align_signal: str = "DNA") -> pd.DataFrame:
@@ -98,6 +60,15 @@ def round_table(exp: Experiment, well: str, align_signal: str = "DNA") -> pd.Dat
     df["width_min"] = df["width"].min()
     df["height_min"] = df["height"].min()
     df["is_align_channel"] = df["signal"] == align_signal
+    duplicated = df[df.duplicated(["round_name", "signal"], keep=False)]
+    if not duplicated.empty:
+        message = f"Duplicate round/signal names in well {well} rounds table:\n\n"
+        duplicated = duplicated.drop_duplicates(["round_name", "signal"])
+        for row in duplicated.itertuples():
+            message += f"{row.round_name} duplicates {row.signal}\n"
+        message += "Correct info_exp.csv then run again"
+        raise ValueError(message)
+
     align_counts = df.groupby("round_name")["is_align_channel"].sum().reindex(rounds["round_name"], fill_value=0)
     invalid = align_counts[align_counts != 1]
     if not invalid.empty:

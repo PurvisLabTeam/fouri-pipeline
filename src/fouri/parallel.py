@@ -3,12 +3,26 @@
 import math
 import os
 import warnings
+from collections.abc import Callable, Sequence
+from concurrent.futures import ProcessPoolExecutor
+from multiprocessing import get_context
 
 import psutil
 
+from fouri.report import progress
+
 MEM_PER_WORKER = 8e9  # In bytes, equals 8 GB per worker
 MEM_MIN_FREE = 4e9  # In bytes, equals 4 GB
-MIN_CPU_FREE = 2
+MIN_CPU_FREE = 2  # Minimum number of cpus to keep available to the OS
+
+
+def parallel_map[T, R](
+    function: Callable[[T], R], items: Sequence[T], *, desc: str, unit: str, n_workers: int | None = None
+) -> list[R]:
+    n_workers = n_workers if n_workers is not None else worker_count()
+    with ProcessPoolExecutor(max_workers=n_workers, mp_context=get_context("spawn")) as executor:
+        results = executor.map(function, items)
+        return list(progress(results, desc=desc, unit=unit, total=len(items)))
 
 
 def worker_count(min_count=1):

@@ -1,5 +1,6 @@
 """File helpers shared by the pipeline notebooks."""
 
+import pickle
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -110,12 +111,6 @@ def read_nd2(path: str | Path) -> npt.NDArray:
     return image
 
 
-def read_nd2_channel(path, channel):
-    """Read one channel of an ND2 file into memory and close the file."""
-    with nd2.ND2File(path) as fh:
-        return np.asarray(fh.to_dask()[channel, :, :].compute())
-
-
 def label_paths(labels_path, well):
     folder = Path(labels_path) / well
     return sorted(pth for pth in folder.iterdir() if pth.suffix in (".tiff", ".tif"))
@@ -134,3 +129,82 @@ def read_labels(labels_path, well, indices=None):
 
 def write_tiff(path: str | Path, array: npt.NDArray[Any], metadata: dict[str, Any] | None = None):
     imwrite(path, array, compression="zlib", ome=metadata is not None, metadata=metadata)
+
+
+def round_table_path(exp: Experiment, well: str) -> Path:
+    return Path(exp.output_df) / f"round_table_{well}.csv"
+
+
+def save_round_table(exp: Experiment, well: str, table: pd.DataFrame) -> None:
+    path = round_table_path(exp, well)
+    table.to_csv(path, index=False)
+
+
+def read_round_table(exp: Experiment, well: str) -> pd.DataFrame:
+    current = round_table_path(exp, well)
+    deprecated = current.parent / f"df_{well}.pkl"
+
+    if current.is_file():
+        return pd.read_csv(current)
+
+    if deprecated.is_file():
+        table = pd.read_pickle(deprecated)
+        table = table.rename(
+            columns={"nameRound": "round_name", "alignRound": "round_index", "alignIm": "is_align_channel"}
+        )
+        table["is_align_channel"] = table["is_align_channel"].astype(bool)
+        table["round_index"] = table["round_index"].astype(int)
+        return table
+
+    raise FileNotFoundError(f"Could not find the round table .csv or .pkl for well {well}")
+
+
+def require_raw_files(table: pd.DataFrame, well: str) -> None:
+    if "raw_file_name" not in table.columns:
+        raise ValueError(
+            f"Well {well}'s round table was made using an old version of the pipeline. "
+            "Rerun the preprocessing step first."
+        )
+
+
+def cell_data_path(exp: Experiment, well: str) -> Path:
+    return Path(exp.cell_data) / f"cell_data_{well}_df.csv"
+
+
+def alignment_paths(exp: Experiment, well: str) -> list[Path]:
+    table = read_round_table(exp, well)
+    require_raw_files(table, well)
+    parent = Path(exp.output_images) / well
+    return [
+        parent / str(row.raw_file_name)
+        for row in table.query("is_align_channel").sort_values("round_index").itertuples()
+    ]
+
+
+def tmat_path(exp: Experiment, well: str, suffix: str | None = None) -> Path:
+    pth = Path(exp.output_df) / f"tmat_{well}"
+    if suffix is not None:
+        pth = pth.with_suffix(suffix)
+    return pth
+
+
+def save_transforms(exp: Experiment, well: str, transforms: npt.NDArray[np.float64]) -> Path:
+    save_path = tmat_path(exp, well, ".npy")
+    np.save(save_path, transforms)
+    return save_path
+
+
+def load_transforms(exp: Experiment, well: str) -> npt.NDArray[np.float64]:
+    current_path = tmat_path(exp, well, ".npy")
+    deprecated_path = tmat_path(exp, well, ".pkl")
+
+    if current_path.exists():
+        transforms = np.load(current_path)
+    elif deprecated_path.exists():
+        with open(deprecated_path, "rb") as fh:
+            transforms = pickle.load(fh)
+        transforms = np.array([getattr(transform, "params", transform) for transform in transforms])
+    else:
+        raise FileNotFoundError(f"Could not find transforms for well {well}")
+
+    return transforms

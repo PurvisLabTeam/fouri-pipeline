@@ -6,8 +6,7 @@ from pathlib import Path
 from tifffile import imread
 
 from fouri.config import Experiment
-from fouri.io import write_tiff
-from fouri.preprocess import alignment_paths
+from fouri.io import alignment_paths, write_tiff
 from fouri.report import progress, say
 
 
