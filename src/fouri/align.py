@@ -5,19 +5,23 @@ import pickle
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import numpy.typing as npt
-import pandas as pd
 from pystackreg import StackReg
-from skimage.transform import downscale_local_mean, warp
+from skimage.transform import EuclideanTransform, downscale_local_mean, warp
 from tifffile import imread
 
 from fouri.config import Experiment
 from fouri.io import label_paths, read_labels
 from fouri.parallel import worker_count
+from fouri.preprocess import read_round_table
 from fouri.report import progress
+
+if TYPE_CHECKING:
+    import napari
+    from napari.layers import Image
 
 
 def register_round(
@@ -81,8 +85,8 @@ def find_transforms(
         labels = label_paths(exp.segmented, well)
         paths_of[well] = labels
 
-        df = pd.read_pickle(Path(exp.output_df) / f"df_{well}.pkl")
-        n_rounds_df = df["alignRound"].nunique()
+        df = read_round_table(exp, well)
+        n_rounds_df = df["round_index"].nunique()
 
         if len(labels) != n_rounds_df:
             mismatched[well] = (len(labels), n_rounds_df)
@@ -92,7 +96,9 @@ def find_transforms(
             f"Segmentation images and rounds don't match in {len(mismatched)} well(s), so no transforms were found:\n"
         )
         for well, (n_labels, n_rounds) in mismatched.items():
-            message += f"\t{well}: {n_labels} label images in segmented, {n_rounds} rounds listed in df_{well}.pkl\n"
+            message += (
+                f"\t{well}: {n_labels} label images in segmented, {n_rounds} rounds listed in the rounds table\n"
+            )
         message += (
             "Each round needs exactly one label image. Rerun 01 for these wells or remove "
             "extra .tif files from their folders."
@@ -174,3 +180,98 @@ def tmat_path(exp: Experiment, well: str, suffix: str | None = None) -> Path:
     if suffix is not None:
         pth = pth.with_suffix(suffix)
     return pth
+
+
+def manual_alignment_images(
+    exp: Experiment, well: str, round_name: str
+) -> tuple[int, npt.NDArray[Any], npt.NDArray[Any]]:
+    table = read_round_table(exp, well)
+    matches = table[table["round_name"] == round_name]["round_index"]
+
+    if matches.empty:
+        raise ValueError(
+            f"Round {round_name} was not found in the round table for well {well}. "
+            f"The table has the following rounds: {', '.join(str(name) for name in table['round_name'].unique())}"
+        )
+
+    round_index = int(matches.iloc[0])
+    if round_index == exp.anchor_round:
+        raise ValueError(
+            f"{round_name} is the anchor round, which the other rounds are aligned onto, so it has nothing "
+            "to correct. Set round_name to the round to correct."
+        )
+
+    anchor_labels, round_labels = read_labels(exp.segmented, well, [exp.anchor_round, round_index])
+
+    return round_index, anchor_labels > 0, round_labels > 0
+
+
+def fit_hand_alignment(
+    anchor_points: npt.NDArray[np.float64], round_points: npt.NDArray[np.float64]
+) -> tuple[npt.NDArray[np.float64], float] | None:
+    """Shift and rotation that move the round's clicked cells onto the same cells in the anchor.
+
+    Points are napari (row, column) positions, paired in the order they were clicked. Returns
+    the 3x3 matrix for the round's napari layer and the average distance in pixels left between
+    the pairs, or None until there are 2 complete pairs.
+    """
+    n_pairs = min(len(anchor_points), len(round_points))
+    if n_pairs < 2:
+        return None
+    moving, fixed = round_points[:n_pairs], anchor_points[:n_pairs]
+    transform = EuclideanTransform.from_estimate(moving, fixed)
+    if not transform:
+        return None
+    mismatch = float(np.mean(transform.residuals(moving, fixed)))
+    return transform.params, mismatch
+
+
+def start_hand_alignment(viewer: "napari.Viewer", anchor_layer: "Image", round_layer: "Image") -> None:
+    from napari.layers.base._base_constants import ActionType
+
+    clicks = {"size": 40, "canvas_size_limits": (12, 30), "ndim": 2}
+    anchor_clicks = viewer.add_points(name="Anchor clicks", face_color="yellow", **clicks)
+    round_clicks = viewer.add_points(name="Round clicks", face_color="cyan", affine=round_layer.affine, **clicks)
+    viewer.text_overlay.visible = True
+
+    def wait_for(layer: Any, message: str) -> None:
+        viewer.layers.selection.active = layer
+        layer.mode = "add"
+        viewer.text_overlay.text = message
+
+    def after_click(event: Any) -> None:
+        if event.action != ActionType.ADDED:
+            return
+        if event.source is anchor_clicks:
+            wait_for(round_clicks, "Now click the same cell in the round to fix (green).")
+            return
+        fit = fit_hand_alignment(anchor_clicks.data, round_clicks.data)
+        if fit is None:
+            wait_for(anchor_clicks, "Click a second cell in the anchor round (magenta), far from the first.")
+            return
+        matrix, mismatch = fit
+        round_layer.affine = matrix
+        round_clicks.affine = matrix
+        wait_for(
+            anchor_clicks,
+            f"{len(round_clicks.data)} pairs, cells {mismatch:.1f} pixels apart on average. Click another cell "
+            "in the anchor round, or run the next cell when the cells line up.",
+        )
+
+    anchor_clicks.events.data.connect(after_click)
+    round_clicks.events.data.connect(after_click)
+    wait_for(anchor_clicks, "Click a cell in the anchor round (magenta).")
+
+
+def save_manual_transform(
+    exp: Experiment, well: str, round_index: int, napari_affine: npt.NDArray[np.float64]
+) -> Path:
+    manual = np.linalg.inv(_swap_xy(napari_affine))
+    transforms = load_transforms(exp, well)
+    transforms[round_index] = manual
+    return save_transforms(exp, well, transforms)
+
+
+def _swap_xy(matrix: npt.NDArray[Any]) -> npt.NDArray[Any]:
+    swap_order = [1, 0, 2]
+    return matrix[np.ix_(swap_order, swap_order)]
