@@ -32,6 +32,12 @@ To pick up changes later: `git pull`, then `uv sync`.
 3. Run the notebooks in order: 00, 01, 02, 03 (only when an alignment is wrong), 06, 07, 08. There is no 04 any more,
    and 05 is not used in this version.
 
+Running 00, 01, 02 or 06 again only does what is missing: wells and rounds that already have their output are skipped,
+so a run that stopped carries on where it left off. To redo them, set `overwrite = True` in that notebook, for example
+after changing one of its settings. 06 does not notice changes made earlier in the pipeline: after segmenting again in
+01 or fixing an alignment in 03, run 06 with `overwrite = True`. In 02, `overwrite = True` also replaces the rounds you
+fixed by hand in 03.
+
 ## Experiment folder layout
 ```
 <experiment folder>/

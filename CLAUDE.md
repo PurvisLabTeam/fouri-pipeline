@@ -91,6 +91,15 @@ stored as a 3 × 3 matrix of NaN (the identity at the anchor): `align.save_manua
 that way when a round is aligned by hand before 02 has run, and `measure_well` refuses a well with any NaN
 round, naming the rounds.
 
+00, 01, 02 and 06 only create outputs that are missing, unless their `overwrite` argument (a setting in each
+notebook, default `False`) is `True`: 00 skips a well whose `round_table_{well}.csv` exists (not the old
+`.pkl`), 01 a round whose labels exist, 02 a round whose matrix isn't NaN (rounds fixed in 03 are kept), 06 a
+well whose CSV exists. Nothing tracks what an output was made from, so after a fix in 03 or a new 01 run, 06
+needs `overwrite=True`. 02 stops if a saved file has a different number of rounds, or a non-identity matrix at
+`anchor_round` (the anchor changed). The check runs in the main process before work is handed out;
+`report.say_skipped` prints what was skipped. `io.write_tiff` writes to a `.partial` name and renames, so a
+stopped run never leaves a half-written TIFF that would count as done.
+
 ## Inputs, naming and couplings
 
 - `info_exp.csv`: one row per round; the first column is the round name (`R0`, `R1`, …), read as
@@ -158,7 +167,8 @@ round, naming the rounds.
 - Work run side by side: `fouri.parallel.parallel_map(function, items, …)` runs a top-level function (or a
   `functools.partial` of one) over items in spawned processes with a progress bar, results in order; 00, 02
   and 06 use it. `fouri.worker_count()` picks how many at once on the current PC (memory at
-  8 GB per process, and cores) and prints why. Worker processes start with `spawn` on every platform,
+  8 GB per process, and cores, never more than the items) and prints why; an empty list returns `[]`
+  without starting any. Worker processes start with `spawn` on every platform,
   so a run on Linux behaves like the Windows lab PCs; a worker is handed file paths, not arrays, and
   prints nothing (on Windows its prints never reach the notebook). Progress bars use `tqdm.auto`, and
   nothing prints while one is running.

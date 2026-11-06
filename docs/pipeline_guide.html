@@ -317,13 +317,14 @@ total_area_DNA = R0_DNA_nuc_mean * nuc_area</pre><button type="button">Copy</but
     <span class="eyebrow">Part 4 · each experiment</span>
     <h2>Run the notebooks</h2>
     <p>In every notebook, replace the placeholder <code>CONFIG = r'Z:\PATH\TO\EXPERIMENT\experiment.json'</code> at the top with your line from the form, then run the cells from the top. Each notebook prints which experiment it loaded; check it before continuing. Run them in order: each one reads the previous one's output.</p>
+    <p>Running 00, 01, 02 or 06 again only does what's missing: wells and rounds that already have their output are skipped, and the notebook prints which. So if a run stops (a crash, a closed laptop), run it again and it carries on where it left off. To redo them, set <code>overwrite = True</code> in that notebook, for example after changing one of its settings. 06 doesn't notice changes made earlier: after segmenting again in 01 or fixing an alignment in 03, run 06 with <code>overwrite = True</code>.</p>
   </div>
   <div class="nb-list">
     <article class="nb">
       <div class="top"><span class="num">00</span><h3>Preprocess data</h3></div>
       <dl>
         <dt>Does</dt><dd>Converts every channel of every round into its own TIFF, all trimmed to a common size, keeping the pixel size, wavelengths and exposure the microscope recorded. Saves a table of every round and channel for each well. Several wells run at once. It stops with an error if a round doesn't have exactly one <code>DNA</code> channel.</dd>
-        <dt>You set</dt><dd><code>align_signal</code>: the stain used to align the rounds, written exactly as in <code>info_exp.csv</code> (default <code>"DNA"</code>).</dd>
+        <dt>You set</dt><dd><code>align_signal</code>: the stain used to align the rounds, written exactly as in <code>info_exp.csv</code> (default <code>"DNA"</code>). <code>overwrite</code> (default <code>False</code>): <code>True</code> converts every well again, e.g. after changing <code>align_signal</code>.</dd>
         <dt>Writes</dt><dd><code>output_df\round_table_&lt;well&gt;.csv</code>, <code>output_images\&lt;well&gt;\Round_&lt;round&gt;_well&lt;well&gt;_&lt;stain&gt;.tif</code> (0.3 to 0.9 GB per well)</dd>
       </dl>
     </article>
@@ -331,16 +332,16 @@ total_area_DNA = R0_DNA_nuc_mean * nuc_area</pre><button type="button">Copy</but
       <div class="top"><span class="num">01</span><h3>Cellpose segmentation</h3><span class="tag">GPU</span></div>
       <dl>
         <dt>Does</dt><dd>Segments nuclei in each round's DNA image with Cellpose-SAM, about 1 minute per image. It stops right away with an error if Cellpose can't use the GPU. Experiments run through an older version of 00 need 00 run again first.</dd>
-        <dt>You set</dt><dd><code>selected_diameter</code> (default 30 pixels). SAM handles a range of sizes, so change it only if nuclei come out clearly too large or too small. <code>allow_cpu</code> (default <code>False</code>): set it to <code>True</code> only if the GPU can't be fixed; the processor takes about 20 minutes per image.</dd>
+        <dt>You set</dt><dd><code>selected_diameter</code> (default 30 pixels). SAM handles a range of sizes, so change it only if nuclei come out clearly too large or too small. <code>allow_cpu</code> (default <code>False</code>): set it to <code>True</code> only if the GPU can't be fixed; the processor takes about 20 minutes per image. <code>overwrite</code> (default <code>False</code>): <code>True</code> segments every round again, e.g. after changing <code>selected_diameter</code>.</dd>
         <dt>Writes</dt><dd><code>segmented\&lt;well&gt;\labels_&lt;well&gt;_round_000.tif</code>, …</dd>
       </dl>
-      <div class="callout note"><p>The first run on a computer downloads the SAM model (about 1 GB). Run <code>nvidia-smi</code> in PowerShell while it works to see GPU use. If it fails with <b>CUDA out of memory</b>, close any other notebook that has Cellpose loaded (each keeps its GPU memory until its kernel is restarted), restart this kernel and run 01 again.</p></div>
+      <div class="callout note"><p>The first run on a computer downloads the SAM model (about 1 GB). Run <code>nvidia-smi</code> in PowerShell while it works to see GPU use. If it fails with <b>CUDA out of memory</b>, close any other notebook that has Cellpose loaded (each keeps its GPU memory until its kernel is restarted), restart this kernel and run 01 again; it starts from the round it stopped on.</p></div>
     </article>
     <article class="nb">
       <div class="top"><span class="num">02</span><h3>Find transforms</h3></div>
       <dl>
         <dt>Does</dt><dd>Registers every round's segmentation to the anchor round (rigid: shift and rotation) and saves the transforms. The anchor round is the first round in <code>info_exp.csv</code>; to use another, add <code>"anchor_round": 1</code> to <code>experiment.json</code> (counting from 0, so 1 is the second round). Notebooks 03 and 06 use the same round.</dd>
-        <dt>You set</dt><dd><code>downscale_factor</code> (1 = full size; 2 if it runs out of memory on very large images).</dd>
+        <dt>You set</dt><dd><code>downscale_factor</code> (1 = full size; 2 if it runs out of memory on very large images). <code>overwrite</code> (default <code>False</code>): <code>False</code> aligns only rounds without a saved alignment and keeps the rest, including rounds you fixed in 03; <code>True</code> aligns every round again and replaces those fixes. If the rounds or the anchor round changed since the alignments were saved, 02 stops and asks for <code>overwrite = True</code>.</dd>
         <dt>Writes</dt><dd><code>output_df\tmat_&lt;well&gt;.npy</code>. Experiments run before this change have <code>tmat_&lt;well&gt;.pkl</code> instead; 03 and 06 still read those.</dd>
       </dl>
       <p>The last cells (“Optional - check the alignment in napari”) open the alignment viewer, the same one as 03, on the first well; skip them unless you want to look.</p>
@@ -350,7 +351,7 @@ total_area_DNA = R0_DNA_nuc_mean * nuc_area</pre><button type="button">Copy</but
       <dl>
         <dt>Does</dt><dd>Opens the alignment viewer in napari: the cell outlines of the anchor round (magenta) and of one other round (green). Up and Down (or ▲ ▼, or the Round list) change the round, Left and Right (◀ ▶, or the Well list) change the well, and Shift with an arrow jumps to the first or last. <em>Start from</em> chooses whether a round opens with its saved alignment or with none. To fix a round, click a cell in magenta, then the same cell in green (a click lands on the cell's centre), for at least 3 cells with two of them a third of the image apart; press Fit (Shift+F) to move green onto magenta, then Save (Shift+S). Undo (Ctrl+Z) removes the last click, and the text in the viewer says what to click next. Changing round or well forgets clicks that weren't saved. It also works before 02 has run, to align rounds entirely by hand.</dd>
         <dt>You set</dt><dd><code>well</code> (e.g. <code>'D03'</code>) and <code>round_name</code> (e.g. <code>"R1"</code>, as written in <code>info_exp.csv</code>): where the viewer opens; <code>round_name = None</code> opens the first round. Every round is aligned onto the anchor round, the same one 02 used, which can't be fixed itself.</dd>
-        <dt>Writes</dt><dd>Updates <code>output_df\tmat_&lt;well&gt;.npy</code> for each round you save, or creates it if 02 never ran; rounds nobody has aligned yet are marked, and 06 won't measure the well until they are. Rerun 06 afterwards.</dd>
+        <dt>Writes</dt><dd>Updates <code>output_df\tmat_&lt;well&gt;.npy</code> for each round you save, or creates it if 02 never ran; rounds nobody has aligned yet are marked, and 06 won't measure the well until they are. Run 06 afterwards with <code>overwrite = True</code>.</dd>
       </dl>
     </article>
     <article class="nb">
@@ -363,7 +364,7 @@ total_area_DNA = R0_DNA_nuc_mean * nuc_area</pre><button type="button">Copy</but
       <div class="top"><span class="num">06</span><h3>Calculate cell properties</h3></div>
       <dl>
         <dt>Does</dt><dd>Outlines every nucleus and a cytoplasmic ring around it on the anchor round, moves those outlines to where the cells sit in every other round (using the transforms from 02 or 03), and measures every channel on 00's images: area, shape, mean intensities, total nuclear protein and nuclear/cytoplasm ratios. Cells touching the image border, cells with no ring and cells that fall outside a round's image are left out. Several wells run at once, about 10–20 seconds per well.</dd>
-        <dt>You set</dt><dd><code>ring_width</code> and <code>ring_gap</code> (6 and 1): the ring reaches <code>ring_width</code> pixels out from the nucleus and starts <code>ring_gap + 1</code> pixels from its edge. Use the same values for experiments you want to compare.</dd>
+        <dt>You set</dt><dd><code>ring_width</code> and <code>ring_gap</code> (6 and 1): the ring reaches <code>ring_width</code> pixels out from the nucleus and starts <code>ring_gap + 1</code> pixels from its edge. Use the same values for experiments you want to compare. <code>overwrite</code> (default <code>False</code>): <code>True</code> measures every well again; use it after changing the ring settings, segmenting again in 01 or fixing an alignment in 03.</dd>
         <dt>Writes</dt><dd><code>cell_data\cell_data_&lt;well&gt;_df.csv</code>. The numbers differ slightly from versions before November 2026, so don't combine older and newer cell data in 07.</dd>
       </dl>
     </article>
