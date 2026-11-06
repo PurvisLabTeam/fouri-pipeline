@@ -1,12 +1,35 @@
 """Helpers for notebook 07 (cell data -> AnnData)."""
 
+from collections.abc import Sequence
+from enum import StrEnum
+
+import numpy as np
+import numpy.typing as npt
 import pandas as pd
+from scipy.signal import find_peaks
+from scipy.stats import gaussian_kde, zscore
+from skimage.filters import threshold_multiotsu, threshold_otsu
 
 from fouri.io import cell_data_path
 from fouri.report import say
 
 # column names notebook 07 has always used in fullest_df / adata.obs
 _OBS_NAMES = {"treatment_time": "treatment time"}
+
+_PRB_LO = "pRB_lo"
+_PRB_MID = "pRB_mid"
+_PRB_HI = "pRB_hi"
+
+_NO_LABEL = np.array(None)
+
+_Z_SCORE_THRESH = 3
+_OTSU_BINS = 1024
+
+
+class Threshold(StrEnum):
+    OTSU = "Otsu"
+    OTSU_2CUT = "Otsu, 2 cut"
+    VALLEY = "Valley"
 
 
 def build_fullest_df(exp):
@@ -23,7 +46,71 @@ def build_fullest_df(exp):
     fullest_df = pd.concat(frames, ignore_index=True)
     say(f"{len(fullest_df)} cells in {len(frames)} wells")
     fullest_df = fullest_df.drop(columns="Unnamed: 0", errors="ignore")
+    fullest_df = fullest_df.astype({col: str for col in metadata_obs_columns(exp) if col != "sample_ID"})
+    fullest_df["sample_ID"] = fullest_df["sample_ID"].astype("category")
     return fullest_df
+
+
+def threshold_labels(values: pd.Series, cutoffs: Sequence[float]) -> pd.Categorical:
+    cutoffs = sorted(cutoffs)
+    n_cutoffs = len(cutoffs)
+    if n_cutoffs == 1:
+        cutoff = cutoffs[0]
+        return pd.Categorical(
+            np.select([values < cutoff, values >= cutoff], [_PRB_LO, _PRB_HI], default=_NO_LABEL),
+            categories=[_PRB_LO, _PRB_HI],
+        )
+    if n_cutoffs == 2:
+        cut_lo = cutoffs[0]
+        cut_hi = cutoffs[1]
+        return pd.Categorical(
+            np.select(
+                [values < cut_lo, (values >= cut_lo) & (values <= cut_hi), values > cut_hi],
+                [_PRB_LO, _PRB_MID, _PRB_HI],
+                default=_NO_LABEL,
+            ),
+            categories=[_PRB_LO, _PRB_MID, _PRB_HI],
+        )
+    raise ValueError(f"Invalid number of cutoffs: {n_cutoffs}. Use 1 or 2 values only.")
+
+
+def middle_values(values: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    z_scores = zscore(values, nan_policy="omit")
+    mask = np.abs(z_scores) <= _Z_SCORE_THRESH
+    return values[mask]
+
+
+def _smoothed_curve(values: npt.NDArray[np.float64]) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    smoothed = gaussian_kde(values)
+    positions = np.linspace(start=np.min(values), stop=np.max(values), num=2000)
+    heights = smoothed(positions)
+    return positions, heights
+
+
+def curve_range(values: npt.NDArray[np.float64]) -> tuple[float, float]:
+    trimmed = middle_values(values)
+    positions, heights = _smoothed_curve(trimmed)
+    tallest = np.max(heights)
+    positions = positions[heights >= 0.01 * tallest]
+    return float(positions[0]), float(positions[-1])
+
+
+def suggest_cutoffs(values: npt.NDArray[np.float64]) -> dict[Threshold, list[float]]:
+    values = middle_values(values)
+
+    cutoffs = {}
+    cutoffs[Threshold.OTSU] = [float(threshold_otsu(values, nbins=_OTSU_BINS))]
+    cutoffs[Threshold.OTSU_2CUT] = [float(val) for val in threshold_multiotsu(values, classes=3, nbins=_OTSU_BINS)]
+
+    positions, heights = _smoothed_curve(values)
+    peak_positions, _ = find_peaks(heights)
+    peaks = sorted((int(peak) for peak in peak_positions), reverse=True, key=lambda peak: heights[peak])
+    if len(peaks) > 1:
+        left, right = sorted(peaks[:2])  # the two tallest, left to right
+        cutoff_position = left + np.argmin(heights[left : right + 1])
+        cutoffs[Threshold.VALLEY] = [float(positions[cutoff_position])]
+
+    return cutoffs
 
 
 def metadata_obs_columns(exp):
