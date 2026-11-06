@@ -93,5 +93,8 @@ files = ["src/fouri"]
 
 [[tool.mypy.overrides]]
 # These ship no type information and have no stub package.
-module = ["pystackreg", "pystackreg.*", "cellpose", "cellpose.*", "ipywidgets", "ipywidgets.*", "napari", "napari.*"]
+module = [
+    "pystackreg", "pystackreg.*", "cellpose", "cellpose.*", "ipywidgets", "ipywidgets.*", "napari", "napari.*",
+    "plotly", "plotly.*",
+]
 ignore_missing_imports = true
