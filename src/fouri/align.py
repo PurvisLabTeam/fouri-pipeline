@@ -2,22 +2,19 @@
 
 import functools
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import cv2
 import numpy as np
 import numpy.typing as npt
+import pandas as pd
 from pystackreg import StackReg
 from skimage.transform import EuclideanTransform, downscale_local_mean
 from tifffile import imread
 
 from fouri.config import Experiment
-from fouri.io import label_paths, load_transforms, read_labels, read_round_table, save_transforms
+from fouri.io import label_paths, load_transforms, read_round_table, save_transforms
 from fouri.parallel import parallel_map
-
-if TYPE_CHECKING:
-    import napari
-    from napari.layers import Image
 
 
 def register_round(
@@ -64,22 +61,6 @@ def move_labels(labels: npt.NDArray[Any], transform: npt.NDArray[np.float64]) ->
         labels.shape[::-1],
         flags=cv2.INTER_NEAREST | cv2.WARP_INVERSE_MAP,
     ).astype(labels.dtype)
-
-
-def apply_transforms(matrices: npt.NDArray[Any], images: npt.NDArray) -> npt.NDArray[Any]:
-    """Warp each image with the matrix at the same position in ``matrices``.
-
-    For the visual check at the end of notebook 02; returns warped images as
-    input type. Works on a single matrix or a stack.
-    """
-    return np.array(
-        [
-            cv2.warpAffine(
-                image.astype(np.float32), matrix[:2], image.shape[::-1], flags=cv2.INTER_NEAREST | cv2.WARP_INVERSE_MAP
-            ).astype(image.dtype)
-            for image, matrix in zip(images, matrices, strict=True)
-        ]
-    )
 
 
 def find_transforms(
@@ -148,40 +129,23 @@ def find_transforms(
     return transforms
 
 
-def alignment_preview(
-    exp: Experiment, well: str, downscale_factor: int = 1
-) -> tuple[npt.NDArray[Any], npt.NDArray[Any], npt.NDArray[Any]]:
-    before = read_labels(exp.segmented, well)
-    before = before[:, ::downscale_factor, ::downscale_factor] > 0
-
-    transforms = load_transforms(exp, well)
-    transforms = rescale_transform(transforms, 1 / downscale_factor)
-    after = apply_transforms(transforms, before)
-    return before[exp.anchor_round], before, after
-
-
-def manual_alignment_images(
-    exp: Experiment, well: str, round_name: str
-) -> tuple[int, npt.NDArray[Any], npt.NDArray[Any]]:
-    table = read_round_table(exp, well)
-    matches = table[table["round_name"] == round_name]["round_index"]
+def round_index_of(round_table: pd.DataFrame, round_name: str, anchor_round: int, well: str) -> int:
+    matches = round_table[round_table["round_name"] == round_name]["round_index"]
 
     if matches.empty:
         raise ValueError(
             f"Round {round_name} was not found in the round table for well {well}. "
-            f"The table has the following rounds: {', '.join(str(name) for name in table['round_name'].unique())}"
+            "The table has the following rounds: "
+            f"{', '.join(str(name) for name in round_table['round_name'].unique())}"
         )
 
     round_index = int(matches.iloc[0])
-    if round_index == exp.anchor_round:
+    if round_index == anchor_round:
         raise ValueError(
             f"{round_name} is the anchor round, which the other rounds are aligned onto, so it has nothing "
             "to correct. Set round_name to the round to correct."
         )
-
-    anchor_labels, round_labels = read_labels(exp.segmented, well, [exp.anchor_round, round_index])
-
-    return round_index, anchor_labels > 0, round_labels > 0
+    return round_index
 
 
 def fit_hand_alignment(
@@ -204,43 +168,6 @@ def fit_hand_alignment(
     return transform.params, mismatch
 
 
-def start_hand_alignment(viewer: "napari.Viewer", anchor_layer: "Image", round_layer: "Image") -> None:
-    from napari.layers.base._base_constants import ActionType
-
-    clicks = {"size": 40, "canvas_size_limits": (12, 30), "ndim": 2}
-    anchor_clicks = viewer.add_points(name="Anchor clicks", face_color="yellow", **clicks)
-    round_clicks = viewer.add_points(name="Round clicks", face_color="cyan", affine=round_layer.affine, **clicks)
-    viewer.text_overlay.visible = True
-
-    def wait_for(layer: Any, message: str) -> None:
-        viewer.layers.selection.active = layer
-        layer.mode = "add"
-        viewer.text_overlay.text = message
-
-    def after_click(event: Any) -> None:
-        if event.action != ActionType.ADDED:
-            return
-        if event.source is anchor_clicks:
-            wait_for(round_clicks, "Now click the same cell in the round to fix (green).")
-            return
-        fit = fit_hand_alignment(anchor_clicks.data, round_clicks.data)
-        if fit is None:
-            wait_for(anchor_clicks, "Click a second cell in the anchor round (magenta), far from the first.")
-            return
-        matrix, mismatch = fit
-        round_layer.affine = matrix
-        round_clicks.affine = matrix
-        wait_for(
-            anchor_clicks,
-            f"{len(round_clicks.data)} pairs, cells {mismatch:.1f} pixels apart on average. Click another cell "
-            "in the anchor round, or run the next cell when the cells line up.",
-        )
-
-    anchor_clicks.events.data.connect(after_click)
-    round_clicks.events.data.connect(after_click)
-    wait_for(anchor_clicks, "Click a cell in the anchor round (magenta).")
-
-
 def _swap_xy(matrix: npt.NDArray[Any]) -> npt.NDArray[Any]:
     swap_order = [1, 0, 2]
     return matrix[np.ix_(swap_order, swap_order)]
@@ -250,6 +177,16 @@ def save_manual_transform(
     exp: Experiment, well: str, round_index: int, napari_affine: npt.NDArray[np.float64]
 ) -> Path:
     manual = np.linalg.inv(_swap_xy(napari_affine))
-    transforms = load_transforms(exp, well)
+    try:
+        transforms = load_transforms(exp, well)
+    except FileNotFoundError:
+        n_rounds = read_round_table(exp, well)["round_index"].nunique()
+        transforms = np.full((n_rounds, 3, 3), np.nan)
+        transforms[exp.anchor_round] = np.eye(3)
     transforms[round_index] = manual
     return save_transforms(exp, well, transforms)
+
+
+def transform_to_napari(transform: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    """Return saved to on-screen position. @TODO."""
+    return _swap_xy(np.linalg.inv(transform))
