@@ -343,14 +343,14 @@ total_area_DNA = R0_DNA_nuc_mean * nuc_area</pre><button type="button">Copy</but
         <dt>You set</dt><dd><code>downscale_factor</code> (1 = full size; 2 if it runs out of memory on very large images).</dd>
         <dt>Writes</dt><dd><code>output_df\tmat_&lt;well&gt;.npy</code>. Experiments run before this change have <code>tmat_&lt;well&gt;.pkl</code> instead; 03 and 06 still read those.</dd>
       </dl>
-      <p>The last cells (“Optional - test transformations”) open napari to inspect the alignment of the first well; skip them unless you want to look.</p>
+      <p>The last cells (“Optional - check the alignment in napari”) open the alignment viewer, the same one as 03, on the first well; skip them unless you want to look.</p>
     </article>
     <article class="nb">
       <div class="top"><span class="num">03</span><h3>Fix an alignment by hand</h3><span class="tag">only if needed</span></div>
       <dl>
-        <dt>Does</dt><dd>Opens the anchor round (magenta) and the round to fix (green) of one well in napari. You click a cell in magenta, then the same cell in green, for at least 3 cells spread across the image; the green round moves onto the magenta one as you go, and the top of the viewer says which round to click next. Then it replaces that round's transform, and the last cells (optional) show every round with the saved transforms.</dd>
-        <dt>You set</dt><dd><code>well</code> (e.g. <code>'D03'</code>) and <code>round_name</code>, the round to fix as written in <code>info_exp.csv</code> (e.g. <code>"R1"</code>). It is aligned onto the anchor round, the same one 02 used, which can't be fixed itself.</dd>
-        <dt>Writes</dt><dd>Updates <code>output_df\tmat_&lt;well&gt;.npy</code>; rerun 06 afterwards.</dd>
+        <dt>Does</dt><dd>Opens the alignment viewer in napari: the cell outlines of the anchor round (magenta) and of one other round (green). Up and Down (or ▲ ▼, or the Round list) change the round, Left and Right (◀ ▶, or the Well list) change the well, and Shift with an arrow jumps to the first or last. <em>Start from</em> chooses whether a round opens with its saved alignment or with none. To fix a round, click a cell in magenta, then the same cell in green (a click lands on the cell's centre), for at least 3 cells with two of them a third of the image apart; press Fit (Shift+F) to move green onto magenta, then Save (Shift+S). Undo (Ctrl+Z) removes the last click, and the text in the viewer says what to click next. Changing round or well forgets clicks that weren't saved. It also works before 02 has run, to align rounds entirely by hand.</dd>
+        <dt>You set</dt><dd><code>well</code> (e.g. <code>'D03'</code>) and <code>round_name</code> (e.g. <code>"R1"</code>, as written in <code>info_exp.csv</code>): where the viewer opens; <code>round_name = None</code> opens the first round. Every round is aligned onto the anchor round, the same one 02 used, which can't be fixed itself.</dd>
+        <dt>Writes</dt><dd>Updates <code>output_df\tmat_&lt;well&gt;.npy</code> for each round you save, or creates it if 02 never ran; rounds nobody has aligned yet are marked, and 06 won't measure the well until they are. Rerun 06 afterwards.</dd>
       </dl>
     </article>
     <article class="nb">

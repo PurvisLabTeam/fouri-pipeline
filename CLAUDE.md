@@ -31,8 +31,9 @@ which ship no type information. `fouri` is installed editable, so changes under 
 kernel restart.
 
 Not every notebook runs headless: `01` needs a CUDA GPU (it raises if Cellpose can't use one, unless its
-`allow_cpu` setting is `True`: about 20 minutes per image on the processor); `03` is hand work in napari;
-`05` is not used for now (see the file table); `02` ends with an optional napari check; `07` has two alternative threshold
+`allow_cpu` setting is `True`: about 20 minutes per image on the processor); `03` is hand work in napari and
+`02` ends with an optional check, both in the alignment viewer (`fouri.viewers.AlignmentViewer`);
+`05` is not used for now (see the file table); `07` has two alternative threshold
 cells (one cutoff or two) meant to be run one or the other, so a top-to-bottom run keeps the two-cutoff labels.
 
 ## experiment.json drives every notebook
@@ -65,7 +66,7 @@ the writing and the reading side, so change them together.
 | 00 | `output_df/round_table_{well}.csv`: one row per round × channel listed in `info_exp.csv`, with its ND2 file, acquisition settings, `is_align_channel` and `raw_file_name`. `output_images/{well}/Round_{round_name}_well{well}_{signal}.tif` (the `raw_file_name`): every channel of every round, cropped to the smallest image, with an OME header (pixel size, wavelengths, exposure); 0.3–0.9 GB per well | table: 01, 02, 03, 06; images: 01 (the `is_align_channel` ones), 06 (all) |
 | 01 | `segmented/{well}/labels_{well}_round_{NNN}.tif` (Cellpose-SAM) | 02, 03, 06 (anchor round only) |
 | 02 | `output_df/tmat_{well}.npy`: rigid transforms (rounds × 3 × 3) indexed by `round_index`, identity for the anchor | 03, 06 |
-| 03 | replaces one entry of `tmat_{well}.npy` with a hand alignment: matching cells clicked in napari (`fouri.align.start_hand_alignment`) | 06 |
+| 03 | replaces one entry of `tmat_{well}.npy` per saved round with a hand alignment: matching cells clicked in the alignment viewer (`fouri.viewers.AlignmentViewer`); creates the file if 02 never ran | 06 |
 | 04 | removed: 06 moves the anchor's outlines into each round instead of measuring aligned copies of the images | — |
 | 05 | not used for now: it draws masks on 04's aligned images and its masks never removed cells (07 dropped `nuc_mask`/`ring_mask`). Masks return with the artifact U-Net, and will remove the cells they cover | — |
 | 06 | `cell_data/cell_data_{well}_df.csv` (no row-number column; older ones have `Unnamed: 0`) | 07 |
@@ -85,7 +86,10 @@ older one.
 
 The transforms file is only read and written through `fouri.io.load_transforms` and `save_transforms`
 (the name lives in `tmat_path`). Reading falls back to the `tmat_{well}.pkl` that 02 and 03 wrote before
-the switch to `.npy`, so older experiments still align without rerunning 02.
+the switch to `.npy`, so older experiments still align without rerunning 02. A round nobody has aligned is
+stored as a 3 × 3 matrix of NaN (the identity at the anchor): `align.save_manual_transform` creates the file
+that way when a round is aligned by hand before 02 has run, and `measure_well` refuses a well with any NaN
+round, naming the rounds.
 
 ## Inputs, naming and couplings
 
@@ -138,10 +142,19 @@ the switch to `.npy`, so older experiments still align without rerunning 02.
   notebook is run needs both updated. Messages printed by `fouri` say in plain words what to do next.
 - Logic used by more than one notebook goes in `fouri`, not copied between notebooks. Notebooks are
   moving towards settings, one `fouri` call per step, and displays (napari, plots); 00 to 03 and 06 have
-  moved, into `fouri/preprocess.py`, `segment.py`, `align.py` and `measure.py`. Napari, torch and Cellpose
-  are imported inside the functions that use them, so importing `fouri` stays fast.
-- 03 no longer uses the Affinder plugin: Affinder 0.5.0 calls `viewer._canvas_size`, which napari 0.9
-  removed, so its Start button fails.
+  moved, into `fouri/preprocess.py`, `segment.py`, `align.py` and `measure.py`. Torch and Cellpose are
+  imported inside the functions that use them, so importing `fouri` stays fast; napari is imported at the
+  top of `fouri/viewers/` only, which nothing else in `fouri` imports.
+- Hand-work viewers live in `fouri/viewers/`. `base.BaseViewer` (abstract) opens napari with a docked panel:
+  well and round dropdowns, a ▲▼◀▶ pad, the viewer's own tools, Undo and Save, and a shortcut list; it binds
+  the keys in `KeyboardShortcuts` (Up/Down round, Left/Right well, Shift for first/last, Ctrl+Z, Shift+S;
+  napari 0.9 already uses Ctrl+S and most bare letters) and shows prompts in the canvas text overlay.
+  Subclasses fill hooks (`_build_layers`, `_tool_widgets`, `_round_choices`, `_load_well`, `_load_round`,
+  `save`, `undo`, `_extra_keys`). `alignment.AlignmentViewer` is 02's optional check and 03: it starts each
+  round from its saved transform or from none, clicks snap to cell centres, Fit (Shift+F) needs 3 pairs with
+  two clicks a third of the image apart. A failed well or round switch leaves the old one on screen and puts
+  the reason in the prompt. 03 no longer uses Affinder, whose 0.5.0 calls `viewer._canvas_size`, removed in
+  napari 0.9.
 - Work run side by side: `fouri.parallel.parallel_map(function, items, …)` runs a top-level function (or a
   `functools.partial` of one) over items in spawned processes with a progress bar, results in order; 00, 02
   and 06 use it. `fouri.worker_count()` picks how many at once on the current PC (memory at

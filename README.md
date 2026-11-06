@@ -75,9 +75,13 @@ Notebook 01 performs the segmentation with Cellpose-SAM on the GPU. It stops wit
 `allow_cpu` is set to `True` (about 20 minutes per image instead of 1). Experiments run through an older version of 00 need 00
 run again before 01.
 
-Notebook 02 uses the segmentation masks to determine the transformation required to align all channels of the images
+Notebook 02 uses the segmentation masks to determine the transformation required to align all channels of the images.
+Its last cells (optional) open the alignment viewer to check the result.
 
-Notebook 03 is only used if the automatic transformations are incorrect, usually as a result of underlying issues with the data
+Notebook 03 opens the alignment viewer: step through the wells and rounds to check the alignment, and fix a round by
+clicking the same cells in the anchor round and in that round, then pressing Fit and Save. It also works before 02 has
+run, to align rounds entirely by hand. Rounds nobody has aligned are marked as such, and 06 won't measure a well until
+all its rounds are aligned.
 
 There is no notebook 04 any more: instead of saving aligned copies of every image, 06 moves each cell's outline into
 every round.
