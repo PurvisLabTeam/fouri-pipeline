@@ -65,7 +65,7 @@ the writing and the reading side, so change them together.
 |------|--------|---------|
 | 00 | `output_df/round_table_{well}.csv`: one row per round × channel listed in `info_exp.csv`, with its ND2 file, acquisition settings, `is_align_channel` and `raw_file_name`. `output_images/{well}/Round_{round_name}_well{well}_{signal}.tif` (the `raw_file_name`): every channel of every round, cropped to the smallest image, with an OME header (pixel size, wavelengths, exposure); 0.3–0.9 GB per well | table: 01, 02, 03, 06; images: 01 (the `is_align_channel` ones), 06 (all) |
 | 01 | `segmented/{well}/labels_{well}_round_{NNN}.tif` (Cellpose-SAM) | 02, 03, 06 (anchor round only) |
-| 02 | `output_df/tmat_{well}.npy`: rigid transforms (rounds × 3 × 3) indexed by `round_index`, identity for the anchor | 03, 06 |
+| 02 | `output_df/tmat_{well}.npy`: rigid transforms (rounds × 3 × 3) indexed by `round_index`, identity for the anchor; found on the outlines at half size by default (`downscale_factor` 2: within 0.27 px of full size on the local wells, 4× faster) | 03, 06 |
 | 03 | replaces one entry of `tmat_{well}.npy` per saved round with a hand alignment: matching cells clicked in the alignment viewer (`fouri.viewers.AlignmentViewer`); creates the file if 02 never ran | 06 |
 | 04 | removed: 06 moves the anchor's outlines into each round instead of measuring aligned copies of the images | — |
 | 05 | not used for now: it draws masks on 04's aligned images and its masks never removed cells (07 dropped `nuc_mask`/`ring_mask`). Masks return with the artifact U-Net, and will remove the cells they cover | — |
@@ -75,8 +75,8 @@ the writing and the reading side, so change them together.
 
 `NNN` is the 0-based `round_index`, zero-padded to 3 digits.
 
-File names live in `fouri/io.py` (`round_table_path`, `tmat_path`, `cell_data_path`, `label_paths`), with the
-functions that read and write those files.
+File names live in `fouri/io.py` (`round_table_path`, `tmat_path`, `cell_data_path`, `label_paths`,
+`label_path`, `fullest_df_path`, `adata_path`), with the functions that read and write those files.
 
 The round table is only read through `fouri.io.read_round_table`. Reading falls back to the `df_{well}.pkl`
 that 00 wrote before the switch, renaming `nameRound` → `round_name`, `alignRound` → `round_index` and
@@ -134,10 +134,21 @@ stopped run never leaves a half-written TIFF that would count as done.
 - `features.build_fullest_df` joins each well's CSV (via `io.cell_data_path`, dropping an old `Unnamed: 0`
   column if present) with its `well_metadata`; `treatment_time` is renamed
   `treatment time` in `fullest_df` and `adata.obs` (`_OBS_NAMES`), the name 07 has always used.
+  `sample_ID` stays a category of numbers (08 selects samples with `isin([1, 2, …])`), other metadata text.
 - `derived_features` are `pandas.eval` formulas applied in order, so one may use an earlier one; a formula
   naming a missing column is skipped with a printed message rather than raising.
-- 07 puts metadata in `.obs`, z-scores the numeric features into `.X`, drops any feature column with NaN,
-  and subsamples with sketchKH grouped by `sample_ID`.
+- 07's pRB thresholds are its own cells, unchanged until the app. `fouri.adata.build_adata(exp, fullest_df)`
+  then builds the AnnData: `.obs` = label, well, metadata, centroid, bbox, orientation and `pRB_label` if a
+  threshold ran; `.X` = every other number column z-scored, a column left with NaN (a missing or infinite
+  value, or one value in every cell) dropped and named (old 07 dropped them silently: Clara's 1.3 file lost
+  all 22 `_nuc_cyto_ratio` features to a few cells with a ring mean of 0); `.var` = kind (channel, shape,
+  derived), round, signal, measure and acquisition from the round tables (a value differing between wells
+  left empty and named); `.uns` = setup-form details, condition columns, derived formulas, plate, microscope,
+  round tables. It saves `fullest_df.csv` (no row-number column) and `standard_adata.h5ad`. 07 then
+  subsamples with sketchKH grouped by `sample_ID` (moves to 08 when 08 moves into `fouri`).
+- For the app: `features.suggest_cutoffs` (Otsu, two-cut Otsu, the valley of the smoothed curve, on cells
+  within 3 SD of the mean), `features.threshold_labels` and `plots.plot_threshold_histogram` (plotly, cut-off
+  lines draggable in a web page). 07 doesn't use them yet.
 
 ## Dependencies
 
@@ -155,7 +166,8 @@ stopped run never leaves a half-written TIFF that would count as done.
   are rewritten once at the end, before the merge into main.
 - Logic used by more than one notebook goes in `fouri`, not copied between notebooks. Notebooks are
   moving towards settings, one `fouri` call per step, and displays (napari, plots); 00 to 03 and 06 have
-  moved, into `fouri/preprocess.py`, `segment.py`, `align.py` and `measure.py`. Torch and Cellpose are
+  moved, into `fouri/preprocess.py`, `segment.py`, `align.py` and `measure.py`, and 07's AnnData into
+  `adata.py`; figures go in `plots.py` (plotly). Torch and Cellpose are
   imported inside the functions that use them, so importing `fouri` stays fast; napari is imported at the
   top of `fouri/viewers/` only, which nothing else in `fouri` imports.
 - Hand-work viewers live in `fouri/viewers/`. `base.BaseViewer` (abstract) opens napari with a docked panel:
