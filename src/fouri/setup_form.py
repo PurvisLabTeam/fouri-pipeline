@@ -168,7 +168,9 @@ class SetupForm:
 
     # -- layout -----------------------------------------------------------------
     def widget(self):
-        h = lambda text: w.HTML(f"<h3 style='margin:12px 0 4px'>{text}</h3>")
+        def h(text):
+            return w.HTML(f"<h3 style='margin:12px 0 4px'>{text}</h3>")
+
         return w.VBox(
             [
                 h("1. Experiment folder"),
@@ -182,7 +184,8 @@ class SetupForm:
                 h("3. Wells and conditions"),
                 w.HTML(
                     "Grey wells have no ND2 files. Coloured wells are included; the colour is the sample_ID. "
-                    "To set a condition: switch to <b>Select wells</b>, click wells, fill in the fields, then <b>Apply</b>."
+                    "To set a condition: switch to <b>Select wells</b>, click wells, "
+                    "fill in the fields, then <b>Apply</b>."
                 ),
                 self.mode,
                 self.plate,
@@ -193,7 +196,7 @@ class SetupForm:
                 self.condition_checks,
                 w.HTML("<b>Or import a metadata CSV</b> (one row per well; only <code>well</code> is required):"),
                 w.HBox([self.csv_path, self.import_btn, self.export_btn]),
-                h("4. Derived features for notebook 07"),
+                h("4. Derived features"),
                 self.features,
                 self.channels_html,
                 h("5. Check and save"),
@@ -389,7 +392,7 @@ class SetupForm:
 
     def refresh(self):
         table = self.table() if self.included else None
-        ids = dict(zip(table["well"], table["sample_ID"])) if table is not None else {}
+        ids = dict(zip(table["well"], table["sample_ID"], strict=True)) if table is not None else {}
         id_list = sorted(set(ids.values()), key=str)
         colors = {sid: SAMPLE_COLORS[i % len(SAMPLE_COLORS)] for i, sid in enumerate(id_list)}
         for well, b in self.buttons.items():
@@ -477,7 +480,11 @@ class SetupForm:
         warn = [m for lvl, m in issues if lvl == "warning"]
         cond_cols = [c for c in self.condition_columns if c in table.columns]
         blank = (
-            [wl for wl, row in zip(table["well"], table[cond_cols].itertuples(index=False)) if not any(map(str, row))]
+            [
+                wl
+                for wl, row in zip(table["well"], table[cond_cols].itertuples(index=False), strict=True)
+                if not any(map(str, row))
+            ]
             if cond_cols
             else []
         )
@@ -488,7 +495,7 @@ class SetupForm:
             f"Saved {cfg_path}" + ("<br>Warnings:<br>" + "<br>".join(html.escape(m) for m in warn) if warn else ""),
         )
         with self.out:
-            print("Put this line at the top of each pipeline notebook:")
+            print("To run the pipeline on this experiment, set CONFIG to:")
             print(f"CONFIG = r'{cfg_path}'")
 
     def _msg(self, level, text):
