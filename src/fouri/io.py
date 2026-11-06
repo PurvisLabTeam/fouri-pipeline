@@ -54,6 +54,14 @@ def _normalize_exposure(exposure: float | None, exposure_time_unit: str | None) 
     return exposure * factor
 
 
+def fullest_df_path(exp: Experiment) -> Path:
+    return Path(exp.base_dir) / "fullest_df.csv"
+
+
+def adata_path(exp: Experiment) -> Path:
+    return Path(exp.base_dir) / "standard_adata.h5ad"
+
+
 def read_info_file(exp: Experiment) -> pd.DataFrame:
     info = Path(exp.info_file)
     df = pd.read_csv(info)
