@@ -55,10 +55,19 @@ def rescale_transform(matrix: npt.NDArray[np.float64], factor: float) -> npt.NDA
     return rescaled
 
 
-def move_labels(labels: npt.NDArray[Any], transform: npt.NDArray[np.float64]) -> npt.NDArray[Any]:
+def move_to_round(labels: npt.NDArray[Any], transform: npt.NDArray[np.float64]) -> npt.NDArray[Any]:
     return cv2.warpAffine(
         labels.astype(np.float32),
         np.linalg.inv(transform)[:2],
+        labels.shape[::-1],
+        flags=cv2.INTER_NEAREST | cv2.WARP_INVERSE_MAP,
+    ).astype(labels.dtype)
+
+
+def move_to_anchor(labels: npt.NDArray[Any], transform: npt.NDArray[np.float64]) -> npt.NDArray[Any]:
+    return cv2.warpAffine(
+        labels.astype(np.float32),
+        transform[:2],
         labels.shape[::-1],
         flags=cv2.INTER_NEAREST | cv2.WARP_INVERSE_MAP,
     ).astype(labels.dtype)

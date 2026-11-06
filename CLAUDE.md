@@ -117,9 +117,12 @@ stopped run never leaves a half-written TIFF that would count as done.
   `ring_area`). `metadata.channel_names` builds its suggestions with the same `feature_prefix`.
 - Cells are outlined once, on the anchor round's segmentation (`exp.anchor_round`, so 02, 03 and 06
   cannot disagree). `fouri.measure.measure_well` moves those outlines and their rings into each other
-  round with `align.move_labels` (inverse of the round's transform, nearest pixel, cv2), blanks pixels
-  where every channel of the round is 0 (no image data in the montage), and measures 00's TIFFs. Cells
-  missing from any round's table (moved outside the image, or no ring) are dropped by the inner joins.
+  round with `align.move_to_round` (inverse of the round's transform, nearest pixel, cv2; `move_to_anchor`
+  goes the other way), blanks pixels where every channel of the round is 0 (no image data in the montage),
+  and measures 00's TIFFs. A cell is dropped if its nucleus or ring, in any round, falls outside the image
+  or on such a blank area, or within 1 px of one: each round's has-data area is moved into the anchor's
+  frame, the areas are combined, and the result is eroded once (3 × 3). `measure_well` returns the count
+  with its path and `measure_wells` prints it per well. Cells with no ring are dropped by the inner joins.
 - Cytoplasmic rings come from `fouri.rings.make_rings(labels, width, gap)` (06's `ring_width`/`ring_gap`
   settings, 6 and 1): a pixel joins a ring only if exactly one nucleus lies within `width`, so pixels two
   cells could claim are dropped. cv2 dilate/erode, identical to the original skimage version.
@@ -183,9 +186,12 @@ On Omar's workstation, `~/data/4i_refactor_test/experiment.json` is a one-well (
 `old/cell_data/cell_data_B02_df.csv` against `~/data/4i_refactor_test/cell_data/cell_data_B02_df.csv`.
 
 `~/data/4i_local_test/experiment.json` is the 5-well experiment (B02, B09, C02, E02, E09) run through the
-new 00–06; its outputs are safe to overwrite. Its segmentation is a newer Cellpose run than `old/`, so cell
-numbers don't match the old tables. To compare 06 with `old/cell_data/cell_data_B02_df.csv`, use a scratch
-experiment whose `segmented` is `old/segmented`, whose `output_df` holds the new `round_table_B02.csv` plus
-`old/output_df/tmat_B02.pkl`, and whose `output_images` is the local test's. Expected (checked 2026-11-05):
-same 5,388 cells and columns, shape and R0 nucleus means identical, R0 ring means identical except rings on
-no-data pixels; rounds 1–5 away from the edge differ by a median 0.3 % (nuclei) and 0.4 % (rings).
+new 00–06; its outputs are safe to overwrite. Its segmentation is Cellpose-SAM, while `old/` is Cellpose
+2.0.5's `cyto` model run on the processor, so cell numbers don't match the old tables. To compare 06 with
+`old/cell_data/cell_data_B02_df.csv`, use a scratch experiment whose `segmented` is `old/segmented`, whose
+`output_df` holds the new `round_table_B02.csv` plus `old/output_df/tmat_B02.pkl`, and whose `output_images`
+is the local test's. Expected (checked 2026-11-06): 5,324 of the old 5,388 cells (the edge rule drops 83, 19
+of which the old table already lacked); the same columns except `nuc_mask`/`ring_mask` (gone) and
+`major_axis_length`/`minor_axis_length` (now `axis_major_length`/`axis_minor_length`); shape columns and
+every R0 value identical; rounds 1–5 differ by a median 0.3 % (nuclei) and 0.4 % (rings), worst about 16 %
+and 26 %.
