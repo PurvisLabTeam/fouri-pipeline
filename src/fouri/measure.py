@@ -33,6 +33,17 @@ def measure_well(exp: Experiment, well: str, ring_width: int = 6, ring_gap: int 
     round_table = read_round_table(exp, well)
     require_raw_files(round_table, well)
     transforms = load_transforms(exp, well)
+    unaligned = set(np.flatnonzero(np.isnan(transforms).any(axis=(1, 2))).tolist())
+    unaligned_round_names = [
+        str(row.round_name)
+        for row in round_table[round_table["is_align_channel"]].sort_values(by="round_index").itertuples()
+        if row.round_index in unaligned
+    ]
+    if unaligned_round_names:
+        raise ValueError(
+            f"Well {well}: the following rounds have not been aligned yet: {', '.join(unaligned_round_names)}. "
+            "Align these rounds before measuring."
+        )
     labels = read_labels(exp.segmented, well, [exp.anchor_round])[0]
     cleaned = clear_border(labels)
     rings = make_rings(cleaned, ring_width, ring_gap)
