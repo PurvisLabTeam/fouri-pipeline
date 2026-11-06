@@ -19,13 +19,15 @@ MIN_CPU_FREE = 2  # Minimum number of cpus to keep available to the OS
 def parallel_map[T, R](
     function: Callable[[T], R], items: Sequence[T], *, desc: str, unit: str, n_workers: int | None = None
 ) -> list[R]:
-    n_workers = n_workers if n_workers is not None else worker_count()
+    if not items:
+        return []
+    n_workers = min(n_workers, len(items)) if n_workers is not None else worker_count(max_count=len(items))
     with ProcessPoolExecutor(max_workers=n_workers, mp_context=get_context("spawn")) as executor:
         results = executor.map(function, items)
         return list(progress(results, desc=desc, unit=unit, total=len(items)))
 
 
-def worker_count(min_count=1):
+def worker_count(min_count=1, max_count=None):
     mem_available = psutil.virtual_memory().available
     cores = physical if (physical := psutil.cpu_count(logical=False)) is not None else os.cpu_count()
 
@@ -45,6 +47,10 @@ def worker_count(min_count=1):
     else:
         workers = raw_min
         bottleneck = "cpu" if workers == cpu_bound else "memory"
+
+    # no more processes than jobs to run (max_count of 0 or less is ignored)
+    if max_count is not None and 0 < max_count < workers:
+        workers = max_count
 
     print(
         f"Running {workers} job(s) in parallel (limited by {bottleneck}: {_to_gb(mem_available):.1f}GB "
