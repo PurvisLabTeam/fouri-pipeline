@@ -75,7 +75,7 @@ def move_to_anchor(labels: npt.NDArray[Any], transform: npt.NDArray[np.float64])
 
 def find_transforms(
     exp: Experiment,
-    downscale_factor: int = 1,
+    downscale_factor: int = 2,
     n_workers: int | None = None,
     overwrite: bool = False,
 ) -> dict[str, npt.NDArray[np.float64]]:
