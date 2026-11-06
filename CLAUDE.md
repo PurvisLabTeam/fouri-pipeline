@@ -149,9 +149,10 @@ stopped run never leaves a half-written TIFF that would count as done.
 
 ## Writing for this repo
 
-- The readers are lab members, not programmers. `README.md` and `docs/pipeline_guide.html` (a
-  step-by-step guide opened in a browser) describe the same workflow; a change to setup or to how a
-  notebook is run needs both updated. Messages printed by `fouri` say in plain words what to do next.
+- The readers are lab members, not programmers. Messages printed by `fouri` say in plain words what to
+  do next. During the refactor (the `fouri-refactor` branch) the step-by-step browser guide
+  (`docs/pipeline_guide.html`, still on main) is removed and `README.md` is not updated per change: both
+  are rewritten once at the end, before the merge into main.
 - Logic used by more than one notebook goes in `fouri`, not copied between notebooks. Notebooks are
   moving towards settings, one `fouri` call per step, and displays (napari, plots); 00 to 03 and 06 have
   moved, into `fouri/preprocess.py`, `segment.py`, `align.py` and `measure.py`. Torch and Cellpose are
