@@ -16,13 +16,28 @@ from fouri.config import Experiment
 from fouri.io import cell_data_path, load_transforms, read_labels, read_round_table, require_raw_files
 from fouri.metadata import feature_prefix
 from fouri.parallel import parallel_map
+from fouri.report import say, say_skipped
 from fouri.rings import make_rings
 
 
-def measure_wells(exp: Experiment, ring_width: int = 6, ring_gap: int = 1, n_workers: int | None = None) -> list[Path]:
+def measure_wells(
+    exp: Experiment,
+    ring_width: int = 6,
+    ring_gap: int = 1,
+    n_workers: int | None = None,
+    overwrite: bool = False,
+) -> list[Path]:
+    """Measure every well without cell data (every well with overwrite); return the CSVs written."""
+    worklist = [well for well in exp.well_list if overwrite or not cell_data_path(exp, well).exists()]
+    if not worklist:
+        say("Every well already has cell data, nothing to measure. To overwrite it from scratch, use overwrite=True")
+        return []
+
+    say_skipped(done="measured", skipped=[well for well in exp.well_list if well not in worklist])
+
     return parallel_map(
         function=functools.partial(measure_well, exp, ring_width=ring_width, ring_gap=ring_gap),
-        items=exp.well_list,
+        items=worklist,
         desc="Measuring cells",
         unit="well",
         n_workers=n_workers,

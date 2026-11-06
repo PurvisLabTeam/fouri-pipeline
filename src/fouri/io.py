@@ -116,6 +116,10 @@ def label_paths(labels_path, well):
     return sorted(pth for pth in folder.iterdir() if pth.suffix in (".tiff", ".tif"))
 
 
+def label_path(exp: Experiment, well: str, round_index: int) -> Path:
+    return Path(exp.segmented) / well / f"labels_{well}_round_{round_index:03d}.tif"
+
+
 def read_labels(labels_path, well, indices=None):
     """Stack of a well's label images (sorted by file name).
 
@@ -127,8 +131,11 @@ def read_labels(labels_path, well, indices=None):
     return np.array([imread(pth) for pth in paths])
 
 
-def write_tiff(path: str | Path, array: npt.NDArray[Any], metadata: dict[str, Any] | None = None):
-    imwrite(path, array, compression="zlib", ome=metadata is not None, metadata=metadata)
+def write_tiff(path: str | Path, array: npt.NDArray[Any], metadata: dict[str, Any] | None = None) -> None:
+    path = Path(path)
+    partial = path.with_suffix(".partial")
+    imwrite(partial, array, compression="zlib", ome=metadata is not None, metadata=metadata)
+    partial.replace(path)
 
 
 def round_table_path(exp: Experiment, well: str) -> Path:

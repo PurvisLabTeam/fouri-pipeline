@@ -15,6 +15,7 @@ from tifffile import imread
 from fouri.config import Experiment
 from fouri.io import label_paths, load_transforms, read_round_table, save_transforms
 from fouri.parallel import parallel_map
+from fouri.report import say, say_skipped
 
 
 def register_round(
@@ -67,7 +68,13 @@ def find_transforms(
     exp: Experiment,
     downscale_factor: int = 1,
     n_workers: int | None = None,
+    overwrite: bool = False,
 ) -> dict[str, npt.NDArray[np.float64]]:
+    """Align every round without a saved transform (every round with overwrite); return each well's.
+
+    A round counts as aligned when its saved matrix isn't NaN, so rounds aligned by hand are kept
+    unless overwrite is set.
+    """
     anchor_round = exp.anchor_round
     paths_of: dict[str, list[Path]] = {}
     mismatched: dict[str, tuple[int, int]] = {}
@@ -103,15 +110,56 @@ def find_transforms(
             "0 is the first round in info_exp.csv, 1 the second."
         )
 
+    transforms: dict[str, npt.NDArray[np.float64]] = {}
+    replaced: list[str] = []
+    stale: dict[str, str] = {}
+    for well, labels in paths_of.items():
+        transforms[well] = _unaligned(len(labels), anchor_round)
+        try:
+            saved = load_transforms(exp, well)
+        except FileNotFoundError:
+            continue
+        if overwrite:
+            replaced.append(well)
+        elif len(saved) != len(labels):
+            stale[well] = f"{len(saved)} rounds saved, {len(labels)} rounds in the well"
+        elif not np.allclose(saved[anchor_round], np.eye(3)):
+            stale[well] = f"saved with a different anchor round than round {anchor_round}"
+        else:
+            transforms[well] = saved
+
+    if stale:
+        message = f"The saved alignments of {len(stale)} well(s) don't fit the experiment any more:\n"
+        for well, reason in stale.items():
+            message += f"\t{well}: {reason}\n"
+        message += "Run with overwrite=True to align these wells again; this also replaces rounds aligned by hand."
+        raise ValueError(message)
+
     jobs = [
         (well, r, labels[anchor_round], label)
         for well, labels in paths_of.items()
         for r, label in enumerate(labels)
-        if r != anchor_round
+        if r != anchor_round and np.isnan(transforms[well][r]).any()
     ]
-    pairs = [(j[2], j[3]) for j in jobs]
-    transforms = {well: np.array([np.identity(3) for _ in range(len(paths))]) for well, paths in paths_of.items()}
 
+    if not jobs:
+        say(
+            "Every round is already aligned, nothing to align. To overwrite them from scratch, use "
+            "overwrite=True (this also replaces rounds aligned by hand)"
+        )
+        return transforms
+
+    skipped = []
+    for well, labels in paths_of.items():
+        n_rounds = len(labels) - 1  # the anchor is never aligned
+        n_skipped = n_rounds - sum(job[0] == well for job in jobs)
+        if n_skipped > 0:
+            skipped.append(f"{well} ({n_skipped} of {n_rounds} rounds)")
+    say_skipped(done="aligned", skipped=skipped)
+    if replaced:
+        say(f"Replacing the saved alignments of {', '.join(replaced)}, including any rounds aligned by hand")
+
+    pairs = [(j[2], j[3]) for j in jobs]
     results = parallel_map(
         function=functools.partial(_register_pair, downscale_factor=downscale_factor),
         items=pairs,
@@ -123,9 +171,16 @@ def find_transforms(
         well, rnd, _, _ = job
         transforms[well][rnd] = result
 
-    for well, matrix in transforms.items():
-        save_transforms(exp, well, matrix)
+    for well in dict.fromkeys(job[0] for job in jobs):  # only the wells that changed, in plate order
+        save_transforms(exp, well, transforms[well])
 
+    return transforms
+
+
+def _unaligned(n_rounds: int, anchor_round: int) -> npt.NDArray[np.float64]:
+    """Return a not-yet-aligned well's transforms: NaN for every round, identity for the anchor."""
+    transforms = np.full((n_rounds, 3, 3), np.nan)
+    transforms[anchor_round] = np.eye(3)
     return transforms
 
 
@@ -181,8 +236,7 @@ def save_manual_transform(
         transforms = load_transforms(exp, well)
     except FileNotFoundError:
         n_rounds = read_round_table(exp, well)["round_index"].nunique()
-        transforms = np.full((n_rounds, 3, 3), np.nan)
-        transforms[exp.anchor_round] = np.eye(3)
+        transforms = _unaligned(n_rounds, exp.anchor_round)
     transforms[round_index] = manual
     return save_transforms(exp, well, transforms)
 

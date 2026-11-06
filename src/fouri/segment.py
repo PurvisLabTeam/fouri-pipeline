@@ -6,12 +6,35 @@ from pathlib import Path
 from tifffile import imread
 
 from fouri.config import Experiment
-from fouri.io import alignment_paths, write_tiff
-from fouri.report import progress, say
+from fouri.io import alignment_paths, label_path, write_tiff
+from fouri.report import progress, say, say_skipped
 
 
-def segment_wells(exp: Experiment, diameter: float = 30, allow_cpu: bool = False) -> None:
+def segment_wells(exp: Experiment, diameter: float = 30, allow_cpu: bool = False, overwrite: bool = False) -> None:
     """Segment all the round images for all wells in the experiment."""
+    worklist = {}
+    skipped = []
+    for well in exp.well_list:
+        paths = alignment_paths(exp, well)
+        well_work = tuple(
+            (round_index, image_path, label)
+            for round_index, image_path in enumerate(paths)
+            if not (label := label_path(exp, well, round_index)).exists() or overwrite
+        )
+        if well_work:
+            worklist[well] = well_work
+
+        n_skipped = len(paths) - len(well_work)
+        if n_skipped > 0:
+            skipped.append(f"{well} ({n_skipped} of {len(paths)} rounds)")
+
+    if not worklist:
+        say("Every round already has labels, nothing to segment. To overwrite them from scratch, use overwrite=True")
+        return
+
+    if skipped:
+        say_skipped(done="segmented", skipped=skipped)
+
     import torch
 
     torch.sparse.check_sparse_tensor_invariants.disable()
@@ -35,16 +58,15 @@ def segment_wells(exp: Experiment, diameter: float = 30, allow_cpu: bool = False
     if model.device.type != "cuda" and not allow_cpu:
         raise RuntimeError(f"Cellpose is running on {model.device}, not the GPU.")
 
-    for well in progress(exp.well_list, desc="Overall Progress", unit="well", total=len(exp.well_list)):
+    for well, work in progress(worklist.items(), desc="Overall Progress", unit="well", total=len(worklist)):
         segment_path = Path(exp.segmented) / well
         segment_path.mkdir(parents=True, exist_ok=True)
 
-        round_bar = progress(alignment_paths(exp, well), desc=f"Segmenting {well}", unit="round", leave=False)
-        for round_index, path in enumerate(round_bar):
-            image = imread(path)
+        round_bar = progress(work, desc=f"Segmenting {well}", unit="round", leave=False)
+        for round_index, path_image, path_label in round_bar:
+            image = imread(path_image)
             labels, peak_gb = segment_image(model, image, diameter, desc=f"Segmenting round {round_index}")
-            img_path = segment_path / f"labels_{well}_round_{round_index:03d}.tif"
-            write_tiff(img_path, labels)
+            write_tiff(path_label, labels)
 
             if peak_gb is not None:
                 round_bar.set_postfix(peak_VRAM=f"{peak_gb:.2f}GB")

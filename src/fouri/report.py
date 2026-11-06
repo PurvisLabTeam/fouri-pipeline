@@ -12,6 +12,12 @@ def say(text: str) -> None:
     tqdm.write(text)
 
 
+def say_skipped(done: str, skipped: list[str]) -> None:
+    if not skipped:
+        return
+    say(f"Skipped, already {done}: {', '.join(skipped)}. To redo them, run with overwrite=True")
+
+
 @overload
 def progress[T](
     items: Iterable[T],

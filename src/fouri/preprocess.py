@@ -13,10 +13,12 @@ from fouri.io import (
     nd2_metadata,
     read_info_file,
     read_nd2,
+    round_table_path,
     save_round_table,
     write_tiff,
 )
 from fouri.parallel import parallel_map
+from fouri.report import say, say_skipped
 
 
 def convert_well(exp: Experiment, well: str, align_signal: str = "DNA") -> None:
@@ -35,7 +37,18 @@ def convert_well(exp: Experiment, well: str, align_signal: str = "DNA") -> None:
     save_round_table(exp, well, table)
 
 
-def preprocess(exp: Experiment, align_signal: str = "DNA", n_workers: int | None = None) -> None:
+def preprocess(
+    exp: Experiment, align_signal: str = "DNA", n_workers: int | None = None, overwrite: bool = False
+) -> None:
+    """Convert every well that has no round table yet (every well with overwrite)."""
+    # the CSV itself, not read_round_table: that falls back to an older df_{well}.pkl
+    worklist = [well for well in exp.well_list if overwrite or not round_table_path(exp, well).exists()]
+    if not worklist:
+        say("Every well is already converted, nothing to convert. To overwrite them from scratch, use overwrite=True")
+        return
+
+    say_skipped(done="converted", skipped=[well for well in exp.well_list if well not in worklist])
+
     path_df = Path(exp.output_df)
     path_images = Path(exp.output_images)
 
@@ -44,7 +57,7 @@ def preprocess(exp: Experiment, align_signal: str = "DNA", n_workers: int | None
 
     parallel_map(
         function=functools.partial(convert_well, exp, align_signal=align_signal),
-        items=exp.well_list,
+        items=worklist,
         desc="Converting wells",
         unit="well",
         n_workers=n_workers,
