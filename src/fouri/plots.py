@@ -1,9 +1,12 @@
 """Figures for the pipeline's interactive steps."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 
+import anndata as ad
 import numpy as np
 import numpy.typing as npt
+import pandas as pd
 import plotly.graph_objects as go
 
 from fouri.features import Threshold, curve_range, middle_values, suggest_cutoffs
@@ -18,6 +21,9 @@ SUGGESTION_STYLES: dict[Threshold, tuple[str, str]] = {
 }
 CHOSEN_COLOR = "#DC2626"  # the cut-offs actually used: red, solid
 BAND_COLOR = "rgba(29, 27, 44, 0.07)"  # between Otsu and the valley, a faint tint over the bars
+# one colour per group (treatment, sample, label ...) in an embedding, in turn: the app's colours
+GROUP_COLORS = ["#7C3AED", "#0F9E8E", "#DB2777", "#2563EB", "#D97706", "#059669", "#9333EA", "#0891B2"]
+VALUE_SCALE = "Viridis"  # cells coloured by a number
 
 
 def plot_threshold_histogram(
@@ -131,6 +137,130 @@ def plot_threshold_histogram(
     fig.update_xaxes(range=[low, high], title_text=x_title)
     fig.update_yaxes(title_text="Cells")
     return fig
+
+
+def plot_embedding(adata: ad.AnnData, key: str, color_by: str, *, title: str | None = None) -> go.Figure:
+    """One embedding's cells in 2D or 3D, coloured by a measurement or a column describing them.
+
+    Cells without coordinates (samples the embedding left out) are not drawn. A measurement, or
+    a column of numbers, colours the cells along one scale running from the 1st to the 99th
+    percentile, so a few extreme cells don't wash out the rest; hovering shows the true value. A
+    column of text or categories, such as treatment or sample_ID, gives each group its own
+    colour and its own legend entry, which shows or hides it.
+
+    Parameters
+    ----------
+    adata : anndata.AnnData
+        The subsample file: the embedding in ``.obsm``, its record in ``.uns["embeddings"]``.
+    key : str
+        The embedding's name in ``.obsm``, e.g. ``"X_phate_3d_top10_knn80"``.
+    color_by : str
+        A measurement (a name in ``adata.var_names``) or a column of ``adata.obs``.
+    title : str, optional
+        Figure title; by default the embedding's method, dimensions and settings. An empty string
+        leaves the title out.
+
+    Returns
+    -------
+    plotly.graph_objects.Figure
+        3D embeddings open with every axis the same length on screen, whatever the spread of the
+        coordinates along it.
+    """
+    if key not in adata.obsm:
+        raise ValueError(
+            f"There is no embedding called {key} in this file. Its embeddings are: {', '.join(adata.obsm) or 'none'}."
+        )
+    is_measurement = color_by in adata.var_names
+    if not is_measurement and color_by not in adata.obs.columns:
+        raise ValueError(
+            f"Cells can't be coloured by {color_by}: it is neither a measurement nor a column describing the cells."
+        )
+
+    coords = np.asarray(adata.obsm[key], dtype=np.float64)
+    drawn = ~np.isnan(coords).any(axis=1)
+    coords = coords[drawn]
+    dims = coords.shape[1]
+    record: Mapping[str, Any] = adata.uns.get("embeddings", {}).get(key, {})
+    method = str(record.get("method", key.removeprefix("X_").split("_")[0].upper()))
+    marker_size = 2 if dims == 3 else 3
+
+    def points(rows: npt.NDArray[np.bool_] | slice, **style: Any) -> go.Scatter3d | go.Scattergl:
+        xyz = dict(zip("xyz", coords[rows].T, strict=False))
+        if dims == 3:
+            return go.Scatter3d(mode="markers", **xyz, **style)
+        return go.Scattergl(mode="markers", **xyz, **style)
+
+    fig = go.Figure()
+    column = None if is_measurement else adata.obs[color_by][drawn]
+    if column is None or (pd.api.types.is_numeric_dtype(column) and not isinstance(column.dtype, pd.CategoricalDtype)):
+        if column is None:
+            values = np.asarray(adata[drawn, color_by].X, dtype=np.float64).ravel()
+            scale_title = "z-score"  # measurements are standardised in the file
+        else:
+            values = column.to_numpy(dtype=np.float64)
+            scale_title = color_by
+        low, high = np.nanpercentile(values, [1, 99])
+        fig.add_trace(
+            points(
+                slice(None),
+                name=color_by,
+                marker={
+                    "size": marker_size,
+                    "color": values,
+                    "colorscale": VALUE_SCALE,
+                    "cmin": float(low),
+                    "cmax": float(high),
+                    "colorbar": {"title": {"text": scale_title}},
+                    "opacity": 0.8,
+                },
+                hovertemplate=f"{color_by}: %{{marker.color:.2f}}<extra></extra>",
+            )
+        )
+    else:
+        labels = column.astype(str).to_numpy()
+        if isinstance(column.dtype, pd.CategoricalDtype):  # keep the column's own order, e.g. sample 2 before 10
+            groups = [str(group) for group in column.cat.categories if str(group) in set(labels)]
+        else:
+            groups = sorted(set(labels))
+        for i, group in enumerate(groups):
+            fig.add_trace(
+                points(
+                    labels == group,
+                    name=group,
+                    marker={"size": marker_size, "color": GROUP_COLORS[i % len(GROUP_COLORS)], "opacity": 0.7},
+                    hovertemplate=f"{color_by}: {group}<extra></extra>",
+                )
+            )
+
+    fig.update_layout(
+        template="simple_white",
+        font_family=FONT,
+        font_size=14,
+        title_text=_embedding_title(method, dims, record) if title is None else title,
+        legend_itemsizing="constant",  # legend dots readable although the points are small
+        uirevision=key,  # recolouring keeps the camera where the viewer turned it
+    )
+    if dims == 3:
+        fig.update_layout(
+            scene={
+                "xaxis_title_text": "1",
+                "yaxis_title_text": "2",
+                "zaxis_title_text": "3",
+                "aspectmode": "cube",
+            }
+        )
+    else:
+        fig.update_xaxes(title_text=f"{method} 1")
+        fig.update_yaxes(title_text=f"{method} 2")
+    return fig
+
+
+def _embedding_title(method: str, dims: int, record: Mapping[str, Any]) -> str:
+    parts = [f"{method} {dims}D"]
+    if "top_n" in record:
+        parts.append(f"top {int(record['top_n'])} features")
+    parts += [f"{name} {value}" for name, value in sorted(record.get("settings", {}).items())]
+    return " · ".join(parts)
 
 
 def _suggestion_lines(xs: Sequence[float], name: str, *, color: str, dash: str) -> go.Scatter:
