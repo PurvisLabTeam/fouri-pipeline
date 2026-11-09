@@ -17,7 +17,7 @@ SUGGESTION_STYLES: dict[Threshold, tuple[str, str]] = {
     Threshold.VALLEY: ("#E11D48", "dot"),  # rose
 }
 CHOSEN_COLOR = "#DC2626"  # the cut-offs actually used: red, solid
-BAND_COLOR = "rgba(29, 27, 44, 0.07)"  # between Otsu and the valley, behind the bars
+BAND_COLOR = "rgba(29, 27, 44, 0.07)"  # between Otsu and the valley, a faint tint over the bars
 
 
 def plot_threshold_histogram(
@@ -53,7 +53,9 @@ def plot_threshold_histogram(
     plotly.graph_objects.Figure
         Each chosen cut-off is its own editable shape, so it can be dragged where the
         figure is shown in a web page. Each suggestion method is one line trace, so its
-        legend entry shows or hides all of its lines.
+        legend entry shows or hides all of its lines. The band between Otsu and the valley
+        is a trace too, so the cut-offs are the only shapes: a page may make every shape
+        draggable without the band moving.
     """
     values = np.asarray(values, dtype=np.float64)
     values = values[~np.isnan(values)]
@@ -79,17 +81,21 @@ def plot_threshold_histogram(
 
     if Threshold.OTSU in suggestions and Threshold.VALLEY in suggestions:
         otsu, valley = suggestions[Threshold.OTSU][0], suggestions[Threshold.VALLEY][0]
-        fig.add_shape(
-            type="rect",
-            x0=min(otsu, valley),
-            x1=max(otsu, valley),
-            y0=0,
-            y1=1,
-            yref="paper",
-            fillcolor=BAND_COLOR,
-            line_width=0,
-            opacity=1,
-            layer="below",
+        low_cut, high_cut = min(otsu, valley), max(otsu, valley)
+        # a filled box on the hidden 0-to-1 axis, not a shape, so it never drags with the cut-offs
+        fig.add_trace(
+            go.Scatter(
+                x=[low_cut, high_cut, high_cut, low_cut, low_cut],
+                y=[0, 0, 1, 1, 0],
+                yaxis="y2",
+                mode="lines",
+                fill="toself",
+                fillcolor=BAND_COLOR,
+                line_width=0,
+                hoverinfo="skip",
+                showlegend=False,
+                name="Otsu-valley gap",
+            )
         )
 
     for thresh, cuts in suggestions.items():
