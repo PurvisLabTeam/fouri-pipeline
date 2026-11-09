@@ -66,6 +66,10 @@ def adata_sub_path(exp: Experiment) -> Path:
     return Path(exp.base_dir) / "standard_adata_sub.h5ad"
 
 
+def run_record_path(exp: Experiment) -> Path:
+    return Path(exp.base_dir) / "run_record.jsonl"
+
+
 def read_info_file(exp: Experiment) -> pd.DataFrame:
     info = Path(exp.info_file)
     df = pd.read_csv(info)

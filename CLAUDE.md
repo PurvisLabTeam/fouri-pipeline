@@ -22,6 +22,9 @@ uv run mypy                    # type-check src/fouri
 
 # run one notebook top to bottom without touching the file in the repo
 uv run jupyter nbconvert --to notebook --execute --output-dir /tmp/nbrun 06_calculate_cell_properties.ipynb
+
+# run one step as its own program, as the app does (steps: convert segment align measure table embedding)
+uv run python -m fouri.run measure --config ~/data/4i_local_test/experiment.json --wells B02 --settings '{"overwrite": true}'
 ```
 
 There is no test suite yet. ruff and mypy are configured in `pyproject.toml`: ruff uses foursight's rule
@@ -73,10 +76,11 @@ the writing and the reading side, so change them together.
 | 07 | `fullest_df.csv`, `standard_adata.h5ad` in `base_dir` | 08 |
 | 08 | `standard_adata_sub.h5ad` in `base_dir`: the subsample with every measurement, each embedding in `.obsm` and the settings that made it in `.uns["embeddings"]`. Rerunning the subsample replaces the file and its embeddings | — |
 
-`NNN` is the 0-based `round_index`, zero-padded to 3 digits.
+`NNN` is the 0-based `round_index`, zero-padded to 3 digits. A step run through `python -m fouri.run` (the app)
+also adds a "started" and an "ended" line to `run_record.jsonl` in `base_dir` (`io.run_record_path`).
 
 File names live in `fouri/io.py` (`round_table_path`, `tmat_path`, `cell_data_path`, `label_paths`,
-`label_path`, `fullest_df_path`, `adata_path`, `adata_sub_path`), with the functions that read and write those
+`label_path`, `fullest_df_path`, `adata_path`, `adata_sub_path`, `run_record_path`), with the functions that read and write those
 files.
 
 The round table is only read through `fouri.io.read_round_table`. Reading falls back to the `df_{well}.pkl`

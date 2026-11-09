@@ -5,6 +5,9 @@ calls ``report_to(path)``: from then on every message, and every bar opened, mov
 is written as one JSON line to that file, which the app's page reads as the step runs. The step
 program ends with ``finished``. Only the main process reports; worker processes print nothing.
 
+To stop a step, the app creates the file ``stop_path(progress file)``; the next time a bar moves it
+raises ``Stopped``. Outputs are written whole or not at all, so a stopped step leaves no half files.
+
 The lines look like this::
 
     {"time": 1731189000.12, "event": "message", "text": "B02: 90 cell(s) dropped."}
@@ -29,16 +32,28 @@ from typing import Any, Literal, Never, overload
 from tqdm.auto import tqdm
 
 _target: Path | None = None  # the progress file, or None to print
+_stop: Path | None = None  # the file whose appearance stops the step
 _lock = threading.Lock()
 _open_bars: list[int] = []  # bars open now, outermost first: a new bar's parent is the last one
 _bar_ids = itertools.count(1)
 MOVE_EVERY = 0.25  # seconds between two "move" lines of one bar
 
 
+class Stopped(Exception):  # noqa: N818 (it reads as what happened)
+    """The app asked the step to stop."""
+
+
+def stop_path(progress_file: str | Path) -> Path:
+    """Return the file the app creates to stop a step that reports to ``progress_file``."""
+    progress_file = Path(progress_file)
+    return progress_file.with_name(progress_file.name + ".stop")
+
+
 def report_to(path: str | Path | None) -> None:
     """Write messages and bars to ``path`` as JSON lines from now on; None goes back to printing."""
-    global _target
+    global _target, _stop
     _target = None if path is None else Path(path)
+    _stop = None if path is None else stop_path(path)
     _open_bars.clear()
 
 
@@ -102,6 +117,8 @@ class _FileBar(tqdm):
         if now - self._last_move >= MOVE_EVERY or (self.total is not None and self.n >= self.total):
             self._last_move = now
             self._event("move")
+            if _stop is not None and _stop.exists():
+                raise Stopped("Stopped from the app.")
         return displayed
 
     def reset(self, total: float | None = None) -> None:
