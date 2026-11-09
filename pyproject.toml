@@ -15,6 +15,7 @@ dependencies = [
     "matplotlib>=3.11.2",
     "napari[pyqt6]>=0.9.2",
     "nd2>=0.12.0",
+    "nicegui[native]>=4.0,<5",
     "numpy>=2.5.4",
     "opencv-python-headless>=5.0.0.93",
     "pandas>=2.3.3",
@@ -100,3 +101,6 @@ module = [
     "threadpoolctl", "threadpoolctl.*",
 ]
 ignore_missing_imports = true
+
+[project.gui-scripts]
+fouri-pipeline = "fouri.app:main"
