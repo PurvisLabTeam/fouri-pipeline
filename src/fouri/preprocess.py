@@ -6,13 +6,17 @@ import functools
 from pathlib import Path
 from typing import Any
 
+import numpy.typing as npt
 import pandas as pd
+from tifffile import imread
 
 from fouri.config import Experiment
 from fouri.io import (
+    label_paths,
     nd2_metadata,
     read_info_file,
     read_nd2,
+    read_round_table,
     round_table_path,
     save_round_table,
     write_tiff,
@@ -21,17 +25,37 @@ from fouri.parallel import parallel_map
 from fouri.report import say, say_skipped
 
 
-def convert_well(exp: Experiment, well: str, align_signal: str = "DNA") -> None:
+def trim(image: npt.NDArray[Any], width: int, height: int) -> npt.NDArray[Any]:
+    return image[:height, :width]
+
+
+def convert_well(exp: Experiment, well: str, align_signal: str = "DNA", overwrite: bool = False) -> None:
     table = round_table(exp, well, align_signal)
+    round_table_pth = round_table_path(exp, well)
+    to_write = table
+    if not overwrite and round_table_pth.exists():
+        existing_round_table = read_round_table(exp, well)
+        existing_dims = (
+            int(existing_round_table["width_min"].iloc[0]),
+            int(existing_round_table["height_min"].iloc[0]),
+        )
+        dims = (int(table["width_min"].iloc[0]), int(table["height_min"].iloc[0]))
+        if existing_dims == dims:
+            to_write = table[~table["round_name"].isin(existing_round_table["round_name"])]
+        elif (Path(exp.segmented) / well).exists():
+            segmentation_files = label_paths(exp.segmented, well)
+            for f in segmentation_files:
+                label_img = trim(imread(f), width=dims[0], height=dims[1])
+                write_tiff(f, label_img)
 
     output_images = Path(exp.output_images) / well
     output_images.mkdir(parents=True, exist_ok=True)
 
-    for (datadir, subdir, file), rows in table.groupby(["dir", "sub_dir", "file"]):
+    for (datadir, subdir, file), rows in to_write.groupby(["dir", "sub_dir", "file"]):
         image = read_nd2(Path(str(datadir)) / str(subdir) / str(file))
         for _, row in rows.iterrows():
             channel = image[int(row["channel_in_file"])]
-            channel = channel[: int(row["height_min"]), : int(row["width_min"])]
+            channel = trim(channel, width=int(row["width_min"]), height=int(row["height_min"]))
             write_tiff(output_images / str(row["raw_file_name"]), channel, metadata=_ome_metadata(row))
 
     save_round_table(exp, well, table)
@@ -41,13 +65,55 @@ def preprocess(
     exp: Experiment, align_signal: str = "DNA", n_workers: int | None = None, overwrite: bool = False
 ) -> None:
     """Convert every well that has no round table yet (every well with overwrite)."""
-    # the CSV itself, not read_round_table: that falls back to an older df_{well}.pkl
-    worklist = [well for well in exp.well_list if overwrite or not round_table_path(exp, well).exists()]
+    info = read_info_file(exp)
+    round_names = info["round_name"].tolist()
+
+    worklist = []
+    skipped = []
+    added = []
+    changed = {}
+    for well in exp.well_list:
+        round_table = round_table_path(exp, well)
+        if overwrite or not round_table.exists():
+            worklist.append(well)
+            continue
+
+        well_round_table = read_round_table(exp, well)
+        well_rounds = well_round_table.sort_values("round_index")["round_name"].unique().tolist()
+        if well_rounds == round_names:
+            skipped.append(well)
+            continue
+
+        if well_rounds == round_names[: len(well_rounds)]:
+            worklist.append(well)
+            added.append(well)
+            continue
+
+        changed[well] = well_rounds
+
+    if changed:
+        message = (
+            f"The rounds in info_exp.csv ({', '.join(round_names)}) don't match the "
+            f"rounds already converted for {len(changed)} well(s):"
+        )
+        for well in changed:
+            message += f"\n\t{well}: {', '.join(changed[well])}"
+
+        message += (
+            "\nLater steps save their results by round number so new rounds can only be added at the end of "
+            "info_exp.csv.\nEither put the rounds back in their earlier order with the new ones at the end "
+            "or start over with overwrite=True. If a round was renamed, overwrite=True in the preprocessing "
+            "step alone is enough."
+        )
+        raise ValueError(message)
+
     if not worklist:
         say("Every well is already converted, nothing to convert. To overwrite them from scratch, use overwrite=True")
         return
 
-    say_skipped(done="converted", skipped=[well for well in exp.well_list if well not in worklist])
+    say_skipped(done="converted", skipped=skipped)
+    if added:
+        say(text=f"{', '.join(added)}: info_exp.csv has new rounds, converting only those.")
 
     path_df = Path(exp.output_df)
     path_images = Path(exp.output_images)
@@ -56,7 +122,7 @@ def preprocess(
     path_images.mkdir(parents=True, exist_ok=True)
 
     parallel_map(
-        function=functools.partial(convert_well, exp, align_signal=align_signal),
+        function=functools.partial(convert_well, exp, align_signal=align_signal, overwrite=overwrite),
         items=worklist,
         desc="Converting wells",
         unit="well",

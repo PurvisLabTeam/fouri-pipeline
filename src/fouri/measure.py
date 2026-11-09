@@ -29,12 +29,15 @@ def measure_wells(
     overwrite: bool = False,
 ) -> list[Path]:
     """Measure every well without cell data (every well with overwrite); return the CSVs written."""
-    worklist = [well for well in exp.well_list if overwrite or not cell_data_path(exp, well).exists()]
+    worklist = [well for well in exp.well_list if overwrite or not _is_measured(exp, well)]
     if not worklist:
         say("Every well already has cell data, nothing to measure. To overwrite it from scratch, use overwrite=True")
         return []
 
     say_skipped(done="measured", skipped=[well for well in exp.well_list if well not in worklist])
+    remeasured = [well for well in worklist if not overwrite and cell_data_path(exp, well).exists()]
+    for well in remeasured:
+        say(f"{well}: cell data has no columns for some rounds, measuring again.")
 
     results = parallel_map(
         function=functools.partial(measure_well, exp, ring_width=ring_width, ring_gap=ring_gap),
@@ -50,6 +53,19 @@ def measure_wells(
             say(f"{well}: {n_cells_lost} cell(s) dropped.")
 
     return paths
+
+
+def _is_measured(exp: Experiment, well: str) -> bool:
+    cell_data_csv = cell_data_path(exp, well)
+    if not cell_data_csv.exists():
+        return False
+    columns = pd.read_csv(cell_data_csv, nrows=0).columns
+    round_table = read_round_table(exp, well)
+    expected_cols = {
+        feature_prefix(round_name, signal) + "_nuc_mean"
+        for round_name, signal in zip(round_table["round_name"], round_table["signal"], strict=True)
+    }
+    return expected_cols.issubset(columns)
 
 
 def measure_well(exp: Experiment, well: str, ring_width: int = 6, ring_gap: int = 1) -> tuple[Path, int]:

@@ -92,13 +92,26 @@ that way when a round is aligned by hand before 02 has run, and `measure_well` r
 round, naming the rounds.
 
 00, 01, 02 and 06 only create outputs that are missing, unless their `overwrite` argument (a setting in each
-notebook, default `False`) is `True`: 00 skips a well whose `round_table_{well}.csv` exists (not the old
-`.pkl`), 01 a round whose labels exist, 02 a round whose matrix isn't NaN (rounds fixed in 03 are kept), 06 a
-well whose CSV exists. Nothing tracks what an output was made from, so after a fix in 03 or a new 01 run, 06
-needs `overwrite=True`. 02 stops if a saved file has a different number of rounds, or a non-identity matrix at
-`anchor_round` (the anchor changed). The check runs in the main process before work is handed out;
-`report.say_skipped` prints what was skipped. `io.write_tiff` writes to a `.partial` name and renames, so a
-stopped run never leaves a half-written TIFF that would count as done.
+notebook, default `False`) is `True`. Done means done for the rounds `info_exp.csv` lists now, so rounds added
+at the end of `info_exp.csv` are processed without redoing the earlier ones:
+
+- 00 skips a well whose `round_table_{well}.csv` (not the old `.pkl`) lists the same rounds. If the saved table
+  lists only the first of them, `convert_well` writes just the new rounds' TIFFs and saves the full table. If a
+  new round's images are smaller, the crop shrinks: every round is written again and the well's labels in
+  `segmented` are cut to the new size. The crop only trims the bottom and right edges, so outlines and saved
+  transforms keep their positions (within 0.04 px on B02). 00 stops if rounds were inserted, removed, renamed
+  or reordered, since later steps store their results by round number.
+- 01 skips a round whose labels exist.
+- 02 skips a round whose matrix isn't NaN, so rounds fixed in 03 are kept; a saved file with fewer rounds keeps
+  them and aligns only the new ones. It stops if a saved file has more rounds than the well, or a non-identity
+  matrix at `anchor_round` (the anchor changed).
+- 06 skips a well whose CSV has a `{prefix}_nuc_mean` column for every channel in its round table; a well
+  missing some measures all its rounds again.
+
+Nothing tracks what an output was made from, so after a fix in 03 or a new 01 run, 06 needs `overwrite=True`.
+The checks run in the main process before work is handed out; `report.say_skipped` prints what was skipped.
+`io.write_tiff` writes to a `.partial` name and renames, so a stopped run never leaves a half-written TIFF that
+would count as done.
 
 ## Inputs, naming and couplings
 

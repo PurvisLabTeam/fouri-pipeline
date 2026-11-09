@@ -82,7 +82,7 @@ def find_transforms(
     """Align every round without a saved transform (every round with overwrite); return each well's.
 
     A round counts as aligned when its saved matrix isn't NaN, so rounds aligned by hand are kept
-    unless overwrite is set.
+    unless overwrite is set. @TODO.
     """
     anchor_round = exp.anchor_round
     paths_of: dict[str, list[Path]] = {}
@@ -130,12 +130,12 @@ def find_transforms(
             continue
         if overwrite:
             replaced.append(well)
-        elif len(saved) != len(labels):
+        elif len(saved) > len(labels):
             stale[well] = f"{len(saved)} rounds saved, {len(labels)} rounds in the well"
-        elif not np.allclose(saved[anchor_round], np.eye(3)):
+        elif anchor_round >= len(saved) or not np.allclose(saved[anchor_round], np.eye(3)):
             stale[well] = f"saved with a different anchor round than round {anchor_round}"
         else:
-            transforms[well] = saved
+            transforms[well][: len(saved)] = saved
 
     if stale:
         message = f"The saved alignments of {len(stale)} well(s) don't fit the experiment any more:\n"
