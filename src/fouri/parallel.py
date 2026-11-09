@@ -17,22 +17,32 @@ MIN_CPU_FREE = 2  # Minimum number of cpus to keep available to the OS
 
 
 def parallel_map[T, R](
-    function: Callable[[T], R], items: Sequence[T], *, desc: str, unit: str, n_workers: int | None = None
+    function: Callable[[T], R],
+    items: Sequence[T],
+    *,
+    desc: str,
+    unit: str,
+    n_workers: int | None = None,
+    mem_per_worker: float = MEM_PER_WORKER,
 ) -> list[R]:
     if not items:
         return []
-    n_workers = min(n_workers, len(items)) if n_workers is not None else worker_count(max_count=len(items))
+    n_workers = (
+        min(n_workers, len(items))
+        if n_workers is not None
+        else worker_count(max_count=len(items), mem_per_worker=mem_per_worker)
+    )
     with ProcessPoolExecutor(max_workers=n_workers, mp_context=get_context("spawn")) as executor:
         results = executor.map(function, items)
         return list(progress(results, desc=desc, unit=unit, total=len(items)))
 
 
-def worker_count(min_count=1, max_count=None):
+def worker_count(min_count=1, max_count=None, mem_per_worker: float = MEM_PER_WORKER):
     mem_available = psutil.virtual_memory().available
-    cores = physical if (physical := psutil.cpu_count(logical=False)) is not None else os.cpu_count()
+    cores = physical if (physical := psutil.cpu_count(logical=False)) is not None else os.cpu_count() or 1
 
     cpu_bound = cores - MIN_CPU_FREE
-    mem_bound = math.floor((mem_available - MEM_MIN_FREE) / MEM_PER_WORKER)
+    mem_bound = math.floor((mem_available - MEM_MIN_FREE) / mem_per_worker)
 
     raw_min = min(cpu_bound, mem_bound)
     if raw_min < min_count:

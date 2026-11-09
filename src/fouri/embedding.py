@@ -20,6 +20,8 @@ from fouri.io import adata_path, adata_sub_path
 from fouri.parallel import parallel_map
 from fouri.report import say
 
+EMBED_MEM_PER_WORKER = 3e9
+
 
 class Method(StrEnum):
     PHATE = "PHATE"
@@ -178,6 +180,7 @@ def embed_grid(
         desc="Embedding",
         unit="run",
         n_workers=n_workers,
+        mem_per_worker=EMBED_MEM_PER_WORKER,
     )
 
     used_samples = sorted(int(sample) for sample in adata.obs["sample_ID"][_sample_mask(adata, samples)].unique())
