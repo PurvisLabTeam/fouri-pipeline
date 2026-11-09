@@ -31,6 +31,7 @@ dependencies = [
     "seaborn>=0.13.2",
     "sketchkh>=0.1.4",
     "statsmodels>=0.15.0",
+    "threadpoolctl>=3.7.0",
     "tifffile>=2026.10.15",
     "torch>=2.14.1",
     "torchvision>=0.29.1",
@@ -95,6 +96,7 @@ files = ["src/fouri"]
 # These ship no type information and have no stub package.
 module = [
     "pystackreg", "pystackreg.*", "cellpose", "cellpose.*", "ipywidgets", "ipywidgets.*", "napari", "napari.*",
-    "plotly", "plotly.*",
+    "plotly", "plotly.*", "sketchKH", "sketchKH.*", "delve", "delve.*", "phate", "phate.*", "umap", "umap.*",
+    "threadpoolctl", "threadpoolctl.*",
 ]
 ignore_missing_imports = true
