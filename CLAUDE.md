@@ -70,13 +70,14 @@ the writing and the reading side, so change them together.
 | 04 | removed: 06 moves the anchor's outlines into each round instead of measuring aligned copies of the images | — |
 | 05 | not used for now: it draws masks on 04's aligned images and its masks never removed cells (07 dropped `nuc_mask`/`ring_mask`). Masks return with the artifact U-Net, and will remove the cells they cover | — |
 | 06 | `cell_data/cell_data_{well}_df.csv` (no row-number column; older ones have `Unnamed: 0`) | 07 |
-| 07 | `fullest_df.csv`, `standard_adata.h5ad`, `standard_adata_sub.h5ad` in `base_dir` | 08 |
-| 08 | `standard_adata_sub_filtered.h5ad`, PowerPoint and PNG plots in `base_dir` | — |
+| 07 | `fullest_df.csv`, `standard_adata.h5ad` in `base_dir` | 08 |
+| 08 | `standard_adata_sub.h5ad` in `base_dir`: the subsample with every measurement, each embedding in `.obsm` and the settings that made it in `.uns["embeddings"]`. Rerunning the subsample replaces the file and its embeddings | — |
 
 `NNN` is the 0-based `round_index`, zero-padded to 3 digits.
 
 File names live in `fouri/io.py` (`round_table_path`, `tmat_path`, `cell_data_path`, `label_paths`,
-`label_path`, `fullest_df_path`, `adata_path`), with the functions that read and write those files.
+`label_path`, `fullest_df_path`, `adata_path`, `adata_sub_path`), with the functions that read and write those
+files.
 
 The round table is only read through `fouri.io.read_round_table`. Reading falls back to the `df_{well}.pkl`
 that 00 wrote before the switch, renaming `nameRound` → `round_name`, `alignRound` → `round_index` and
@@ -157,11 +158,38 @@ would count as done.
   all 22 `_nuc_cyto_ratio` features to a few cells with a ring mean of 0); `.var` = kind (channel, shape,
   derived), round, signal, measure and acquisition from the round tables (a value differing between wells
   left empty and named); `.uns` = setup-form details, condition columns, derived formulas, plate, microscope,
-  round tables. It saves `fullest_df.csv` (no row-number column) and `standard_adata.h5ad`. 07 then
-  subsamples with sketchKH grouped by `sample_ID` (moves to 08 when 08 moves into `fouri`).
+  round tables. It saves `fullest_df.csv` (no row-number column) and `standard_adata.h5ad`.
 - For the app: `features.suggest_cutoffs` (Otsu, two-cut Otsu, the valley of the smoothed curve, on cells
-  within 3 SD of the mean), `features.threshold_labels` and `plots.plot_threshold_histogram` (plotly, cut-off
-  lines draggable in a web page). 07 doesn't use them yet.
+  within 3 SD of the mean), `features.threshold_labels` and `plots.plot_threshold_histogram` (plotly; the
+  cut-off lines are its only shapes, so a page can make every shape draggable, and the Otsu–valley band is a
+  trace). 07 doesn't use them yet.
+
+## Embeddings (08)
+
+`fouri/embedding.py`, one call per step, all on `standard_adata_sub.h5ad` (`io.adata_sub_path`):
+
+- `subsample(exp, cells_per_sample=2000, seed=42)`: sketchKH kernel herding grouped by `sample_ID`, from
+  `standard_adata.h5ad`; lowered to the smallest sample's count (sketch would do it silently), recorded in
+  `.uns["subsample"]`. Every feature stays in `.X`, so an embedding can be coloured by any measurement.
+- `rank_features(adata, features, samples=None, k=100)`: the picked features decide which cells are
+  neighbours (k of them), and delve's `feature_select` scores every feature by how smoothly it changes
+  between neighbours, lower is better. For the picked features this is exactly old 08's Laplacian ranking.
+  delve's own `delve_fs` is not used: its test only finds changing features when most features don't change,
+  and on a 4i panel nearly every column follows the cell cycle (nothing found in 21 of 22 settings tried).
+- `embed(path, method, features, *, samples, dims, settings, seed=42)`: one PHATE or UMAP run (`Method`),
+  2D or 3D, returning a row per cell of the file (NaN for samples left out). Seeded, and fitted on one maths
+  thread (`threadpoolctl`): PHATE's coordinates otherwise shift with the thread count, mainly on its third
+  axis, and a seeded UMAP runs on one core anyway. `phate` and `umap` are imported inside it.
+- `make_runs(method, dims, top_n, settings)` builds a `Run` (method, dims, top_n, settings) per combination;
+  `embed_grid(exp, runs, picked, *, samples, ranking_k, seed, n_workers)` ranks once, runs every `Run` side by
+  side with `parallel_map` on its top-ranked picked features, and saves each under
+  `X_{method}_{dims}d_top{n}_{setting}{value}…` (settings sorted). The same run with the same picked
+  features, samples, ranking k and seed replaces its embedding (the result is identical); other inputs get
+  `_2`, `_3`. `.uns["embeddings"][key]` records method, dims, top_n, settings, picked, the samples actually
+  used, ranking_k, seed, and the features used with their scores.
+- `plots.plot_embedding(adata, key, color_by)`: plotly, 2D (WebGL) or 3D; a measurement or a number column
+  on a Viridis scale from the 1st to the 99th percentile, a text or category column one trace and colour per
+  group (`GROUP_COLORS`, the app's).
 
 ## Dependencies
 
@@ -179,9 +207,9 @@ would count as done.
   are rewritten once at the end, before the merge into main.
 - Logic used by more than one notebook goes in `fouri`, not copied between notebooks. Notebooks are
   moving towards settings, one `fouri` call per step, and displays (napari, plots); 00 to 03 and 06 have
-  moved, into `fouri/preprocess.py`, `segment.py`, `align.py` and `measure.py`, and 07's AnnData into
-  `adata.py`; figures go in `plots.py` (plotly). Torch and Cellpose are
-  imported inside the functions that use them, so importing `fouri` stays fast; napari is imported at the
+  moved, into `fouri/preprocess.py`, `segment.py`, `align.py` and `measure.py`, 07's AnnData into
+  `adata.py`, and 08 into `embedding.py`; figures go in `plots.py` (plotly). Torch, Cellpose, PHATE and UMAP
+  are imported inside the functions that use them, so importing `fouri` stays fast; napari is imported at the
   top of `fouri/viewers/` only, which nothing else in `fouri` imports.
 - Hand-work viewers live in `fouri/viewers/`. `base.BaseViewer` (abstract) opens napari with a docked panel:
   well and round dropdowns, a ▲▼◀▶ pad, the viewer's own tools, Undo and Save, and a shortcut list; it binds
