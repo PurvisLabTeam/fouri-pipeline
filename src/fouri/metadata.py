@@ -222,7 +222,5 @@ def default_derived_features(info_file):
         if signal == "pRB" and f"{rnd}_RB" in names:
             features.append({"name": "pRB_RB_ratio", "formula": f"{rnd}_pRB_nuc_mean / {rnd}_RB_nuc_mean"})
             break
-    dna = [n for n in names if n.endswith("_DNA")]
-    if dna:
-        features.append({"name": "total_area_DNA", "formula": f"{dna[0]}_nuc_mean * nuc_area"})
+    # no total DNA: 06 writes every channel's total, e.g. R0_DNA_total_nuc_protein (mean x area)
     return features
