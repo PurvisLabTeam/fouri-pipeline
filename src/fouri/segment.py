@@ -11,6 +11,13 @@ from fouri.io import alignment_paths, label_path, write_tiff
 from fouri.report import progress, say, say_skipped
 
 
+def gpu_name() -> str | None:
+    import torch
+
+    gpu = torch.cuda.is_available()
+    return torch.cuda.get_device_name(0) if gpu else None
+
+
 def segment_wells(
     exp: Experiment,
     diameter: float = 30,
@@ -53,10 +60,12 @@ def segment_wells(
         if not allow_cpu:
             raise RuntimeError(
                 f"No GPU available to PyTorch (torch {torch.__version__}, CUDA build "
-                f"{torch.version.cuda}). If CUDA build is None, run uv sync. To run on the CPU "
-                "(slow), set allow_cpu=True"
+                f"{torch.version.cuda}). Segmenting on CPU takes significantly longer. To do it "
+                "anyway choose 'Run on the CPU' in the app or set allow_cpu=True. If this PC has "
+                "a GPU and CUDA build is None, PyTorch was installed without GPU support. Run "
+                "'uv sync'."
             )
-        say("GPU not detected, Cellpose is running on CPU (allow_cpu is set to True)")
+        say("GPU not detected, segmenting on the CPU.")
 
     model = models.CellposeModel(gpu=gpu)
 

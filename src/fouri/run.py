@@ -203,7 +203,8 @@ def run_step(
     except Exception as exception:  # any failure is reported to the app, then the program ends
         outcome = "failed"
         failed = [str(item) for item in getattr(exception, "failed", ())]  # StepFailed lists the failed items
-        error = str(exception) if isinstance(exception, ValueError) else f"{type(exception).__name__}: {exception}"
+        plain = isinstance(exception, (ValueError, RuntimeError, FileNotFoundError))  # fouri's own messages
+        error = str(exception) if plain else f"{type(exception).__name__}: {exception}"
         traceback.print_exc()
     report.finished(outcome, failed=failed, error=error)
     if exp is not None and "event" in entry:
