@@ -231,6 +231,9 @@ rules, read from disk, for the app's Status page; change it with a step's skip r
   so a run on Linux behaves like the Windows lab PCs; a worker is handed file paths, not arrays, and
   prints nothing (on Windows its prints never reach the notebook). Progress bars use `tqdm.auto`, and
   nothing prints while one is running.
+- Messages and bars go through `fouri.report` (`say`, `say_skipped`, `progress`), never `print` or tqdm directly:
+  after `report.report_to(path)` (the app, when it starts a step) they are written to that file as JSON lines
+  (message; bar open, move, close with its parent bar; `report.finished` at the end) instead of printed.
 - `.gitignore` ignores every dotfile except `.gitignore`, `.gitattributes` and `.python-version`, so a new
   dot-folder (e.g. `.claude/`) is not committed unless that rule changes.
 

@@ -9,7 +9,7 @@ from multiprocessing import get_context
 
 import psutil
 
-from fouri.report import progress
+from fouri.report import progress, say
 
 MEM_PER_WORKER = 8e9  # In bytes, equals 8 GB per worker
 MEM_MIN_FREE = 4e9  # In bytes, equals 4 GB
@@ -62,7 +62,7 @@ def worker_count(min_count=1, max_count=None, mem_per_worker: float = MEM_PER_WO
     if max_count is not None and 0 < max_count < workers:
         workers = max_count
 
-    print(
+    say(
         f"Running {workers} job(s) in parallel (limited by {bottleneck}: {_to_gb(mem_available):.1f}GB "
         f"available memory, {cores} total cores)"
     )
