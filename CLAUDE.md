@@ -112,7 +112,9 @@ at the end of `info_exp.csv` are processed without redoing the earlier ones:
 Nothing tracks what an output was made from, so after a fix in 03 or a new 01 run, 06 needs `overwrite=True`.
 The checks run in the main process before work is handed out; `report.say_skipped` prints what was skipped.
 `io.write_tiff` writes to a `.partial` name and renames, so a stopped run never leaves a half-written TIFF that
-would count as done.
+would count as done. `fouri.status` (`step_status` per well, `experiment_status` for 07 and 08) applies the same
+rules, read from disk, for the app's Status page; change it with a step's skip rule. Every step takes
+`wells=` (checked and put in plate order by `Experiment.pick_wells`); `None` means every well.
 
 ## Inputs, naming and couplings
 
