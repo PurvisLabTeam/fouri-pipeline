@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -62,7 +63,11 @@ def convert_well(exp: Experiment, well: str, align_signal: str = "DNA", overwrit
 
 
 def preprocess(
-    exp: Experiment, align_signal: str = "DNA", n_workers: int | None = None, overwrite: bool = False
+    exp: Experiment,
+    align_signal: str = "DNA",
+    n_workers: int | None = None,
+    overwrite: bool = False,
+    wells: Sequence[str] | None = None,
 ) -> None:
     """Convert every well that has no round table yet (every well with overwrite)."""
     info = read_info_file(exp)
@@ -72,7 +77,7 @@ def preprocess(
     skipped = []
     added = []
     changed = {}
-    for well in exp.well_list:
+    for well in exp.pick_wells(wells):
         round_table = round_table_path(exp, well)
         if overwrite or not round_table.exists():
             worklist.append(well)

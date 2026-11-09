@@ -25,7 +25,7 @@ import json
 import os
 import platform
 
-from .metadata import plate_sort_key, to_sample_id
+from .metadata import normalize_well, plate_sort_key, to_sample_id
 
 CONFIG_NAME = "experiment.json"
 
@@ -83,6 +83,24 @@ class Experiment:
                 m["sample_ID"] = to_sample_id(m["sample_ID"])
             out[well] = m
         return out
+
+    def pick_wells(self, wells=None):
+        """Return the wells a step works on, in plate order: every well when ``wells`` is None.
+
+        Names are normalized ('c2' -> 'C02') and repeats dropped. Raises ValueError for a name
+        that isn't a well, or a well that isn't in this experiment.
+        """
+        if wells is None:
+            return self.well_list
+        if isinstance(wells, str):
+            wells = [wells]
+        chosen = {normalize_well(well) for well in wells}
+        unknown = sorted(chosen - {normalize_well(well) for well in self.well_list}, key=plate_sort_key)
+        if unknown:
+            raise ValueError(
+                f"Not in this experiment: {', '.join(unknown)}. Its wells are listed in {self.config_path}."
+            )
+        return sorted(chosen, key=plate_sort_key)
 
     @property
     def metadata_columns(self):

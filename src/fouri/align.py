@@ -1,6 +1,7 @@
 """Utils for StackReg alignment."""
 
 import functools
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -78,6 +79,7 @@ def find_transforms(
     downscale_factor: int = 2,
     n_workers: int | None = None,
     overwrite: bool = False,
+    wells: Sequence[str] | None = None,
 ) -> dict[str, npt.NDArray[np.float64]]:
     """Align every round without a saved transform (every round with overwrite); return each well's.
 
@@ -87,7 +89,7 @@ def find_transforms(
     anchor_round = exp.anchor_round
     paths_of: dict[str, list[Path]] = {}
     mismatched: dict[str, tuple[int, int]] = {}
-    for well in exp.well_list:
+    for well in exp.pick_wells(wells):
         labels = label_paths(exp.segmented, well)
         paths_of[well] = labels
 

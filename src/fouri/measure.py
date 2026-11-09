@@ -1,6 +1,7 @@
 """@TODO."""
 
 import functools
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -27,14 +28,16 @@ def measure_wells(
     ring_gap: int = 1,
     n_workers: int | None = None,
     overwrite: bool = False,
+    wells: Sequence[str] | None = None,
 ) -> list[Path]:
     """Measure every well without cell data (every well with overwrite); return the CSVs written."""
-    worklist = [well for well in exp.well_list if overwrite or not _is_measured(exp, well)]
+    chosen = exp.pick_wells(wells)
+    worklist = [well for well in chosen if overwrite or not _is_measured(exp, well)]
     if not worklist:
         say("Every well already has cell data, nothing to measure. To overwrite it from scratch, use overwrite=True")
         return []
 
-    say_skipped(done="measured", skipped=[well for well in exp.well_list if well not in worklist])
+    say_skipped(done="measured", skipped=[well for well in chosen if well not in worklist])
     remeasured = [well for well in worklist if not overwrite and cell_data_path(exp, well).exists()]
     for well in remeasured:
         say(f"{well}: cell data has no columns for some rounds, measuring again.")

@@ -1,6 +1,7 @@
 """Cellpose segmentation with progress bar over an image's tiles."""
 
 import warnings
+from collections.abc import Sequence
 from pathlib import Path
 
 from tifffile import imread
@@ -10,11 +11,17 @@ from fouri.io import alignment_paths, label_path, write_tiff
 from fouri.report import progress, say, say_skipped
 
 
-def segment_wells(exp: Experiment, diameter: float = 30, allow_cpu: bool = False, overwrite: bool = False) -> None:
+def segment_wells(
+    exp: Experiment,
+    diameter: float = 30,
+    allow_cpu: bool = False,
+    overwrite: bool = False,
+    wells: Sequence[str] | None = None,
+) -> None:
     """Segment all the round images for all wells in the experiment."""
     worklist = {}
     skipped = []
-    for well in exp.well_list:
+    for well in exp.pick_wells(wells):
         paths = alignment_paths(exp, well)
         well_work = tuple(
             (round_index, image_path, label)
