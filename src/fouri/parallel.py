@@ -5,7 +5,7 @@ import os
 import re
 import warnings
 from collections.abc import Callable, Sequence
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from multiprocessing import get_context
@@ -85,7 +85,7 @@ def parallel_map[T, R](
 
     An item whose job raised comes back as a ``Failed``. When a bar raises ``Stopped``, the items
     no worker has taken yet come back as ``Dropped``, and the ones running finish first. ``names``
-    names each item in these; without it an item's name is ``str(item)``.
+    names each item in these; without it an item's name is ``str(item)``. @TODO.
     """
     if not items:
         return []
@@ -95,29 +95,42 @@ def parallel_map[T, R](
         if n_workers is not None
         else worker_count(max_count=len(items), mem_per_worker=mem_per_worker)
     )
-    with ProcessPoolExecutor(max_workers=n_workers, mp_context=get_context("spawn")) as executor:
-        jobs = [executor.submit(function, item) for item in items]
-        try:
-            for _ in progress(as_completed(jobs), desc=desc, unit=unit, total=len(jobs)):
-                pass  # results are read below, in item order
-        except Stopped:
-            for job in jobs:
-                job.cancel()  # works only on jobs no worker has taken yet; the running ones finish
-    # leaving the pool waited for the jobs still running
+    n_items = len(items)
+    slots: list[Future[R] | None] = [None] * n_items
+    next_item = 0
+    running: set[Future[R]] = set()
+    pool_broke = False
+    bar = progress(desc=desc, unit=unit, total=n_items)
+    try:
+        with ProcessPoolExecutor(max_workers=n_workers, mp_context=get_context("spawn")) as executor, bar:
+            while next_item < n_items or running != set():
+                while len(running) < n_workers and next_item < n_items:
+                    job = executor.submit(function, items[next_item])
+                    slots[next_item] = job
+                    running.add(job)
+                    next_item += 1
 
+                done, not_done = wait(running, return_when=FIRST_COMPLETED)
+                running = not_done
+                bar.update(n=len(done))
+    except Stopped:
+        pass
+    except BrokenProcessPool:
+        pool_broke = True
+
+    broken = f"A worker process stopped unexpectedly, possibly out of memory. This {unit} did not finish."
     outcomes: list[R | Failed | Dropped] = []
-    for name, job in zip(names, jobs, strict=True):
-        if job.cancelled():  # checked first: asking a cancelled job for its error raises
-            outcomes.append(Dropped(name))
+    for name, slot in zip(names, slots, strict=True):
+        if slot is None:
+            outcomes.append(Failed(item=name, error=broken) if pool_broke else Dropped(item=name))
             continue
-        error = job.exception()
-        if isinstance(error, BrokenProcessPool):  # a RuntimeError, so checked before error_in_words
-            broken = f"A worker process stopped unexpectedly, possibly out of memory. This {unit} did not finish."
-            outcomes.append(Failed(name, broken))
-        elif error is not None:
-            outcomes.append(Failed(name, error_in_words(error)))
-        else:
-            outcomes.append(job.result())
+        match slot.exception():
+            case None:
+                outcomes.append(slot.result())
+            case BrokenProcessPool():
+                outcomes.append(Failed(item=name, error=broken))
+            case _ as exc:
+                outcomes.append(Failed(item=name, error=error_in_words(exc)))
     return outcomes
 
 

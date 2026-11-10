@@ -63,20 +63,18 @@ def test_a_killed_worker_fails_every_unfinished_item() -> None:
 def test_a_stop_drops_waiting_items_and_keeps_finished(tmp_path: Path) -> None:
     progress_file = tmp_path / "step.jsonl"
     report.report_to(progress_file)
-    items = list(range(1, 9))  # one worker takes up to four items before the stop is seen
 
     results = parallel_map(
         functools.partial(jobs.create_stop_file, stop_file=report.stop_path(progress_file)),
-        items,
+        [1, 2, 3, 4, 5],
         desc="Stopping",
         unit="item",
         n_workers=1,
     )
 
     assert results[0] == 1
-    assert isinstance(results[-1], Dropped)
-    for item, result in zip(items, results, strict=True):
-        assert result == item or result == Dropped(str(item))
+    assert results[1] in (2, Dropped("2"))
+    assert results[2:] == [Dropped("3"), Dropped("4"), Dropped("5")]
 
 
 def test_check_results_raises_step_failed_listing_each_failed_item_once() -> None:

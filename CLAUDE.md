@@ -258,8 +258,9 @@ rules, read from disk, for the app's Status page; change it with a step's skip r
 - Work run side by side: `fouri.parallel.parallel_map(function, items, …)` runs a top-level function (or a
   `functools.partial` of one) over items in spawned processes with a progress bar. It returns, in item order,
   each item's result, a `Failed` (its name and the error) when its job raised, or a `Dropped` when a stop left
-  it unstarted: on `report.Stopped` from the bar, jobs not yet taken are cancelled and running ones finish; a
-  worker killed outright fails every unfinished item. Each caller saves what finished, then calls
+  it unstarted: the pool gets only as many items as it has workers, and the next as each one finishes, so on
+  `report.Stopped` from the bar nothing more is handed out and running ones finish; a worker killed outright
+  fails every unfinished item, including those not yet handed out. Each caller saves what finished, then calls
   `check_results`, which says each failure and raises `report.Stopped` if anything was dropped, else
   `report.StepFailed` naming the failed items (wells, or embedding keys), which `fouri.run` records. Its
   message gives each item's reasons in brackets, the first sentence of each distinct error, because the Run
