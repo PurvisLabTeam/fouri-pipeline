@@ -1,7 +1,7 @@
 """Run one pipeline step as its own program: how the app starts a step.
 
     python -m fouri.run measure --config Z:/exp/experiment.json --wells B02 C02
-        --settings '{"overwrite": true}' --progress C:/runs/measure.jsonl --run 2026-11-09T17:30
+        --settings '{"overwrite": true}' --progress C:/runs/measure.jsonl --run 20261109T173005
 
 ``--settings`` is a JSON object of the step function's keyword arguments; ``--wells`` (per-well
 steps only) defaults to every well. With ``--progress`` every message and bar goes to that file as
@@ -33,6 +33,7 @@ from typing import Any, Literal
 from fouri import report
 from fouri.config import Experiment, load_config
 from fouri.io import adata_sub_path, run_record_path
+from fouri.parallel import error_in_words
 from fouri.status import PER_WELL_STEPS, Step
 
 STEP_NAMES = {
@@ -203,8 +204,7 @@ def run_step(
     except Exception as exception:  # any failure is reported to the app, then the program ends
         outcome = "failed"
         failed = [str(item) for item in getattr(exception, "failed", ())]  # StepFailed lists the failed items
-        plain = isinstance(exception, (ValueError, RuntimeError, FileNotFoundError))  # fouri's own messages
-        error = str(exception) if plain else f"{type(exception).__name__}: {exception}"
+        error = error_in_words(exception)
         traceback.print_exc()
     report.finished(outcome, failed=failed, error=error)
     if exp is not None and "event" in entry:

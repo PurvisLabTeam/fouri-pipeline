@@ -8,9 +8,11 @@ from pathlib import Path
 
 from nicegui import ui
 
+from fouri.app.runner import Run
 from fouri.app.state import STATE
 from fouri.app.theme import apply_theme
 from fouri.config import Experiment
+from fouri.run import STEP_NAMES
 
 # address, name in the list, Material icon
 PAGES = [
@@ -38,6 +40,16 @@ def _mode_icon(dark: bool) -> str:
     return "light_mode" if dark else "dark_mode"
 
 
+def running_line(run: Run | None) -> str:
+    """Return "Step 2 of 4: Segment nuclei" for the step running; nothing when no run is going."""
+    if run is None or run.finished:
+        return ""
+    for position, progress in enumerate(run.progress, start=1):
+        if progress.outcome is None:
+            return f"Step {position} of {len(run.progress)}: {STEP_NAMES[progress.step]}"
+    return ""
+
+
 @contextmanager
 def page_frame(title: str) -> Iterator[None]:
     """Build the header and the page list, and yield inside the page's content column.
@@ -55,7 +67,9 @@ def page_frame(title: str) -> Iterator[None]:
                 STATE, "experiment", backward=_experiment_name
             )
         ui.space()
-        ui.label().classes("text-sm font-medium").style("color: var(--c-primary)")  # the running step, later
+        ui.label().classes("text-sm font-medium").style("color: var(--c-primary)").bind_text_from(
+            STATE, "run", backward=running_line
+        )
         ui.button(on_click=dark_mode.toggle).props("flat round").bind_icon_from(
             STATE, "dark", backward=_mode_icon
         ).tooltip("Light / dark")

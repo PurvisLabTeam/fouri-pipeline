@@ -89,7 +89,10 @@ the writing and the reading side, so change them together.
 | 08 | `standard_adata_sub.h5ad` in `base_dir`: the subsample with every measurement, each embedding in `.obsm` and the settings that made it in `.uns["embeddings"]`. Rerunning the subsample replaces the file and its embeddings | — |
 
 `NNN` is the 0-based `round_index`, zero-padded to 3 digits. A step run through `python -m fouri.run` (the app)
-also adds a "started" and an "ended" line to `run_record.jsonl` in `base_dir` (`io.run_record_path`).
+also adds a "started" and an "ended" line to `run_record.jsonl` in `base_dir` (`io.run_record_path`). The app's
+Run page starts its steps that way one after another (`fouri.app.runner.Run`), each step's progress file, stop file
+and printed output in `fouri-app/<run id>/` under the system's temporary folder; the run id, also in the run record,
+is the run's start time in ISO's compact form, `20261109T173005`.
 
 File names live in `fouri/io.py` (`round_table_path`, `tmat_path`, `cell_data_path`, `label_paths`,
 `label_path`, `fullest_df_path`, `adata_path`, `adata_sub_path`, `run_record_path`), with the functions that read and write those
