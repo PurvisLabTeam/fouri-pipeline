@@ -116,12 +116,15 @@ at the end of `info_exp.csv` are processed without redoing the earlier ones:
   lists only the first of them, `convert_well` writes just the new rounds' TIFFs and saves the full table. If a
   new round's images are smaller, the crop shrinks: every round is written again and the well's labels in
   `segmented` are cut to the new size. The crop only trims the bottom and right edges, so outlines and saved
-  transforms keep their positions (within 0.04 px on B02). 00 stops if rounds were inserted, removed, renamed
-  or reordered, since later steps store their results by round number.
+  transforms keep their positions (within 0.04 px on B02). 00 refuses a well whose rounds were inserted,
+  removed, renamed or reordered, since later steps store their results by round number.
 - 01 skips a round whose labels exist.
 - 02 skips a round whose matrix isn't NaN, so rounds fixed in 03 are kept; a saved file with fewer rounds keeps
-  them and aligns only the new ones. It stops if a saved file has more rounds than the well, or a non-identity
-  matrix at `anchor_round` (the anchor changed).
+  them and aligns only the new ones. It refuses a well whose label images don't match its rounds, that has no
+  label image for `anchor_round`, or whose saved file has more rounds than the well or a non-identity matrix at
+  `anchor_round` (the anchor changed); the checks run in that order and a well gets the first one's message.
+- A refused well is a failed well: it is left out of the work and passed to `check_results` with the others, so
+  the other wells still run and the step ends failed naming it.
 - 06 skips a well whose CSV has a `{prefix}_nuc_mean` column for every channel in its round table; a well
   missing some measures all its rounds again.
 
@@ -245,7 +248,9 @@ rules, read from disk, for the app's Status page; change it with a step's skip r
   it unstarted: on `report.Stopped` from the bar, jobs not yet taken are cancelled and running ones finish; a
   worker killed outright fails every unfinished item. Each caller saves what finished, then calls
   `check_results`, which says each failure and raises `report.Stopped` if anything was dropped, else
-  `report.StepFailed` naming the failed items (wells, or embedding keys), which `fouri.run` records.
+  `report.StepFailed` naming the failed items (wells, or embedding keys), which `fouri.run` records. Its
+  message gives each item's reasons in brackets, the first sentence of each distinct error, because the Run
+  page shows only that line in red.
   00, 02, 06 and `embed_grid` use it; `segment_wells`, which has no pool, carries on past a failed well the
   same way. `fouri.worker_count()` picks how many at once on the current PC (memory at
   8 GB per process, and cores, never more than the items) and prints why; an empty list returns `[]`

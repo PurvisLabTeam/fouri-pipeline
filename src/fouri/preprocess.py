@@ -22,7 +22,7 @@ from fouri.io import (
     save_round_table,
     write_tiff,
 )
-from fouri.parallel import check_results, parallel_map
+from fouri.parallel import Failed, check_results, parallel_map
 from fouri.report import say, say_skipped
 
 
@@ -76,7 +76,7 @@ def preprocess(
     worklist = []
     skipped = []
     added = []
-    changed = {}
+    refused = []
     for well in exp.pick_wells(wells):
         round_table = round_table_path(exp, well)
         if overwrite or not round_table.exists():
@@ -94,25 +94,18 @@ def preprocess(
             added.append(well)
             continue
 
-        changed[well] = well_rounds
-
-    if changed:
-        message = (
-            f"The rounds in info_exp.csv ({', '.join(round_names)}) don't match the "
-            f"rounds already converted for {len(changed)} well(s):"
+        refused.append(
+            Failed(
+                well,
+                f"converted rounds ({', '.join(well_rounds)}) don't match info_exp.csv ({', '.join(round_names)}). "
+                "New rounds can only be added at the end of info_exp.csv; put the rounds back in that order, "
+                "or convert this well again with Overwrite.",
+            )
         )
-        for well in changed:
-            message += f"\n\t{well}: {', '.join(changed[well])}"
-
-        message += (
-            "\nLater steps save their results by round number so new rounds can only be added at the end of "
-            "info_exp.csv.\nEither put the rounds back in their earlier order with the new ones at the end "
-            "or start over with overwrite=True. If a round was renamed, overwrite=True in the preprocessing "
-            "step alone is enough."
-        )
-        raise ValueError(message)
 
     if not worklist:
+        if refused:
+            check_results(refused, unit="well")  # raises StepFailed naming them
         say("Every well is already converted, nothing to convert. To overwrite them from scratch, use overwrite=True")
         return
 
@@ -133,7 +126,7 @@ def preprocess(
         unit="well",
         n_workers=n_workers,
     )
-    check_results(results, unit="well")
+    check_results([*refused, *results], unit="well")
 
 
 def round_table(exp: Experiment, well: str, align_signal: str = "DNA") -> pd.DataFrame:

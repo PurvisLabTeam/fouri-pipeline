@@ -89,64 +89,65 @@ def find_transforms(
     anchor_round = exp.anchor_round
     paths_of: dict[str, list[Path]] = {}
     round_names: dict[str, list[str]] = {}  # each well's round names, in round order
-    mismatched: dict[str, tuple[int, int]] = {}
-    for well in exp.pick_wells(wells):
-        labels = label_paths(exp.segmented, well)
-        paths_of[well] = labels
-
-        df = read_round_table(exp, well)
-        n_rounds_df = df["round_index"].nunique()
-        round_names[well] = df.sort_values("round_index")["round_name"].unique().tolist()
-
-        if len(labels) != n_rounds_df:
-            mismatched[well] = (len(labels), n_rounds_df)
-
-    if mismatched:
-        message = (
-            f"Segmentation images and rounds don't match in {len(mismatched)} well(s), so no transforms were found:\n"
-        )
-        for well, (n_labels, n_rounds) in mismatched.items():
-            message += (
-                f"\t{well}: {n_labels} label images in segmented, {n_rounds} rounds listed in the rounds table\n"
-            )
-        message += (
-            "Each round needs exactly one label image. Rerun 01 for these wells or remove "
-            "extra .tif files from their folders."
-        )
-        raise ValueError(message)
-
-    too_few = sorted(well for well, labels in paths_of.items() if anchor_round >= len(labels))
-    if too_few:
-        raise ValueError(
-            f'"anchor_round" is {anchor_round} in experiment.json, but {", ".join(too_few)} '
-            f"{'has' if len(too_few) == 1 else 'have'} no round {anchor_round}. Rounds count from 0: "
-            "0 is the first round in info_exp.csv, 1 the second."
-        )
-
     transforms: dict[str, npt.NDArray[np.float64]] = {}
     replaced: list[str] = []
-    stale: dict[str, str] = {}
-    for well, labels in paths_of.items():
-        transforms[well] = _unaligned(len(labels), anchor_round)
+    refused: list[Failed] = []  # wells set up wrongly, each with the first check it fails
+    for well in exp.pick_wells(wells):
+        labels = label_paths(exp.segmented, well)
+        df = read_round_table(exp, well)
+        n_rounds_df = df["round_index"].nunique()
+        if len(labels) != n_rounds_df:
+            refused.append(
+                Failed(
+                    well,
+                    f"{len(labels)} label images in segmented, {n_rounds_df} rounds in its round table. "
+                    "Each round needs exactly one label image; segment this well again or remove the extra "
+                    ".tif files.",
+                )
+            )
+            continue
+        if anchor_round >= len(labels):
+            refused.append(
+                Failed(
+                    well,
+                    f"no label image for the anchor round, round {anchor_round}. Rounds count from 0: 0 is the "
+                    "first round in info_exp.csv.",
+                )
+            )
+            continue
+
+        well_transforms = _unaligned(len(labels), anchor_round)
         try:
             saved = load_transforms(exp, well)
         except FileNotFoundError:
-            continue
-        if overwrite:
-            replaced.append(well)
-        elif len(saved) > len(labels):
-            stale[well] = f"{len(saved)} rounds saved, {len(labels)} rounds in the well"
-        elif anchor_round >= len(saved) or not np.allclose(saved[anchor_round], np.eye(3)):
-            stale[well] = f"saved with a different anchor round than round {anchor_round}"
-        else:
-            transforms[well][: len(saved)] = saved
+            saved = None  # nothing aligned yet
+        if saved is not None:
+            if overwrite:
+                replaced.append(well)
+            elif len(saved) > len(labels):
+                refused.append(
+                    Failed(
+                        well,
+                        f"{len(saved)} rounds saved, {len(labels)} rounds in the well. Align this well again "
+                        "with Overwrite; that also replaces rounds aligned by hand.",
+                    )
+                )
+                continue
+            elif anchor_round >= len(saved) or not np.allclose(saved[anchor_round], np.eye(3)):
+                refused.append(
+                    Failed(
+                        well,
+                        f"transforms saved with a different anchor round than round {anchor_round}. Align this "
+                        "well again with Overwrite; that also replaces rounds aligned by hand.",
+                    )
+                )
+                continue
+            else:
+                well_transforms[: len(saved)] = saved
 
-    if stale:
-        message = f"The saved alignments of {len(stale)} well(s) don't fit the experiment any more:\n"
-        for well, reason in stale.items():
-            message += f"\t{well}: {reason}\n"
-        message += "Run with overwrite=True to align these wells again; this also replaces rounds aligned by hand."
-        raise ValueError(message)
+        paths_of[well] = labels
+        round_names[well] = df.sort_values("round_index")["round_name"].unique().tolist()
+        transforms[well] = well_transforms
 
     jobs = [
         (well, r, labels[anchor_round], label)
@@ -156,6 +157,8 @@ def find_transforms(
     ]
 
     if not jobs:
+        if refused:
+            check_results(refused, unit="well")  # raises StepFailed naming them
         say(
             "Every round is already aligned, nothing to align. To overwrite them from scratch, use "
             "overwrite=True (this also replaces rounds aligned by hand)"
@@ -198,7 +201,7 @@ def find_transforms(
     for well in to_write:
         save_transforms(exp, well, transforms[well])
 
-    check_results(outcomes, unit="well")
+    check_results([*refused, *outcomes], unit="well")
     return transforms
 
 

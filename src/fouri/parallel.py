@@ -2,6 +2,7 @@
 
 import math
 import os
+import re
 import warnings
 from collections.abc import Callable, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -38,22 +39,36 @@ def check_results(results: Sequence[object], *, unit: str) -> None:
 
     Raise Stopped if any were dropped, otherwise StepFailed if any failed.
     """
-    failed = []
+    reasons: dict[str, list[str]] = {}  # each failed item's distinct reasons, in order
     dropped = []
+    finished = 0
     for result in results:
         match result:
             case Failed(item=item, error=error):
                 say(f"{item}: {error}")
-                failed.append(item)
+                item_reasons = reasons.setdefault(item, [])
+                if (reason := _first_sentence(error)) not in item_reasons:
+                    item_reasons.append(reason)
             case Dropped(item=item):
                 dropped.append(item)
+            case _:
+                finished += 1
     if dropped:
         raise Stopped
 
-    failed = list(dict.fromkeys(failed).keys())
-    if failed:
-        message = f"{len(failed)} {unit}(s) failed: {', '.join(failed)}. The other {unit}s finished and were saved."
-        raise StepFailed(message, failed)
+    if reasons:
+        listed = ", ".join(f"{item} ({'; '.join(why)})" for item, why in reasons.items())
+        rerun = "run the step again to redo the failed ones."
+        if finished:
+            message = f"{len(reasons)} {unit}(s) failed: {listed}. The other {unit}s finished and were saved; {rerun}"
+        else:
+            message = f"{len(reasons)} {unit}(s) failed: {listed}. {rerun.capitalize()}"
+        raise StepFailed(message, list(reasons))
+
+
+def _first_sentence(error: str) -> str:
+    # up to the first full stop or line break, without the full stop
+    return re.split(r"\.\s|\n", error, maxsplit=1)[0].strip().removesuffix(".")
 
 
 def parallel_map[T, R](
@@ -97,7 +112,7 @@ def parallel_map[T, R](
             continue
         error = job.exception()
         if isinstance(error, BrokenProcessPool):  # a RuntimeError, so checked before error_in_words
-            broken = f"A worker process stopped unexpectedly, possibly out of memory; this {unit} did not finish."
+            broken = f"A worker process stopped unexpectedly, possibly out of memory. This {unit} did not finish."
             outcomes.append(Failed(name, broken))
         elif error is not None:
             outcomes.append(Failed(name, error_in_words(error)))
