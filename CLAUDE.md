@@ -47,18 +47,26 @@ cells (one cutoff or two) meant to be run one or the other, so a top-to-bottom r
 
 Each notebook's first code cell is `CONFIG = r'...experiment.json'` followed by
 `exp = load_config(CONFIG)`; every folder and the well list come from `exp` (`fouri.config.Experiment`).
-`setup_experiment.ipynb` calls `fouri.setup_form` (an ipywidgets plate form), which writes the file
-through `save_config` and keeps the previous version as `experiment.json.bak`.
+`setup_experiment.ipynb` calls `fouri.setup_form` (an ipywidgets plate form), and the app's Experiment page
+saves its paths and anchor round; both write the file through `save_config`, which keeps the previous version
+as `experiment.json.bak`.
 
 - `base_dir` is `mac_base_dir` on non-Windows if set, else `base_dir`, else the folder holding the config.
 - Folder names are `DEFAULT_PATHS` in `config.py`; each can be overridden in the config's `paths`
   (relative to `base_dir` or absolute). A new folder needs an entry there and a property on `Experiment`.
+- The app's Experiment page (`config_to_save` in `fouri/app/pages/experiment.py`) writes the results folder
+  to the key it is read from on that PC (`mac_base_dir` on non-Windows if set, else `base_dir`), left out
+  only when the same folder would be read without it (the folder holding the config, with no other key to
+  take over: on non-Windows `mac_base_dir` stays while `base_dir` is set), and the ND2 folder and info_exp.csv as
+  `paths.data`/`paths.info_file`, each left out when its box is empty or it is base_dir's own `data` or
+  `info_exp.csv`, relative to `base_dir` when inside it, in full otherwise. A path typed without a drive or
+  root is read as relative to the results folder.
 - The format stays readable as Lauryn's older `project_config` files (`experiment_key`, `base_dir`,
   `mac_base_dir`, `well_list`, `well_metadata`); `Experiment.__getitem__`/`.get` exist for code written
   against that dict. New fields must be optional.
 - Optional `anchor_round`: the round every other round is aligned onto, counted from 0 like `round_index`;
-  default 0, the first round in `info_exp.csv`. It is not in the setup form, which keeps any key it does
-  not manage when it saves.
+  default 0, the first round in `info_exp.csv`. The app's Experiment page sets it and always writes it, 0
+  included. It is not in the setup form, which keeps any key it does not manage when it saves.
 - Wells are always zero-padded (`B02`), normalized by `metadata.normalize_well`, sorted by `plate_sort_key`.
 - Committed notebooks keep the placeholder `CONFIG = r'Z:\PATH\TO\EXPERIMENT\experiment.json'`; do not
   commit a local path.
