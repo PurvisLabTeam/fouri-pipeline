@@ -29,6 +29,7 @@ LEGEND = [
     ("not imaged", NOT_IMAGED),
 ]
 CAN_NOT_OPEN = (OSError, ValueError, AttributeError, TypeError)  # what loading a file that isn't an experiment raises
+TYPE_IN_FULL = "Type the full path to experiment.json or its folder."
 
 
 # -- how the paths are written ---------------------------------------------------------------
@@ -166,16 +167,38 @@ def _path_row(label: str, value: str, hint: str) -> tuple[ui.input, ui.button]:
     return box, browse
 
 
-async def _open_other(box: ui.input) -> None:
-    chosen = await pick_file(box.value, suffix=".json")
-    if chosen is None:
-        return
+def _show_open_path(box: ui.input) -> None:
+    box.value = STATE.experiment.config_path if STATE.experiment is not None else ""
+
+
+def _open(path: str | Path, box: ui.input) -> None:
+    """Open ``path`` as the experiment; else say why and put the open experiment's path back."""
     try:
-        open_experiment(chosen)
+        open_experiment(path)
     except CAN_NOT_OPEN as error:
-        ui.notify(f"Can't open {chosen} as an experiment: {_reason(error)}", type="negative")
+        # no experiment.json there: load_config's own message, which names the path
+        nothing_there = isinstance(error, FileNotFoundError) and error.strerror is None
+        message = str(error) if nothing_there else f"Can't open {path} as an experiment: {_reason(error)}"
+        ui.notify(message, type="negative")
+        _show_open_path(box)
         return
     _content.refresh()
+
+
+def _open_typed(box: ui.input) -> None:
+    path = os.path.expanduser(box.value.strip())
+    pure = PurePath(path)
+    if not (pure.drive or pure.root):
+        ui.notify(TYPE_IN_FULL, type="negative")
+        _show_open_path(box)
+        return
+    _open(path, box)
+
+
+async def _open_other(box: ui.input) -> None:
+    chosen = await pick_file(box.value, suffix=".json")
+    if chosen is not None:
+        _open(chosen, box)
 
 
 async def _browse_folder(box: ui.input) -> None:
@@ -243,7 +266,7 @@ def _content() -> None:
             config_box, browse = _path_row(
                 "experiment.json", exp.config_path if exp else "", "Wells, conditions and settings"
             )
-            config_box.props("readonly")
+            config_box.on("keydown.enter", lambda: _open_typed(config_box))
             browse.on_click(lambda: _open_other(config_box))
             if exp is None:
                 return

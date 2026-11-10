@@ -6,6 +6,7 @@ learn a file's path, so an in-app dialog lists this PC's folders instead.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from nicegui import app, ui
@@ -36,14 +37,18 @@ async def _system_dialog(window: WindowProxy, start: Path, *, suffix: str | None
 
 
 async def _listing_dialog(start: Path, *, suffix: str | None) -> Path | None:
-    """List folders, and ``suffix`` files when picking a file; return the pick or None."""
+    """List folders, and ``suffix`` files when picking a file; return the pick or None.
+
+    The box at the top shows the folder listed. Enter on a path typed there goes to that folder,
+    or picks a ``suffix`` file; a path without a drive or root is read against the folder listed.
+    """
     here = start
     with ui.dialog() as dialog, ui.card().classes("w-[560px]"):
-        title = ui.label().classes("font-semibold break-all")
+        where = ui.input().classes("w-full").props("dense")
         listing = ui.column().classes("w-full gap-0 max-h-96 overflow-auto")
 
         def show() -> None:
-            title.text = str(here)
+            where.value = str(here)
             listing.clear()
             try:
                 entries = sorted(here.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
@@ -69,6 +74,23 @@ async def _listing_dialog(start: Path, *, suffix: str | None) -> Path | None:
             here = path
             show()
 
+        def go_typed() -> None:
+            # normpath, not resolve: resolve would turn a mapped drive (Z:) into its network name
+            path = Path(os.path.normpath(here / Path(where.value.strip()).expanduser()))
+            if path.is_dir():
+                go(path)
+            elif path.is_file():
+                if suffix is not None and path.name.lower().endswith(suffix.lower()):
+                    dialog.submit(path)
+                    return
+                kind = "is a file" if suffix is None else f"isn't a {suffix} file"
+                ui.notify(f"{path.name} {kind}; showing its folder.", type="warning")
+                go(path.parent)
+            else:
+                ui.notify(f"No such folder: {path}", type="negative")
+                where.value = str(here)
+
+        where.on("keydown.enter", go_typed)
         show()
         with ui.row().classes("w-full justify-end mt-2"):
             ui.button("Cancel", on_click=lambda: dialog.submit(None)).props("flat")
