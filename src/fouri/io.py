@@ -1,6 +1,8 @@
 """File helpers shared by the pipeline notebooks."""
 
 import pickle
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -147,11 +149,26 @@ def read_labels(labels_path, well, indices=None):
     return np.array([imread(pth) for pth in paths])
 
 
+@contextmanager
+def written_whole(path: str | Path) -> Generator[Path]:
+    """Yield a .partial name to write to.
+
+    The .partial is renamed over path when the block ends without error.
+    """
+    path = Path(path)
+    partial_path = path.with_name(f"{path.name}.partial")
+    try:
+        yield partial_path
+        Path.replace(partial_path, path)
+    except BaseException:
+        partial_path.unlink(missing_ok=True)
+        raise
+
+
 def write_tiff(path: str | Path, array: npt.NDArray[Any], metadata: dict[str, Any] | None = None) -> None:
     path = Path(path)
-    partial = path.with_suffix(".partial")
-    imwrite(partial, array, compression="zlib", ome=metadata is not None, metadata=metadata)
-    partial.replace(path)
+    with written_whole(path) as partial:
+        imwrite(partial, array, compression="zlib", ome=metadata is not None, metadata=metadata)
 
 
 def round_table_path(exp: Experiment, well: str) -> Path:
@@ -160,7 +177,8 @@ def round_table_path(exp: Experiment, well: str) -> Path:
 
 def save_round_table(exp: Experiment, well: str, table: pd.DataFrame) -> None:
     path = round_table_path(exp, well)
-    table.to_csv(path, index=False)
+    with written_whole(path) as partial:
+        table.to_csv(partial, index=False)
 
 
 def read_round_table(exp: Experiment, well: str) -> pd.DataFrame:
@@ -213,7 +231,8 @@ def tmat_path(exp: Experiment, well: str, suffix: str | None = None) -> Path:
 
 def save_transforms(exp: Experiment, well: str, transforms: npt.NDArray[np.float64]) -> Path:
     save_path = tmat_path(exp, well, ".npy")
-    np.save(save_path, transforms)
+    with written_whole(save_path) as partial, open(partial, "wb") as fh:
+        np.save(fh, transforms)
     return save_path
 
 

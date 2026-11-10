@@ -133,8 +133,12 @@ at the end of `info_exp.csv` are processed without redoing the earlier ones:
 
 Nothing tracks what an output was made from, so after a fix in 03 or a new 01 run, 06 needs `overwrite=True`.
 The checks run in the main process before work is handed out; `report.say_skipped` prints what was skipped.
-`io.write_tiff` writes to a `.partial` name and renames, so a stopped run never leaves a half-written TIFF that
-would count as done. `fouri.status` (`step_status` per well, `experiment_status` for 07 and 08) applies the same
+Every output a step writes goes through `io.written_whole`: it is written to its own name plus `.partial`
+(`cell_data_B02_df.csv.partial`), renamed over the output when the write ends cleanly, and removed when it doesn't
+(an error or Ctrl+C), so a stopped run never leaves a half-written file that would count as done and an earlier
+file stays as it was. Readers match exact names or the `.tif` suffix, so a `.partial` left by a killed process is
+never read. `save_transforms` hands `numpy.save` an open file, since it adds `.npy` to any other name.
+`fouri.status` (`step_status` per well, `experiment_status` for 07 and 08) applies the same
 rules, read from disk, for the app's Status page; change it with a step's skip rule. Every step takes
 `wells=` (checked and put in plate order by `Experiment.pick_wells`); `None` means every well.
 

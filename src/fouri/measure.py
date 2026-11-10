@@ -15,7 +15,7 @@ from tifffile import imread
 
 from fouri.align import move_to_anchor, move_to_round
 from fouri.config import Experiment
-from fouri.io import cell_data_path, load_transforms, read_labels, read_round_table, require_raw_files
+from fouri.io import cell_data_path, load_transforms, read_labels, read_round_table, require_raw_files, written_whole
 from fouri.metadata import feature_prefix
 from fouri.parallel import Dropped, Failed, check_results, parallel_map
 from fouri.report import say, say_skipped
@@ -161,7 +161,8 @@ def measure_well(exp: Experiment, well: str, ring_width: int = 6, ring_gap: int 
 
     path = cell_data_path(exp, well)
     path.parent.mkdir(parents=True, exist_ok=True)
-    cells.to_csv(path, index=False)
+    with written_whole(path) as partial:
+        cells.to_csv(partial, index=False)
     return path, len(lost_labels)
 
 

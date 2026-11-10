@@ -8,7 +8,7 @@ import pandas as pd
 
 from fouri.config import Experiment
 from fouri.features import metadata_obs_columns, standardize_columns
-from fouri.io import adata_path, fullest_df_path, read_round_table
+from fouri.io import adata_path, fullest_df_path, read_round_table, written_whole
 from fouri.metadata import config_to_table, feature_prefix
 from fouri.report import say
 
@@ -46,8 +46,12 @@ def build_adata(exp: Experiment, fullest_df: pd.DataFrame) -> ad.AnnData:
         uns=_experiment_info(exp, round_tables),
     )
 
-    fullest_df.to_csv(fullest_df_path(exp), index=False)
-    adata.write_h5ad(adata_path(exp))
+    df_path = fullest_df_path(exp)
+    ad_path = adata_path(exp)
+    with written_whole(df_path) as partial:
+        fullest_df.to_csv(partial, index=False)
+    with written_whole(ad_path) as partial:
+        adata.write_h5ad(partial)
     say(f"Saved {adata.n_obs:,} cells and {adata.n_vars} features to {adata_path(exp)}")
     return adata
 

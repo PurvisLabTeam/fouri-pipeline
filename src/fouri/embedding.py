@@ -16,7 +16,7 @@ from delve import feature_select
 from sketchKH import sketch
 
 from fouri.config import Experiment
-from fouri.io import adata_path, adata_sub_path
+from fouri.io import adata_path, adata_sub_path, written_whole
 from fouri.parallel import Dropped, Failed, check_results, parallel_map
 from fouri.report import say
 
@@ -41,8 +41,8 @@ def subsample(exp: Experiment, cells_per_sample: int = 2000, seed: int = 42) -> 
         data, sample_set_key="sample_ID", num_subsamples=cells_per_sample, frequency_seed=seed, n_jobs=-1
     )
     subsampled.uns["subsample"] = {"cells_per_sample": cells_per_sample, "seed": seed}
-    wpath = adata_sub_path(exp)
-    subsampled.write_h5ad(wpath)
+    with written_whole(adata_sub_path(exp)) as partial:
+        subsampled.write_h5ad(partial)
     say(f"Wrote subsampled dataframe with {len(cells_per_sample_actual)} samples and {subsampled.n_obs:,} cells.")
     return subsampled
 
@@ -209,7 +209,8 @@ def embed_grid(
         keys.append(key)
 
     if keys:  # a file where every run failed is left as it was
-        adata.write_h5ad(path)
+        with written_whole(path) as partial:
+            adata.write_h5ad(partial)
         say(f"Saved {len(keys)} embedding(s) to {path.name}: {', '.join(keys)}")
     check_results(coordinates, unit="run")
     return keys
