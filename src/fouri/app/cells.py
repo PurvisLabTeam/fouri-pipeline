@@ -26,6 +26,7 @@ WELL = "well"
 PLATE_ROW = "plate row"
 PLATE_COLUMN = "plate column"
 CONDITION_JOIN = " · "  # between the condition columns' values: Palbo · 24h
+BLANK = "(blank)"
 
 ROW_NUMBER = "Unnamed: 0"  # the row-number column older cell data files have
 
@@ -72,7 +73,11 @@ def _condition(meta: dict[str, object], columns: list[str]) -> str:
 
 
 def _in_natural_order(values: pd.Series) -> pd.Categorical:
-    return pd.Categorical(values, categories=sorted(values.dropna().unique(), key=natural_key), ordered=True)
+    blank = values.isna() | values.astype(str).str.strip().eq("")
+    categories = sorted(values[~blank].unique(), key=natural_key)
+    if blank.any():
+        categories.append(BLANK)
+    return pd.Categorical(values.where(~blank, BLANK), categories=categories, ordered=True)
 
 
 def add_groups(table: pd.DataFrame, exp: Experiment) -> list[str]:

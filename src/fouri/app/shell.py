@@ -90,15 +90,23 @@ def page_frame(title: str) -> Generator[None]:
 
 def _missing_line(cells: Cells) -> str:
     """Return the line a cell page shows above its content; nothing when every well is measured."""
-    if not cells.measured:
-        return "No wells measured yet. Run Measure cells."
-    if cells.missing:
-        return f"Not measured yet: {', '.join(cells.missing)}."
-    return ""
+    if not cells.measured or not cells.missing:
+        return ""
+    wells = len(cells.measured) + len(cells.missing)
+    return f"Showing {len(cells.measured)} of {wells} wells. Not measured yet: {', '.join(cells.missing)}."
 
 
 def empty_state(cells: Cells) -> None:
     """Show what is missing above a cell page: no well measured, or the wells not measured yet."""
+    if not cells.measured:
+        with ui.card().classes("p-8 items-center gap-3 max-w-xl mx-auto mt-10"):
+            ui.icon("hourglass_empty").classes("text-5xl muted")
+            ui.label("No cells measured yet").classes("text-[1.05rem] font-semibold")
+            ui.label("Run Measure cells on at least one well to plot cells here.").classes("text-sm muted text-center")
+            ui.button("Go to Run", icon="play_circle", on_click=lambda: ui.navigate.to("/run"))
+        return
     line = _missing_line(cells)
     if line:
-        ui.label(line).classes("muted")
+        with ui.row().classes("items-center gap-2 text-sm muted"):
+            ui.icon("info")
+            ui.label(line)
