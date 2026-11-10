@@ -3,11 +3,11 @@
 import math
 import os
 import re
-import warnings
 from collections.abc import Callable, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
+from enum import StrEnum
 from multiprocessing import get_context
 
 import psutil
@@ -32,6 +32,13 @@ class Dropped:
     """An item that did not start because a run was manually stopped."""
 
     item: str
+
+
+class _Bottleneck(StrEnum):
+    ITEMS = "items"
+    CORES = "CPU"
+    MEM = "memory"
+    FORCED_MIN = "forced_minimum"
 
 
 def check_results(results: Sequence[object], *, unit: str) -> None:
@@ -67,7 +74,6 @@ def check_results(results: Sequence[object], *, unit: str) -> None:
 
 
 def _first_sentence(error: str) -> str:
-    # up to the first full stop or line break, without the full stop
     return re.split(r"\.\s|\n", error, maxsplit=1)[0].strip().removesuffix(".")
 
 
@@ -93,7 +99,7 @@ def parallel_map[T, R](
     n_workers = (
         min(n_workers, len(items))
         if n_workers is not None
-        else worker_count(max_count=len(items), mem_per_worker=mem_per_worker)
+        else worker_count(max_count=len(items), mem_per_worker=mem_per_worker, unit=unit)
     )
     n_items = len(items)
     slots: list[Future[R] | None] = [None] * n_items
@@ -141,37 +147,48 @@ def error_in_words(error: BaseException) -> str:
     return f"{type(error).__name__}: {error}"
 
 
-def worker_count(min_count=1, max_count=None, mem_per_worker: float = MEM_PER_WORKER):
+def worker_count(min_count=1, max_count=None, mem_per_worker: float = MEM_PER_WORKER, unit: str = "well"):
     mem_available = psutil.virtual_memory().available
     cores = physical if (physical := psutil.cpu_count(logical=False)) is not None else os.cpu_count() or 1
 
     cpu_bound = cores - MIN_CPU_FREE
     mem_bound = math.floor((mem_available - MEM_MIN_FREE) / mem_per_worker)
+    available_gb = round(_to_gb(mem_available), 1)
 
     raw_min = min(cpu_bound, mem_bound)
     if raw_min < min_count:
         workers = min_count
-        bottleneck = "forced minimum"
-        warnings.warn(
-            f"Severe resource constraints detected (CPU bound: {cpu_bound}. Mem bound: "
-            f"{_to_gb(mem_available):.1f}). Forcing worker count to {min_count}. Expect "
-            "degraded performance.",
-            stacklevel=2,
-        )
+        bottleneck = _Bottleneck.FORCED_MIN
     else:
         workers = raw_min
-        bottleneck = "cpu" if workers == cpu_bound else "memory"
+        bottleneck = _Bottleneck.CORES if workers == cpu_bound else _Bottleneck.MEM
+
+    resource_limit = workers
 
     # no more processes than jobs to run (max_count of 0 or less is ignored)
     if max_count is not None and 0 < max_count < workers:
         workers = max_count
+        bottleneck = _Bottleneck.ITEMS
 
-    say(
-        f"Running {workers} job(s) in parallel (limited by {bottleneck}: {_to_gb(mem_available):.1f}GB "
-        f"available memory, {cores} total cores)"
-    )
+    match bottleneck:
+        case _Bottleneck.ITEMS:
+            say(
+                f"Running all {workers} {unit}(s) in parallel. This PC can run up to {resource_limit} "
+                f"{unit}(s) at the same time ({available_gb} GB of memory available, {cores} cores)."
+            )
+        case _Bottleneck.MEM | _Bottleneck.CORES:
+            say(
+                f"Running {workers} {unit}(s) in parallel, limited by {bottleneck}: {available_gb} GB "
+                f"of memory available, {cores} cores."
+            )
+        case _Bottleneck.FORCED_MIN:
+            say(
+                f"Running {workers} {unit}(s) in parallel: this PC is low on free memory or cores "
+                f"({available_gb} GB of memory available, {cores} cores). This step will be slower "
+                "than usual."
+            )
     return workers
 
 
-def _to_gb(num_bytes):
+def _to_gb(num_bytes: int | float) -> float:
     return num_bytes / 1e9
