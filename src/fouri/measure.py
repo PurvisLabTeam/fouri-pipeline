@@ -17,7 +17,7 @@ from fouri.align import move_to_anchor, move_to_round
 from fouri.config import Experiment
 from fouri.io import cell_data_path, load_transforms, read_labels, read_round_table, require_raw_files
 from fouri.metadata import feature_prefix
-from fouri.parallel import parallel_map
+from fouri.parallel import Dropped, Failed, check_results, parallel_map
 from fouri.report import say, say_skipped
 from fouri.rings import make_rings
 
@@ -50,10 +50,15 @@ def measure_wells(
         n_workers=n_workers,
     )
     paths = []
-    for (path, n_cells_lost), well in zip(results, worklist, strict=True):
+    for result, well in zip(results, worklist, strict=True):
+        if isinstance(result, (Failed, Dropped)):
+            continue
+        path, n_cells_lost = result
         paths.append(path)
         if n_cells_lost > 0:
             say(f"{well}: {n_cells_lost} cell(s) dropped.")
+
+    check_results(results, unit="well")
 
     return paths
 

@@ -17,7 +17,7 @@ from sketchKH import sketch
 
 from fouri.config import Experiment
 from fouri.io import adata_path, adata_sub_path
-from fouri.parallel import parallel_map
+from fouri.parallel import Dropped, Failed, check_results, parallel_map
 from fouri.report import say
 
 EMBED_MEM_PER_WORKER = 3e9
@@ -181,12 +181,15 @@ def embed_grid(
         unit="run",
         n_workers=n_workers,
         mem_per_worker=EMBED_MEM_PER_WORKER,
+        names=[_run_key(run) for run in runs],
     )
 
     used_samples = sorted(int(sample) for sample in adata.obs["sample_ID"][_sample_mask(adata, samples)].unique())
     embeddings = adata.uns.setdefault("embeddings", {})
     keys = []
     for run, coords in zip(runs, coordinates, strict=True):
+        if isinstance(coords, (Failed, Dropped)):
+            continue
         features = order[: run.top_n]
         record = {
             "method": str(run.method),
@@ -205,8 +208,10 @@ def embed_grid(
         embeddings[key] = record
         keys.append(key)
 
-    adata.write_h5ad(path)
-    say(f"Saved {len(keys)} embedding(s) to {path.name}: {', '.join(keys)}")
+    if keys:  # a file where every run failed is left as it was
+        adata.write_h5ad(path)
+        say(f"Saved {len(keys)} embedding(s) to {path.name}: {', '.join(keys)}")
+    check_results(coordinates, unit="run")
     return keys
 
 

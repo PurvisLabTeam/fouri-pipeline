@@ -22,7 +22,7 @@ from fouri.io import (
     save_round_table,
     write_tiff,
 )
-from fouri.parallel import parallel_map
+from fouri.parallel import check_results, parallel_map
 from fouri.report import say, say_skipped
 
 
@@ -126,13 +126,14 @@ def preprocess(
     path_df.mkdir(parents=True, exist_ok=True)
     path_images.mkdir(parents=True, exist_ok=True)
 
-    parallel_map(
+    results = parallel_map(
         function=functools.partial(convert_well, exp, align_signal=align_signal, overwrite=overwrite),
         items=worklist,
         desc="Converting wells",
         unit="well",
         n_workers=n_workers,
     )
+    check_results(results, unit="well")
 
 
 def round_table(exp: Experiment, well: str, align_signal: str = "DNA") -> pd.DataFrame:

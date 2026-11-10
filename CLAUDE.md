@@ -19,6 +19,7 @@ uv run jupyter lab             # or VS Code with the .venv kernel
 uv run ruff check              # lint src/fouri and the notebooks
 uv run ruff format             # format them
 uv run mypy                    # type-check src/fouri
+uv run pytest -m 'not slow and not gpu'  # the quick tests; -m slow for the ones importing torch or UMAP
 
 # run one notebook top to bottom without touching the file in the repo
 uv run jupyter nbconvert --to notebook --execute --output-dir /tmp/nbrun 06_calculate_cell_properties.ipynb
@@ -27,7 +28,10 @@ uv run jupyter nbconvert --to notebook --execute --output-dir /tmp/nbrun 06_calc
 uv run python -m fouri.run measure --config ~/data/4i_local_test/experiment.json --wells B02 --settings '{"overwrite": true}'
 ```
 
-There is no test suite yet. ruff and mypy are configured in `pyproject.toml`: ruff uses foursight's rule
+Tests are pytest under `tests/`, on a made-up three-well experiment (`tests/builders.py` writes what each
+step would have, `tests/conftest.py` the fixture); they cover only mistakes that would lose or miscount data
+without anyone noticing. `slow` marks a test that imports torch, Cellpose, PHATE or UMAP, `gpu` one that
+needs a CUDA GPU. ruff and mypy are configured in `pyproject.toml`: ruff uses foursight's rule
 families, with docstrings optional but checked when present, and lets notebooks import after their
 `CONFIG` cell; mypy checks `src/fouri` (not strict) and skips pystackreg, cellpose, ipywidgets and napari,
 which ship no type information. `fouri` is installed editable, so changes under `src/fouri/` apply after a
@@ -228,8 +232,14 @@ rules, read from disk, for the app's Status page; change it with a step's skip r
   the reason in the prompt. 03 no longer uses Affinder, whose 0.5.0 calls `viewer._canvas_size`, removed in
   napari 0.9.
 - Work run side by side: `fouri.parallel.parallel_map(function, items, …)` runs a top-level function (or a
-  `functools.partial` of one) over items in spawned processes with a progress bar, results in order; 00, 02
-  and 06 use it. `fouri.worker_count()` picks how many at once on the current PC (memory at
+  `functools.partial` of one) over items in spawned processes with a progress bar. It returns, in item order,
+  each item's result, a `Failed` (its name and the error) when its job raised, or a `Dropped` when a stop left
+  it unstarted: on `report.Stopped` from the bar, jobs not yet taken are cancelled and running ones finish; a
+  worker killed outright fails every unfinished item. Each caller saves what finished, then calls
+  `check_results`, which says each failure and raises `report.Stopped` if anything was dropped, else
+  `report.StepFailed` naming the failed items (wells, or embedding keys), which `fouri.run` records.
+  00, 02, 06 and `embed_grid` use it; `segment_wells`, which has no pool, carries on past a failed well the
+  same way. `fouri.worker_count()` picks how many at once on the current PC (memory at
   8 GB per process, and cores, never more than the items) and prints why; an empty list returns `[]`
   without starting any. Worker processes start with `spawn` on every platform,
   so a run on Linux behaves like the Windows lab PCs; a worker is handed file paths, not arrays, and

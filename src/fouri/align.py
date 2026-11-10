@@ -15,7 +15,7 @@ from tifffile import imread
 
 from fouri.config import Experiment
 from fouri.io import label_paths, load_transforms, read_round_table, save_transforms
-from fouri.parallel import parallel_map
+from fouri.parallel import Dropped, Failed, check_results, parallel_map
 from fouri.report import say, say_skipped
 
 
@@ -88,6 +88,7 @@ def find_transforms(
     """
     anchor_round = exp.anchor_round
     paths_of: dict[str, list[Path]] = {}
+    round_names: dict[str, list[str]] = {}  # each well's round names, in round order
     mismatched: dict[str, tuple[int, int]] = {}
     for well in exp.pick_wells(wells):
         labels = label_paths(exp.segmented, well)
@@ -95,6 +96,7 @@ def find_transforms(
 
         df = read_round_table(exp, well)
         n_rounds_df = df["round_index"].nunique()
+        round_names[well] = df.sort_values("round_index")["round_name"].unique().tolist()
 
         if len(labels) != n_rounds_df:
             mismatched[well] = (len(labels), n_rounds_df)
@@ -177,14 +179,26 @@ def find_transforms(
         desc="Aligning images",
         unit="image",
         n_workers=n_workers,
+        names=[j[0] for j in jobs],
     )
+    outcomes: list[object] = []  # the results, with each failed pair's error naming its round
+    to_write = []
     for job, result in zip(jobs, results, strict=True):
         well, rnd, _, _ = job
+        if isinstance(result, Failed):
+            outcomes.append(Failed(result.item, f"round {round_names[well][rnd]}: {result.error}"))
+            continue
+        outcomes.append(result)
+        if isinstance(result, Dropped):
+            continue
+        to_write.append(well)
         transforms[well][rnd] = result
 
-    for well in dict.fromkeys(job[0] for job in jobs):  # only the wells that changed, in plate order
+    to_write = list(dict.fromkeys(to_write))
+    for well in to_write:
         save_transforms(exp, well, transforms[well])
 
+    check_results(outcomes, unit="well")
     return transforms
 
 

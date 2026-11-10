@@ -43,6 +43,16 @@ class Stopped(Exception):  # noqa: N818 (it reads as what happened)
     """The app asked the step to stop."""
 
 
+class StepFailed(RuntimeError):  # noqa: N818
+    """Some items of a step failed."""
+
+    failed: list[str]
+
+    def __init__(self, message: str, failed: Sequence[str]) -> None:
+        self.failed = list(failed)
+        super().__init__(message)
+
+
 def stop_path(progress_file: str | Path) -> Path:
     """Return the file the app creates to stop a step that reports to ``progress_file``."""
     progress_file = Path(progress_file)

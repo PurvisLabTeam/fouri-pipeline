@@ -109,7 +109,7 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 markers = [
     "gpu: needs a CUDA GPU",
-    "slow: imports torch or starts worker processes, more than a few seconds",
+    "slow: imports torch, Cellpose, PHATE or UMAP",
 ]
 
 [project.gui-scripts]

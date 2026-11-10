@@ -8,7 +8,8 @@ from tifffile import imread
 
 from fouri.config import Experiment
 from fouri.io import alignment_paths, label_path, write_tiff
-from fouri.report import progress, say, say_skipped
+from fouri.parallel import Failed, check_results, error_in_words
+from fouri.report import Stopped, progress, say, say_skipped
 
 
 def gpu_name() -> str | None:
@@ -74,23 +75,33 @@ def segment_wells(
     if model.device.type != "cuda" and not allow_cpu:
         raise RuntimeError(f"Cellpose is running on {model.device}, not the GPU.")
 
+    outcomes: list[str | Failed] = []  # each well's name, or its Failed
     for well, work in progress(worklist.items(), desc="Overall Progress", unit="well", total=len(worklist)):
-        segment_path = Path(exp.segmented) / well
-        segment_path.mkdir(parents=True, exist_ok=True)
+        try:
+            segment_path = Path(exp.segmented) / well
+            segment_path.mkdir(parents=True, exist_ok=True)
 
-        round_bar = progress(work, desc=f"Segmenting {well}", unit="round", leave=False)
-        for round_index, path_image, path_label in round_bar:
-            image = imread(path_image)
-            labels, peak_gb = segment_image(model, image, diameter, desc=f"Segmenting round {round_index}")
-            write_tiff(path_label, labels)
+            # the bar closes even when the well fails, so the next well's bar starts clean
+            with progress(work, desc=f"Segmenting {well}", unit="round", leave=False) as round_bar:
+                for round_index, path_image, path_label in round_bar:
+                    image = imread(path_image)
+                    labels, peak_gb = segment_image(model, image, diameter, desc=f"Segmenting round {round_index}")
+                    write_tiff(path_label, labels)
 
-            if peak_gb is not None:
-                round_bar.set_postfix(peak_VRAM=f"{peak_gb:.2f}GB")
+                    if peak_gb is not None:
+                        round_bar.set_postfix(peak_VRAM=f"{peak_gb:.2f}GB")
 
-            torch.cuda.empty_cache()
+                    torch.cuda.empty_cache()
+        except Stopped:
+            raise  # a stop ends the step; the rounds already written are kept
+        except Exception as error:  # one well failing: note it and go on to the next well
+            outcomes.append(Failed(well, error_in_words(error)))
+        else:
+            outcomes.append(well)
 
     del model
     torch.cuda.empty_cache()
+    check_results(outcomes, unit="well")
 
 
 def segment_image(model, im, diameter, desc=None):
