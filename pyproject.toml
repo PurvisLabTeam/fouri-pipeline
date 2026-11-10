@@ -61,7 +61,7 @@ packages = ["src/fouri"]
 [tool.uv.sources]
 torch = [{ index = "pytorch-cu130", marker = "sys_platform == 'win32'" }]
 torchvision = [{ index = "pytorch-cu130", marker = "sys_platform == 'win32'" }]
-delve-fs = { git = "https://github.com/omar-merhebi/delve", rev = "v0.1.7+purvislab.1" }
+delve-fs = { url = "https://github.com/omar-merhebi/delve/archive/3a6ce1a79e609e687110839de45d636bcf1cff8d.tar.gz"}
 
 [[tool.uv.index]]
 name = "pytorch-cu130"
