@@ -193,6 +193,9 @@ class AlignmentViewer(BaseViewer):
         self._wait_for(self.anchor_clicks, first_message)
 
     def _restart_round(self) -> None:
+        current = getattr(self, "round_name", None)
+        if current is None:
+            return
         self.show_round(self.round_name)
 
     def _after_click(self, event: Any) -> None:

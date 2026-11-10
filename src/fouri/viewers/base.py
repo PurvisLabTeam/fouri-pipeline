@@ -95,7 +95,7 @@ class BaseViewer(abc.ABC):
             widgets=[self.well_picker, self.round_picker, pad, *self._tool_widgets(), save_undo, shortcut_help],
         )
         panel.min_width = 250
-        self.viewer.window.add_dock_widget(panel, area="right", name=self.title)
+        self.viewer.window.add_dock_widget(panel.native, area="right", name=self.title)
         self.viewer.canvas.overlays.text.visible = True
         self._bind_keys()
         self.show_well(well, round_name)
@@ -103,6 +103,10 @@ class BaseViewer(abc.ABC):
     def show_well(self, well: str, round_name: str | None = None) -> None:
         round_table = read_round_table(self.exp, well)
         choices = self._round_choices(round_table)
+        refused = None
+        if round_name is not None and round_name not in choices:
+            refused = round_name
+            round_name = choices[0]
         self._load_well(well, round_table)
         self.well = well
         self.round_table = round_table
@@ -117,6 +121,8 @@ class BaseViewer(abc.ABC):
         current = getattr(self, "round_name", None)
         target = round_name if round_name is not None else current if current in choices else choices[0]
         self.show_round(target)
+        if refused is not None:
+            self.prompt(f"{refused} is not a recognized round for {well}. Opened {round_name} instead.")
 
     def show_round(self, round_name: str) -> None:
         self._load_round(round_name)
