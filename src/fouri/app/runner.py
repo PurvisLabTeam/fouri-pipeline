@@ -32,11 +32,16 @@ RUNS_FOLDER = "fouri-app"
 
 @dataclass(frozen=True)
 class StepRequest:
-    """One step of a run: the step, its wells and its settings."""
+    """One step of a run: the step, its wells and its settings.
+
+    ``images`` is how many images Segment nuclei has to segment, counted when the run was asked
+    for, so its time left can go by image; None for every other step, or when it was not counted.
+    """
 
     step: Step
     wells: list[str] | None
     settings: dict[str, Any]
+    images: int | None = None
 
 
 @dataclass
@@ -51,6 +56,20 @@ class Bar:
     done: float
     note: str
     closed: bool
+    started: float | None  # the time on its open line, None when the line carries no time
+    updated: float | None  # the time on its latest line
+
+
+def time_left(bar: Bar, now: float) -> float | None:
+    """Return a bar's seconds left at its rate so far, or None before a rate exists.
+
+    The items left times the seconds per item done so far, less the seconds since the latest line,
+    never below 0. A bar with no total, nothing done yet, or closed has no time left.
+    """
+    if bar.closed or bar.total is None or bar.done <= 0 or bar.started is None or bar.updated is None:
+        return None
+    per_item = (bar.updated - bar.started) / bar.done
+    return max((bar.total - bar.done) * per_item - (now - bar.updated), 0.0)
 
 
 @dataclass
@@ -96,6 +115,8 @@ def _take(progress: StepProgress, line: dict[str, Any]) -> None:
         progress.messages.append(str(line.get("text", "")))
     elif event == "bar" and isinstance(line.get("bar"), int):
         parent = line.get("parent")
+        at = _number(line.get("time"))
+        earlier = progress.bars.get(line["bar"])
         progress.bars[line["bar"]] = Bar(
             bar=line["bar"],
             parent=parent if isinstance(parent, int) else None,
@@ -105,6 +126,9 @@ def _take(progress: StepProgress, line: dict[str, Any]) -> None:
             done=_number(line.get("done")) or 0.0,
             note=str(line.get("note") or ""),
             closed=line.get("action") == "close",
+            # a bar's first line is its open line; were it missed, the first line read stands in
+            started=at if earlier is None or line.get("action") == "open" else earlier.started,
+            updated=at,
         )
     elif event == "finished":
         outcome = line.get("outcome")

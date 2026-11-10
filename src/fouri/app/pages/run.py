@@ -7,15 +7,19 @@ the run going. With no GPU found, Run asks before Segment nuclei runs on the CPU
 
 from __future__ import annotations
 
+import datetime as dt
 import math
+import time
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from typing import Any
 
 from nicegui import ui
+from tqdm import tqdm
 
 from fouri.app.gpu import cpu_minutes, images_to_segment
 from fouri.app.plate import plate
-from fouri.app.runner import Bar, Run, StepProgress, StepRequest
+from fouri.app.runner import Bar, Run, StepProgress, StepRequest, time_left
 from fouri.app.shell import page_frame, running_line
 from fouri.app.state import POLL_SECONDS, STATE, run_going, stop_run
 from fouri.app.steps import DESCRIPTIONS, Setting, can_tick, default, settings_for, shown_settings, whole_number
@@ -46,6 +50,7 @@ CHECKING_GPU = "Checking for a GPU…"
 NO_GPU = "No GPU found"
 STILL_CHECKING = "Still checking for a GPU. Try again in a moment."
 ON_CPU_LINE = "Segment nuclei runs on the CPU: no GPU found."
+WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")  # not %a, which follows the PC's language
 
 
 # -- what the page shows -------------------------------------------------------------------------
@@ -98,17 +103,53 @@ def _share(bar: Bar) -> float:
     return min(max(bar.done / bar.total, 0.0), 1.0) if bar.total else 0.0
 
 
+def _step_bar(progress: StepProgress) -> Bar | None:
+    """Return the step's latest outermost bar, the one for the whole step, kept once closed."""
+    outermost = [bar for bar in progress.bars.values() if bar.parent is None]
+    return max(outermost, key=lambda bar: bar.bar) if outermost else None
+
+
 def step_share(progress: StepProgress) -> float:
     """Return how far a step has got by its latest outermost bar, which keeps its share once closed.
 
     A stopped step closes that bar while its last items finish, so the step bar holds its place.
     """
-    outermost = [bar for bar in progress.bars.values() if bar.parent is None]
-    return _share(max(outermost, key=lambda bar: bar.bar)) if outermost else 0.0
+    bar = _step_bar(progress)
+    return _share(bar) if bar is not None else 0.0
+
+
+def step_time_left(progress: StepProgress, now: float, images: int | None = None) -> float | None:
+    """Return the step's seconds left, or None before a rate exists.
+
+    By the step's outermost bar, or, given Segment nuclei's count of images to segment, by image:
+    each well's bar inside it moves once per image, and the step's bar opening starts the clock.
+    """
+    bar = _step_bar(progress)
+    if bar is None:
+        return None
+    if images is None:
+        return time_left(bar, now)
+    inside = [inner for inner in progress.bars.values() if inner.parent == bar.bar]
+    latest = max((inner.updated for inner in inside if inner.updated is not None), default=None)
+    by_image = replace(bar, total=float(images), done=sum(inner.done for inner in inside), updated=latest)
+    return time_left(by_image, now)
 
 
 def _amount(number: float) -> str:
     return str(int(number)) if float(number).is_integer() else f"{number:.1f}"
+
+
+def time_left_text(seconds: float, now: float) -> str:
+    """Return a bar's time left as tqdm writes it and the clock time it should be done.
+
+    02:45 left, done about 2:32 PM; 9:41:10 left, done about Tue 7:05 AM, the weekday shown when it
+    falls on another day.
+    """
+    done_at = dt.datetime.fromtimestamp(now + seconds)
+    clock = f"{done_at.hour % 12 or 12}:{done_at.minute:02d} {'AM' if done_at.hour < 12 else 'PM'}"
+    if done_at.date() != dt.datetime.fromtimestamp(now).date():
+        clock = f"{WEEKDAYS[done_at.weekday()]} {clock}"
+    return f"{tqdm.format_interval(seconds)} left, done about {clock}"
 
 
 def duration(minutes: int) -> str:
@@ -285,7 +326,8 @@ def _progress_card(start: Callable[[], Awaitable[None]]) -> None:
                 label = ui.label().classes("text-sm muted w-44 shrink-0 truncate")
                 bar = ui.linear_progress(value=0, show_value=False)
                 bar.props(f"size={8 - 2 * depth}px color=primary instant-feedback").classes("grow")
-                count = ui.label().classes("text-xs muted w-20 text-right")
+                # one line at any count, digits all one width: the row keeps its height
+                count = ui.label().classes("text-xs muted w-28 shrink-0 text-right whitespace-nowrap tabular-nums")
             row.visible = False
             rows.append((row, label, bar, count))
         log = ui.log(max_lines=2000).classes("w-full h-96 text-xs")
@@ -331,7 +373,9 @@ def _progress_card(start: Callable[[], Awaitable[None]]) -> None:
             if not run.finished:
                 position = next(index for index, p in enumerate(run.progress) if p.outcome is None)
                 bars = open_bars(run.progress[position])
-                step_line.text = running_line(run)
+                now = time.time()
+                seconds = step_time_left(run.progress[position], now, run.requests[position].images)
+                step_line.text = running_line(run) + ("" if seconds is None else f" · {time_left_text(seconds, now)}")
                 step_bar.value = (position + step_share(run.progress[position])) / len(run.progress)
                 _colour(step_bar, "primary")
                 show_bars(bars)
@@ -370,25 +414,28 @@ def _content(exp: Experiment) -> None:
             ui.notify("Pick at least one well.", type="warning")
             return
         on_cpu = False
+        images: int | None = None  # Segment nuclei's, for the question and its time left
         if Step.SEGMENT in chosen:
             if STATE.checking_gpu:
                 ui.notify(STILL_CHECKING, type="warning")
                 return
-            if STATE.gpu is None:
-                try:
-                    images = images_to_segment(exp, wells_picked, overwrite=overwrite[Step.SEGMENT])
-                except (OSError, ValueError) as error:
+            try:
+                images = images_to_segment(exp, wells_picked, overwrite=overwrite[Step.SEGMENT])
+            except (OSError, ValueError) as error:
+                if STATE.gpu is None:  # the question needs the count
                     ui.notify(f"The run could not start: {error}", type="negative")
                     return
-                if images > 0:
-                    if not await _ask_cpu(images) or run_going():
-                        return
-                    on_cpu = True
+                # with a GPU the run goes ahead, its time left by whole wells
+            if STATE.gpu is None and images:
+                if not await _ask_cpu(images) or run_going():
+                    return
+                on_cpu = True
         requests = [
             StepRequest(
                 step,
                 wells_picked if step in PER_WELL_STEPS else None,
                 settings_for(step, values[step], overwrite=overwrite[step], workers=workers["count"] or None),
+                images=images if step == Step.SEGMENT else None,
             )
             for step in chosen
         ]
