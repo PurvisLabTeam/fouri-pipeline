@@ -45,6 +45,7 @@ dev = [
     "mypy>=2.4.1",
     "nbstripout>=0.8",
     "pandas-stubs>=3.1.0.261029",
+    "pytest>=9.2.0",
     "ruff>=0.17.3",
     "scipy-stubs>=1.18.1.1",
     "types-psutil>=7.2.2.20260906",
@@ -92,6 +93,8 @@ max-doc-length = 100
 [tool.mypy]
 python_version = "3.12"
 files = ["src/fouri"]
+# Find fouri as source, so a file outside it (tests/) that imports fouri is checked against it.
+mypy_path = "src"
 
 [[tool.mypy.overrides]]
 # These ship no type information and have no stub package.
@@ -101,6 +104,13 @@ module = [
     "threadpoolctl", "threadpoolctl.*",
 ]
 ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "gpu: needs a CUDA GPU",
+    "slow: imports torch or starts worker processes, more than a few seconds",
+]
 
 [project.gui-scripts]
 fouri-pipeline = "fouri.app:main"
