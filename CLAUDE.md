@@ -198,10 +198,10 @@ rules, read from disk, for the app's Status page; change it with a step's skip r
 
 - `subsample(exp, cells_per_sample=2000, seed=42)`: sketchKH kernel herding grouped by `sample_ID`, from
   `standard_adata.h5ad`; lowered to the smallest sample's count (sketch would do it silently), recorded in
-  `.uns["subsample"]`. Every feature stays in `.X`, so an embedding can be coloured by any measurement.
+  `.uns["subsample"]`. Every feature stays in `.X`, so an embedding can be colored by any measurement.
 - `rank_features(adata, features, samples=None, k=100)`: the picked features decide which cells are
-  neighbours (k of them), and delve's `feature_select` scores every feature by how smoothly it changes
-  between neighbours, lower is better. For the picked features this is exactly old 08's Laplacian ranking.
+  neighbors (k of them), and delve's `feature_select` scores every feature by how smoothly it changes
+  between neighbors, lower is better. For the picked features this is exactly old 08's Laplacian ranking.
   delve's own `delve_fs` is not used: its test only finds changing features when most features don't change,
   and on a 4i panel nearly every column follows the cell cycle (nothing found in 21 of 22 settings tried).
 - `embed(path, method, features, *, samples, dims, settings, seed=42)`: one PHATE or UMAP run (`Method`),
@@ -216,7 +216,7 @@ rules, read from disk, for the app's Status page; change it with a step's skip r
   `_2`, `_3`. `.uns["embeddings"][key]` records method, dims, top_n, settings, picked, the samples actually
   used, ranking_k, seed, and the features used with their scores.
 - `plots.plot_embedding(adata, key, color_by)`: plotly, 2D (WebGL) or 3D; a measurement or a number column
-  on a Viridis scale from the 1st to the 99th percentile, a text or category column one trace and colour per
+  on a Viridis scale from the 1st to the 99th percentile, a text or category column one trace and color per
   group (`GROUP_COLORS`, the app's).
 
 ## Dependencies
@@ -234,7 +234,7 @@ rules, read from disk, for the app's Status page; change it with a step's skip r
   (`docs/pipeline_guide.html`, still on main) is removed and `README.md` is not updated per change: both
   are rewritten once at the end, before the merge into main.
 - Logic used by more than one notebook goes in `fouri`, not copied between notebooks. Notebooks are
-  moving towards settings, one `fouri` call per step, and displays (napari, plots); 00 to 03 and 06 have
+  moving toward settings, one `fouri` call per step, and displays (napari, plots); 00 to 03 and 06 have
   moved, into `fouri/preprocess.py`, `segment.py`, `align.py` and `measure.py`, 07's AnnData into
   `adata.py`, and 08 into `embedding.py`; figures go in `plots.py` (plotly). Torch, Cellpose, PHATE and UMAP
   are imported inside the functions that use them, so importing `fouri` stays fast; napari is imported at the
@@ -245,7 +245,7 @@ rules, read from disk, for the app's Status page; change it with a step's skip r
   napari 0.9 already uses Ctrl+S and most bare letters) and shows prompts in the canvas text overlay.
   Subclasses fill hooks (`_build_layers`, `_tool_widgets`, `_round_choices`, `_load_well`, `_load_round`,
   `save`, `undo`, `_extra_keys`). `alignment.AlignmentViewer` is 02's optional check and 03: it starts each
-  round from its saved transform or from none, clicks snap to cell centres, Fit (Shift+F) needs 3 pairs with
+  round from its saved transform or from none, clicks snap to cell centers, Fit (Shift+F) needs 3 pairs with
   two clicks a third of the image apart. A failed well or round switch leaves the old one on screen and puts
   the reason in the prompt; a round the viewer doesn't offer (the anchor, or one the well lacks) opens its first
   round instead, with the reason in the prompt. The panel is docked as its Qt widget (`panel.native`): napari

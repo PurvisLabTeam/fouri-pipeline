@@ -27,7 +27,7 @@ def test_the_runs_that_finished_are_saved(experiment: Experiment) -> None:
     _small_subsample(experiment)
     runs = [
         Run(Method.UMAP, 2, 2, {"n_neighbors": 5}),
-        Run(Method.UMAP, 2, 2, {"n_neighbors": 1}),  # UMAP refuses fewer than 2 neighbours
+        Run(Method.UMAP, 2, 2, {"n_neighbors": 1}),  # UMAP refuses fewer than 2 neighbors
     ]
 
     with pytest.raises(StepFailed) as raised:

@@ -13,7 +13,7 @@ from fouri.features import Threshold, curve_range, middle_values, suggest_cutoff
 
 FONT = "Calibri, Carlito, sans-serif"  # Calibri on the lab PCs, its stand-in Carlito elsewhere
 BAR_COLOR = "#0F9E8E"  # teal
-# colour and dash pattern of each suggested cut-off
+# color and dash pattern of each suggested cut-off
 SUGGESTION_STYLES: dict[Threshold, tuple[str, str]] = {
     Threshold.OTSU: ("#7C3AED", "dash"),  # purple
     Threshold.OTSU_2CUT: ("#1D4ED8", "dashdot"),  # blue
@@ -21,9 +21,9 @@ SUGGESTION_STYLES: dict[Threshold, tuple[str, str]] = {
 }
 CHOSEN_COLOR = "#DC2626"  # the cut-offs actually used: red, solid
 BAND_COLOR = "rgba(29, 27, 44, 0.07)"  # between Otsu and the valley, a faint tint over the bars
-# one colour per group (treatment, sample, label ...) in an embedding, in turn: the app's colours
+# one color per group (treatment, sample, label ...) in an embedding, in turn: the app's colors
 GROUP_COLORS = ["#7C3AED", "#0F9E8E", "#DB2777", "#2563EB", "#D97706", "#059669", "#9333EA", "#0891B2"]
-VALUE_SCALE = "Viridis"  # cells coloured by a number
+VALUE_SCALE = "Viridis"  # cells colored by a number
 
 
 def plot_threshold_histogram(
@@ -140,13 +140,13 @@ def plot_threshold_histogram(
 
 
 def plot_embedding(adata: ad.AnnData, key: str, color_by: str, *, title: str | None = None) -> go.Figure:
-    """One embedding's cells in 2D or 3D, coloured by a measurement or a column describing them.
+    """One embedding's cells in 2D or 3D, colored by a measurement or a column describing them.
 
     Cells without coordinates (samples the embedding left out) are not drawn. A measurement, or
-    a column of numbers, colours the cells along one scale running from the 1st to the 99th
+    a column of numbers, colors the cells along one scale running from the 1st to the 99th
     percentile, so a few extreme cells don't wash out the rest; hovering shows the true value. A
     column of text or categories, such as treatment or sample_ID, gives each group its own
-    colour and its own legend entry, which shows or hides it.
+    color and its own legend entry, which shows or hides it.
 
     Parameters
     ----------
@@ -173,7 +173,7 @@ def plot_embedding(adata: ad.AnnData, key: str, color_by: str, *, title: str | N
     is_measurement = color_by in adata.var_names
     if not is_measurement and color_by not in adata.obs.columns:
         raise ValueError(
-            f"Cells can't be coloured by {color_by}: it is neither a measurement nor a column describing the cells."
+            f"Cells can't be colored by {color_by}: it is neither a measurement nor a column describing the cells."
         )
 
     coords = np.asarray(adata.obsm[key], dtype=np.float64)
