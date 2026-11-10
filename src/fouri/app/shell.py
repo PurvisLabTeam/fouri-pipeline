@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -51,7 +51,7 @@ def running_line(run: Run | None) -> str:
 
 
 @contextmanager
-def page_frame(title: str) -> Iterator[None]:
+def page_frame(title: str) -> Generator[None]:
     """Build the header and the page list, and yield inside the page's content column.
 
     ``title`` is the page's name in the list, which is shown as the current page.
