@@ -24,6 +24,7 @@ well_metadata, ...). Fields added here are optional:
 import json
 import os
 import platform
+import shutil
 
 from .metadata import normalize_well, plate_sort_key, to_sample_id
 
@@ -238,12 +239,17 @@ def announce_experiment(exp):
 
 
 def save_config(config, path):
-    """Write a config dict to ``path`` (experiment.json or its folder)."""
+    """Write a config dict to ``path`` (experiment.json or its folder).
+
+    The file it replaces, if there is one, is copied to ``experiment.json.bak`` beside it first.
+    """
     config = dict(config)
     config["well_list"] = sorted(config.get("well_list", []), key=plate_sort_key)
     meta = config.get("well_metadata") or {}
     config["well_metadata"] = {w: meta[w] for w in config["well_list"] if w in meta}
     config_path = config_path_for(path)
+    if os.path.exists(config_path):
+        shutil.copyfile(config_path, config_path + ".bak")
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
         f.write("\n")

@@ -471,10 +471,6 @@ class SetupForm:
         else:
             config.pop("paths", None)
         cfg_path = os.path.join(self.base_dir, CONFIG_NAME)
-        if os.path.exists(cfg_path):
-            backup = cfg_path + ".bak"
-            with open(cfg_path, encoding="utf-8") as src, open(backup, "w", encoding="utf-8") as dst:
-                dst.write(src.read())
         save_config(config, cfg_path)
         self.config = config
         warn = [m for lvl, m in issues if lvl == "warning"]
