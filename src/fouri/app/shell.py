@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from nicegui import ui
 
@@ -13,6 +14,9 @@ from fouri.app.state import STATE
 from fouri.app.theme import apply_theme
 from fouri.config import Experiment
 from fouri.run import STEP_NAMES
+
+if TYPE_CHECKING:
+    from fouri.app.cells import Cells
 
 # address, name in the list, Material icon
 PAGES = [
@@ -82,3 +86,19 @@ def page_frame(title: str) -> Generator[None]:
                     ui.label(name)
     with ui.column().classes("w-full p-6 gap-4"):
         yield
+
+
+def _missing_line(cells: Cells) -> str:
+    """Return the line a cell page shows above its content; nothing when every well is measured."""
+    if not cells.measured:
+        return "No wells measured yet. Run Measure cells."
+    if cells.missing:
+        return f"Not measured yet: {', '.join(cells.missing)}."
+    return ""
+
+
+def empty_state(cells: Cells) -> None:
+    """Show what is missing above a cell page: no well measured, or the wells not measured yet."""
+    line = _missing_line(cells)
+    if line:
+        ui.label(line).classes("muted")
