@@ -2,17 +2,18 @@
 
 The page never runs a step: it starts a ``Run``, whose steps are programs of their own, and shows
 what they report. The run's progress is read by the app's own timer, so leaving the page leaves
-the run going.
+the run going. With no GPU found, Run asks before Segment nuclei runs on the CPU.
 """
 
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from nicegui import ui
 
+from fouri.app.gpu import cpu_minutes, images_to_segment
 from fouri.app.plate import plate
 from fouri.app.runner import Bar, Run, StepProgress, StepRequest
 from fouri.app.shell import page_frame, running_line
@@ -40,6 +41,11 @@ ENDINGS = {
     "stopped": ("warning", "Stopped. Completed wells are kept; run again to continue."),
 }
 FAILURE_LINE = "text-negative font-semibold"
+GPU_LINE_SECONDS = 0.5  # how often the GPU line looks for the check's answer
+CHECKING_GPU = "Checking for a GPU…"
+NO_GPU = "No GPU found"
+STILL_CHECKING = "Still checking for a GPU. Try again in a moment."
+ON_CPU_LINE = "Segment nuclei runs on the CPU: no GPU found."
 
 
 # -- what the page shows -------------------------------------------------------------------------
@@ -103,6 +109,23 @@ def step_share(progress: StepProgress) -> float:
 
 def _amount(number: float) -> str:
     return str(int(number)) if float(number).is_integer() else f"{number:.1f}"
+
+
+def duration(minutes: int) -> str:
+    """Return a time in hours and minutes, the minutes left out when there are none.
+
+    About 20 minutes, about 2 hours 20 minutes, about 6 hours.
+    """
+    hours, rest = divmod(minutes, 60)
+    parts = [f"{hours} hour{'' if hours == 1 else 's'}"] if hours else []
+    if rest or not hours:
+        parts.append(f"{rest} minute{'' if rest == 1 else 's'}")
+    return "about " + " ".join(parts)
+
+
+def segments_on_cpu(run: Run) -> bool:
+    """Return whether the run's Segment nuclei was told to run on the CPU."""
+    return any(request.step == Step.SEGMENT and request.settings.get("allow_cpu") is True for request in run.requests)
 
 
 def ending(run: Run) -> str:
@@ -176,6 +199,51 @@ def _control(step: Step, setting: Setting, values: dict[str, Any]) -> None:
         ui.input(setting.label).bind_value(values, setting.name).classes("w-56")
 
 
+def _gpu_line() -> None:
+    """Show the GPU line under Segment nuclei: the GPU's name, or that none was found.
+
+    Until the check answers, the line says it is checking.
+    """
+    with ui.row().classes("items-center gap-1 no-wrap mt-1"):
+        icon = ui.icon("hourglass_empty").classes("text-base muted")
+        label = ui.label(CHECKING_GPU).classes("text-xs muted")
+
+    def show() -> None:
+        if STATE.checking_gpu:
+            return
+        if STATE.gpu:
+            icon.name = "memory"
+            icon.classes(replace="text-base text-positive")
+            label.text = f"GPU: {STATE.gpu}"
+            label.classes(replace="text-xs")
+        else:
+            icon.name = "warning"
+            icon.classes(replace="text-base text-warning")
+            label.text = NO_GPU
+            label.classes(replace="text-xs text-warning")
+        timer.cancel()  # the GPU is checked once, so the line doesn't change again
+
+    timer = ui.timer(GPU_LINE_SECONDS, show)
+
+
+async def _ask_cpu(images: int) -> bool:
+    """Ask before Segment nuclei runs on the CPU; return whether to go ahead."""
+    count = f"{images} image{'' if images == 1 else 's'}"
+    with ui.dialog() as dialog, ui.card().classes("p-5 gap-3 max-w-lg"):
+        with ui.row().classes("items-center gap-2 no-wrap"):
+            ui.icon("warning").classes("text-2xl text-warning")
+            ui.label("No GPU found").classes(SECTION_TITLE)
+        ui.label(f"Segment nuclei would segment {count} on the CPU, {duration(cpu_minutes(images))}.").classes(
+            "text-sm"
+        )
+        with ui.row().classes("w-full justify-end gap-2"):
+            ui.button("Cancel", on_click=lambda: dialog.submit(False)).props("flat")
+            ui.button("Run on the CPU", icon="play_arrow", on_click=lambda: dialog.submit(True))
+    answer = await dialog  # None when closed with Escape or a click beside it, as Cancel
+    dialog.delete()
+    return answer is True
+
+
 def _step_card(
     badge: int, step: Step, ticked: dict[Step, bool], overwrite: dict[Step, bool], values: dict[str, Any]
 ) -> None:
@@ -189,6 +257,8 @@ def _step_card(
                 if not can_tick(step):
                     box.disable()
                 ui.label(DESCRIPTIONS[step]).classes("text-xs muted -mt-1")
+                if step == Step.SEGMENT:
+                    _gpu_line()
             if step in PER_WELL_STEPS:
                 ui.switch("Overwrite").bind_value(overwrite, step).props("dense")
         settings = shown_settings(step)
@@ -203,7 +273,7 @@ def _colour(bar: ui.linear_progress, name: str) -> None:
         bar.props(f"color={name}")
 
 
-def _progress_card(start: Callable[[], None]) -> None:
+def _progress_card(start: Callable[[], Awaitable[None]]) -> None:
     with ui.card().classes("grow p-5 gap-2"):
         ui.label("Progress").classes(SECTION_TITLE)
         step_line = ui.label(IDLE).classes("font-medium")
@@ -253,6 +323,8 @@ def _progress_card(start: Callable[[], None]) -> None:
             if run is not shown["run"]:  # a new run: the log starts afresh
                 log.clear()
                 shown.update(run=run, messages=[0] * len(run.progress) if run else [], errors=set())
+                if run is not None and segments_on_cpu(run):
+                    log.push(ON_CPU_LINE)
             if run is None:
                 return
             show_log(run)
@@ -286,7 +358,7 @@ def _content(exp: Experiment) -> None:
     values = {step: {s.name: default(step, s.name) for s in shown_settings(step)} for step in Step}
     workers = {"count": 0}
 
-    def start() -> None:
+    async def start() -> None:
         if run_going():
             return
         chosen = [step for step in Step if ticked[step] and can_tick(step)]
@@ -297,6 +369,21 @@ def _content(exp: Experiment) -> None:
         if not wells_picked and any(step in PER_WELL_STEPS for step in chosen):
             ui.notify("Pick at least one well.", type="warning")
             return
+        on_cpu = False
+        if Step.SEGMENT in chosen:
+            if STATE.checking_gpu:
+                ui.notify(STILL_CHECKING, type="warning")
+                return
+            if STATE.gpu is None:
+                try:
+                    images = images_to_segment(exp, wells_picked, overwrite=overwrite[Step.SEGMENT])
+                except (OSError, ValueError) as error:
+                    ui.notify(f"The run could not start: {error}", type="negative")
+                    return
+                if images > 0:
+                    if not await _ask_cpu(images) or run_going():
+                        return
+                    on_cpu = True
         requests = [
             StepRequest(
                 step,
@@ -305,6 +392,8 @@ def _content(exp: Experiment) -> None:
             )
             for step in chosen
         ]
+        if on_cpu:  # this run only: the next run's settings start without it
+            next(request for request in requests if request.step == Step.SEGMENT).settings["allow_cpu"] = True
         run = Run(exp.config_path, requests)
         try:
             run.start()

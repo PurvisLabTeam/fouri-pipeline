@@ -40,9 +40,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     from nicegui import app, ui
 
     from fouri.app import pages  # noqa: F401  (registers every page's address)
-    from fouri.app.state import POLL_SECONDS, poll_run, reopen_last, stop_run
+    from fouri.app.state import POLL_SECONDS, find_gpu, poll_run, reopen_last, stop_run
 
     app.on_startup(reopen_last)
+    app.on_startup(find_gpu)  # NiceGUI runs it in the background, so pages open while the check goes on
     # the app follows the run whichever page is open; quitting stops it and keeps finished wells
     app.timer(POLL_SECONDS, poll_run)
     app.on_shutdown(stop_run)

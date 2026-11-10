@@ -1,4 +1,4 @@
-"""What the whole app shares while it runs: the open experiment, the light/dark choice, the run.
+"""What the whole app shares while it runs: the open experiment, light or dark, the GPU, the run.
 
 The app is one window used by one person, so this is one object for the app, not one per
 browser tab.
@@ -11,6 +11,7 @@ from pathlib import Path
 
 from nicegui import app
 
+from fouri.app.gpu import check_gpu
 from fouri.app.runner import Run
 from fouri.config import Experiment, load_config
 
@@ -20,14 +21,28 @@ POLL_SECONDS = 0.25  # how often the run's progress is read
 
 @dataclass
 class AppState:
-    """What the whole app shares: the experiment open, light or dark, the run; later the GPU."""
+    """What the whole app shares: the experiment open, light or dark, the GPU found, the run."""
 
     experiment: Experiment | None = None
     dark: bool = True
     run: Run | None = None  # the run going, or the last one that ended
+    gpu: str | None = None  # the GPU's name; None when none was found
+    checking_gpu: bool = True  # the check made when the app opens has not answered yet
 
 
 STATE = AppState()
+
+
+async def find_gpu() -> None:
+    """Check for a GPU in a program of its own and keep what it found.
+
+    The app does this once, when it starts. A check that fails leaves ``gpu`` as None: no GPU found.
+    """
+    STATE.checking_gpu = True
+    try:
+        STATE.gpu = await check_gpu()
+    finally:
+        STATE.checking_gpu = False
 
 
 def run_going() -> bool:
