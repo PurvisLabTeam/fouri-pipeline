@@ -110,10 +110,10 @@ async def _pick(start: str | Path, *, suffix: str | None) -> Path | None:
 
 
 async def pick_file(start: str | Path, *, suffix: str) -> Path | None:
-    """Return a ``suffix`` file picked in a dialog opened at ``start``, or None if cancelled."""
+    """Return a ``suffix`` file picked in a dialog opened at ``start``, or None if canceled."""
     return await _pick(start, suffix=suffix)
 
 
 async def pick_folder(start: str | Path) -> Path | None:
-    """Return a folder picked in a dialog opened at ``start``, or None if cancelled."""
+    """Return a folder picked in a dialog opened at ``start``, or None if canceled."""
     return await _pick(start, suffix=None)

@@ -75,6 +75,32 @@ def _in_natural_order(values: pd.Series) -> pd.Categorical:
     return pd.Categorical(values, categories=sorted(values.dropna().unique(), key=natural_key), ordered=True)
 
 
+def add_groups(table: pd.DataFrame, exp: Experiment) -> list[str]:
+    wells = table[WELL].astype(str)
+    present = list(dict.fromkeys(wells))
+    metadata = exp.well_metadata
+    meta = {well: metadata.get(well, {}) for well in present}
+
+    # the metadata under the names the AnnData uses (treatment_time is "treatment time")
+    obs_names = dict(zip(exp.metadata_columns, metadata_obs_columns(exp), strict=True))
+    for column, name in obs_names.items():
+        table[name] = wells.map({well: meta[well].get(column) for well in present})
+    groups: list[str] = list(obs_names.values())
+
+    conditions = [c for c in exp.condition_columns if any(not _blank(meta[well].get(c)) for well in present)]
+    if len(conditions) >= 2:
+        table[CONDITION] = wells.map({well: _condition(meta[well], conditions) for well in present})
+        groups.append(CONDITION)
+
+    table[WELL] = wells
+    table[PLATE_ROW] = wells.map({well: normalize_well(well)[0] for well in present})
+    table[PLATE_COLUMN] = wells.map({well: str(int(normalize_well(well)[1:])) for well in present})
+    groups += [WELL, PLATE_ROW, PLATE_COLUMN]
+    for name in groups:
+        table[name] = _in_natural_order(table[name])
+    return groups
+
+
 def _load(exp: Experiment) -> Cells:
     status = step_status(exp, Step.MEASURE)
     wells = sorted(status, key=plate_sort_key)
@@ -90,26 +116,9 @@ def _load(exp: Experiment) -> Cells:
         frames.append(frame)
     table = pd.concat(frames, ignore_index=True)
 
-    # the metadata under the names the AnnData uses (treatment_time is "treatment time")
-    obs_names = dict(zip(exp.metadata_columns, metadata_obs_columns(exp), strict=True))
-    metadata = exp.well_metadata
-    added = {
-        name: table[WELL].map({well: metadata[well].get(column) for well in measured})
-        for column, name in obs_names.items()
-    }
-    table = pd.concat([table, pd.DataFrame(added, index=table.index)], axis=1)
-
     # add_derived_features copies the table into one block, so the columns after it add quickly
     table = add_derived_features(table, exp.derived_features)
-
-    # a condition column no well has is left out, as when sample IDs are numbered
-    conditions = [c for c in exp.condition_columns if c in obs_names]
-    table[CONDITION] = table[WELL].map({well: _condition(metadata[well], conditions) for well in measured})
-    table[PLATE_ROW] = table[WELL].map({well: normalize_well(well)[0] for well in measured})
-    table[PLATE_COLUMN] = table[WELL].map({well: str(int(normalize_well(well)[1:])) for well in measured})
-    groups = [*obs_names.values(), CONDITION, WELL, PLATE_ROW, PLATE_COLUMN]
-    for name in groups:
-        table[name] = _in_natural_order(table[name])
+    groups = add_groups(table, exp)
 
     features = describe(table.select_dtypes("number").columns.tolist(), read_info_file(exp))
     return Cells(table, features, groups, measured, missing)

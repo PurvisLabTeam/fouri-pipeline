@@ -6,7 +6,7 @@ The cell pages offer features by these names, and the plots use them as axis tit
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -88,6 +88,31 @@ def describe(columns: Sequence[str], info: pd.DataFrame) -> dict[str, Feature]:
                 features[column] = Feature(column, markers[prefix], words)
                 break
     return features
+
+
+def _panel(info: pd.DataFrame) -> list[str]:
+    markers = _markers(info)
+    channels = list(info.columns[1:])
+    order: list[str] = []
+    for _, row in info.iterrows():
+        for signal in _signals(row, channels):
+            marker = markers[feature_prefix(str(row["round_name"]), signal)]
+            if marker not in order:
+                order.append(marker)
+    return order
+
+
+def marker_menu(features: Mapping[str, Feature], info: pd.DataFrame) -> dict[str, dict[str, str]]:
+    columns = {(feature.marker, feature.measure): column for column, feature in features.items()}
+    menu: dict[str, dict[str, str]] = {}
+    for marker in _panel(info):
+        measures = {words: columns[marker, words] for words in MEASURES.values() if (marker, words) in columns}
+        if measures:
+            menu[marker] = measures
+    for column, feature in features.items():
+        if feature.measure == VALUE and feature.marker not in menu:
+            menu[feature.marker] = {VALUE: column}
+    return menu
 
 
 def natural_key(value: object) -> tuple[Any, ...]:

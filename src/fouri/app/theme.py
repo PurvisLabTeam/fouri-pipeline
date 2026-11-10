@@ -1,7 +1,7 @@
 """The app's look: a violet palette in light and dark, one font, flat cards, and figures to match.
 
 The palette lives in CSS variables, so the class Quasar puts on the page body in dark mode
-switches every colour at once. Plotly figures cannot read CSS, so ``restyle`` sets their colours
+switches every color at once. Plotly figures cannot read CSS, so ``restyle`` sets their colors
 for the mode.
 """
 
@@ -39,7 +39,7 @@ def _variables(palette: dict[str, str]) -> str:
     return "".join(f"--c-{name}: {value};" for name, value in palette.items())
 
 
-# Quasar's own primary colour is set on the body by ui.colors; the !important lets dark mode
+# Quasar's own primary color is set on the body by ui.colors; the !important lets dark mode
 # override it, so the switch changes buttons and links without rebuilding the page.
 CSS = f"""
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -84,7 +84,7 @@ def apply_theme() -> None:
     ui.linear_progress.default_props("rounded")
 
 
-# fouri.plots' colours, chosen for a white background, and their lighter versions for a dark one
+# fouri.plots' colors, chosen for a white background, and their lighter versions for a dark one
 DARK_SWAP = {
     "#7c3aed": "#a78bfa",
     "#1d4ed8": "#60a5fa",
@@ -97,23 +97,23 @@ WHITE = "#FFFFFF"
 POINTS = {"scatter", "scattergl", "scatter3d"}
 
 
-def _swap(colour: Any) -> Any:
-    return DARK_SWAP.get(colour.lower(), colour) if isinstance(colour, str) else colour
+def _swap(color: Any) -> Any:
+    return DARK_SWAP.get(color.lower(), color) if isinstance(color, str) else color
 
 
-def _numbers(colour: Any) -> bool:
-    """Whether a marker colour is a number per point rather than one colour."""
-    if colour is None or isinstance(colour, str):
+def _numbers(color: Any) -> bool:
+    """Whether a marker color is a number per point rather than one color."""
+    if color is None or isinstance(color, str):
         return False
     try:
-        first = colour[0]
+        first = color[0]
     except (TypeError, IndexError, KeyError):
         return False
     return isinstance(first, int | float | np.number) and not isinstance(first, bool | np.bool_)
 
 
-def coloured_by_value(fig: go.Figure) -> bool:
-    """Return whether the figure colours its points by a number on a colour scale."""
+def colored_by_value(fig: go.Figure) -> bool:
+    """Return whether the figure colors its points by a number on a color scale."""
     return any(
         trace.type in POINTS and (trace.marker.coloraxis is not None or _numbers(trace.marker.color))
         for trace in fig.data
@@ -121,17 +121,17 @@ def coloured_by_value(fig: go.Figure) -> bool:
 
 
 def on_white_panel(fig: go.Figure, *, dark: bool) -> bool:
-    """Return whether the figure belongs on a white panel: dark mode, points coloured by value."""
-    return dark and coloured_by_value(fig)
+    """Return whether the figure belongs on a white panel: dark mode, points colored by value."""
+    return dark and colored_by_value(fig)
 
 
 def restyle(fig: go.Figure, *, dark: bool) -> go.Figure:
-    """Return the figure styled for the mode, with its colour scales and ranges untouched.
+    """Return the figure styled for the mode, with its color scales and ranges untouched.
 
     The figure is changed in place: a transparent background with the mode's text, grid and
-    axis colours. Points coloured by a value keep the light style on a white background even in
+    axis colors. Points colored by a value keep the light style on a white background even in
     dark mode, since a scale's dark end would sink into a dark one. Otherwise, in dark mode,
-    fouri.plots' colours turn lighter and bars get dark outlines.
+    fouri.plots' colors turn lighter and bars get dark outlines.
     """
     white = on_white_panel(fig, dark=dark)
     dark = dark and not white

@@ -24,7 +24,7 @@ class AppState:
     """What the whole app shares: the experiment open, light or dark, the GPU found, the run."""
 
     experiment: Experiment | None = None
-    dark: bool = True
+    dark: bool = False
     run: Run | None = None  # the run going, or the last one that ended
     gpu: str | None = None  # the GPU's name; None when none was found
     checking_gpu: bool = True  # the check made when the app opens has not answered yet

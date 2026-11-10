@@ -50,7 +50,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     # only this PC can reach the app, not the rest of the network
     if args.browser:
-        ui.run(title="4i pipeline", dark=True, reload=False, host="127.0.0.1", port=8080)
+        ui.run(title="4i pipeline", dark=False, reload=False, host="127.0.0.1", port=8080)
     else:
         app.native.window_args["confirm_close"] = True  # the window asks before it closes
-        ui.run(title="4i pipeline", dark=True, reload=False, host="127.0.0.1", native=True, window_size=(1400, 900))
+        ui.run(title="4i pipeline", dark=False, reload=False, host="127.0.0.1", native=True, window_size=(1400, 900))

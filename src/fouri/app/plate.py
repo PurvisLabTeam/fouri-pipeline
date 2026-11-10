@@ -1,6 +1,6 @@
-"""The plate: every well position, the imaged wells in a colour each, the rest dashed.
+"""The plate: every well position, the imaged wells in a color each, the rest dashed.
 
-``plate`` knows nothing of what the colours mean, so the Experiment page can colour wells by how
+``plate`` knows nothing of what the colors mean, so the Experiment page can color wells by how
 far they have got and the Run page by whether they are picked.
 """
 
@@ -55,19 +55,19 @@ def _click(on_click: Callable[[str], None], well: str) -> Callable[[], None]:
 
 def plate(
     exp: Experiment,
-    colours: Mapping[str, str],
+    colors: Mapping[str, str],
     *,
     hover: Mapping[str, str] | None = None,
     on_click: Callable[[str], None] | None = None,
 ) -> None:
-    """Draw the plate: imaged wells in their colours, the rest dashed; a click passes the well.
+    """Draw the plate: imaged wells in their colors, the rest dashed; a click passes the well.
 
     ``hover`` gives the text shown when the pointer rests on an imaged well. ``on_click`` gets the
     name of any well clicked, imaged or not.
     """
     rows, columns = plate_grid(exp)
     imaged = {normalize_well(well) for well in exp.well_list}
-    fills = {normalize_well(well): colour for well, colour in colours.items()}
+    fills = {normalize_well(well): color for well, color in colors.items()}
     texts = {normalize_well(well): text for well, text in (hover or {}).items()}
     with ui.grid(columns=len(columns) + 1).classes("gap-1"):
         ui.label("")

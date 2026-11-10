@@ -20,12 +20,12 @@ from fouri.io import read_info_file
 from fouri.status import State
 
 SECTION_TITLE = "text-[1.05rem] font-semibold"
-STATE_COLOURS = {State.COMPLETE: "#0F9E8E", State.PARTIAL: "#D97706", State.NOT_STARTED: "#A8A3BC"}
+STATE_COLORS = {State.COMPLETE: "#0F9E8E", State.PARTIAL: "#D97706", State.NOT_STARTED: "#A8A3BC"}
 NOT_IMAGED = "border: 1px dashed var(--c-line)"
 LEGEND = [
-    ("complete", f"background: {STATE_COLOURS[State.COMPLETE]}"),
-    ("partial", f"background: {STATE_COLOURS[State.PARTIAL]}"),
-    ("not started", f"background: {STATE_COLOURS[State.NOT_STARTED]}"),
+    ("complete", f"background: {STATE_COLORS[State.COMPLETE]}"),
+    ("partial", f"background: {STATE_COLORS[State.PARTIAL]}"),
+    ("not started", f"background: {STATE_COLORS[State.NOT_STARTED]}"),
     ("not imaged", NOT_IMAGED),
 ]
 CAN_NOT_OPEN = (OSError, ValueError, AttributeError, TypeError)  # what loading a file that isn't an experiment raises
@@ -220,13 +220,13 @@ def _message_card(text: str) -> None:
 
 
 def _plate_card(exp: Experiment, states: dict[str, State]) -> None:
-    colours = {well: STATE_COLOURS[state] for well, state in states.items()}
+    colors = {well: STATE_COLORS[state] for well, state in states.items()}
     metadata = exp.well_metadata
     hover = {well: _hover_text(well, metadata.get(well, {}), state) for well, state in states.items()}
     with ui.card().classes("p-5"):
         ui.label("Plate").classes(SECTION_TITLE)
         with ui.element("div").classes("mt-2"):
-            plate(exp, colours, hover=hover)
+            plate(exp, colors, hover=hover)
         with ui.row().classes("gap-3 text-xs muted mt-3"):
             for name, style in LEGEND:
                 with ui.row().classes("items-center gap-1"):

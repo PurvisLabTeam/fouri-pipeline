@@ -35,7 +35,7 @@ BADGE_STYLE = "background: var(--c-primary-soft); color: var(--c-primary)"
 WORKER_CHOICES = {0: "Automatic", 1: "1", 2: "2", 4: "4", 8: "8", 12: "12"}  # 0 is Automatic
 MAX_BARS = 3  # the step's own bars shown under the step bar
 IDLE = "Nothing running."
-# the step bar's colour and the line above it once a run has ended
+# the step bar's color and the line above it once a run has ended
 ENDINGS = {
     "done": ("positive", "Finished: all wells complete."),
     "failed": (
@@ -191,8 +191,8 @@ def _wells_card(exp: Experiment, picked: dict[str, bool]) -> None:
 
         @ui.refreshable
         def drawn() -> None:
-            colours = {well: PICKED if on else NOT_PICKED for well, on in picked.items()}
-            plate(exp, colours, hover=hover, on_click=toggle)
+            colors = {well: PICKED if on else NOT_PICKED for well, on in picked.items()}
+            plate(exp, colors, hover=hover, on_click=toggle)
             count.text = f"{sum(picked.values())} of {len(picked)} wells chosen"
 
         def pick(wells: set[str]) -> None:
@@ -309,7 +309,7 @@ def _step_card(
                     _control(step, setting, values)
 
 
-def _colour(bar: ui.linear_progress, name: str) -> None:
+def _color(bar: ui.linear_progress, name: str) -> None:
     if bar.props.get("color") != name:
         bar.props(f"color={name}")
 
@@ -377,17 +377,17 @@ def _progress_card(start: Callable[[], Awaitable[None]]) -> None:
                 seconds = step_time_left(run.progress[position], now, run.requests[position].images)
                 step_line.text = running_line(run) + ("" if seconds is None else f" · {time_left_text(seconds, now)}")
                 step_bar.value = (position + step_share(run.progress[position])) / len(run.progress)
-                _colour(step_bar, "primary")
+                _color(step_bar, "primary")
                 show_bars(bars)
                 return
             how = ending(run)
-            colour, text = ENDINGS[how]
+            color, text = ENDINGS[how]
             failed = [well for progress in run.progress for well in progress.failed]
             if how == "failed" and failed:
                 text += f" Failed: {', '.join(failed)}."
             step_line.text = text
             step_bar.value = 1
-            _colour(step_bar, colour)
+            _color(step_bar, color)
             show_bars([])
 
         refresh()
