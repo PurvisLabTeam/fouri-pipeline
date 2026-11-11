@@ -17,6 +17,7 @@ from typing import Any
 from nicegui import ui
 from tqdm import tqdm
 
+from fouri.app.embeddings import embedding_settings
 from fouri.app.gpu import cpu_minutes, images_to_segment
 from fouri.app.plate import plate
 from fouri.app.rules import switched_on_filters
@@ -54,6 +55,9 @@ STILL_CHECKING = "Still checking for a GPU. Try again in a moment."
 ON_CPU_LINE = "Segment nuclei runs on the CPU: no GPU found."
 NO_FILTERS = "No filters switched on."
 FILTERS_UNREADABLE = "The saved filters can't be read. Fix them on the Filters page."
+NO_EMBEDDING_SETUP = "Set up the embeddings on the Embedding page first."
+EMBEDDING_UNREADABLE = "The embedding set-up can't be read. Save it again on the Embedding page."
+ALL_SKIPPED = "Every embedding set up is skipped. Tick some on the Embedding page."
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")  # not %a, which follows the PC's language
 
 
@@ -281,6 +285,28 @@ def _filters_line(exp: Experiment) -> bool:
     return True
 
 
+def _embedding_line(exp: Experiment) -> bool:
+    try:
+        settings = embedding_settings(exp)
+    except ValueError:
+        ui.label(EMBEDDING_UNREADABLE).classes("text-xs text-negative mt-1")
+        return False
+    if settings is None:
+        ui.label(NO_EMBEDDING_SETUP).classes("text-xs mt-1")
+        return False
+    count = len(settings["runs"])
+    if not count:
+        ui.label(ALL_SKIPPED).classes("text-xs mt-1")
+        return False
+    noun = "embedding" if count == 1 else "embeddings"
+    ui.label(f"{count} {noun} set up on the Embedding page.").classes("text-xs mt-1")
+    return True
+
+
+def _tickable(step: Step) -> bool:
+    return step == Step.EMBEDDING or can_tick(step)
+
+
 async def _ask_cpu(images: int) -> bool:
     """Ask before Segment nuclei runs on the CPU; return whether to go ahead."""
     count = f"{images} image{'' if images == 1 else 's'}"
@@ -314,12 +340,15 @@ def _step_card(
             ).style(BADGE_STYLE)
             with ui.column().classes("gap-0 grow"):
                 box = ui.checkbox(STEP_NAMES[step]).bind_value(ticked, step).classes("font-medium -ml-2")
-                if not can_tick(step):
+                if not _tickable(step):
                     box.disable()
                 ui.label(DESCRIPTIONS[step]).classes("text-xs muted -mt-1")
                 if step == Step.SEGMENT:
                     _gpu_line()
                 if step == Step.TABLE and not _filters_line(exp):
+                    ticked[step] = False
+                    box.disable()
+                if step == Step.EMBEDDING and not _embedding_line(exp):
                     ticked[step] = False
                     box.disable()
             if step in PER_WELL_STEPS:
@@ -427,7 +456,7 @@ def _content(exp: Experiment) -> None:
     async def start() -> None:
         if run_going():
             return
-        chosen = [step for step in Step if ticked[step] and can_tick(step)]
+        chosen = [step for step in Step if ticked[step] and _tickable(step)]
         if not chosen:
             ui.notify("Tick at least one step.", type="warning")
             return
@@ -452,6 +481,16 @@ def _content(exp: Experiment) -> None:
                 if not await _ask_cpu(images) or run_going():
                     return
                 on_cpu = True
+        embedding: dict[str, Any] | None = None
+        if Step.EMBEDDING in chosen:
+            try:
+                embedding = embedding_settings(load_config(exp.config_path, announce=False))
+            except (OSError, ValueError) as error:
+                ui.notify(f"The run could not start: {error}", type="negative")
+                return
+            if embedding is None or not embedding["runs"]:
+                ui.notify(NO_EMBEDDING_SETUP if embedding is None else ALL_SKIPPED, type="negative")
+                return
         filters: list[str] = []
         if Step.TABLE in chosen:
             try:
@@ -472,6 +511,8 @@ def _content(exp: Experiment) -> None:
             next(request for request in requests if request.step == Step.SEGMENT).settings["allow_cpu"] = True
         if Step.TABLE in chosen:
             next(request for request in requests if request.step == Step.TABLE).settings["filters"] = filters
+        if embedding is not None:
+            next(request for request in requests if request.step == Step.EMBEDDING).settings.update(embedding)
         try:
             run = Run(exp.config_path, requests)
             run.start()

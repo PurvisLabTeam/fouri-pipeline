@@ -78,7 +78,15 @@ saves its paths and anchor round, and with its own Save the derived features; bo
   (`set_on_samples` and `sds` are the page's record of how the cut-offs were chosen; Build cell table ignores
   them); a `gates` rule takes `x`, `y` and `gates`, each gate a `class`, a `shape` and `points`, [x, y] pairs in
   the features' own values: two opposite corners for a `rectangle`, the outline (three or more) for a `freehand`.
-  `fouri.labels.saved_labels` reads them the same way and refuses two labels with one column.
+  `fouri.labels.saved_labels` reads them the same way and refuses two labels with one column. `app.embedding`
+  is the experiment's one embedding set-up, saved by the Embedding page's set-up tab: `picked` (column names),
+  `samples` (sample IDs), `ranking_k`, `top_n` (a list), `methods` (always both `PHATE` and `UMAP`, each with
+  `dims`, empty when the method makes no run, and `settings`, a list of values per setting as
+  `fouri.embedding` passes them: `knn`, `t`, `gamma`, `decay`, `n_pca`; `n_neighbors`, `min_dist`, `metric`),
+  `skipped` (the `run_key` of each run unticked), `seed` and `values` (`original` until batch correction).
+  `fouri.app.embeddings.saved_setup` reads it, None when missing, and refuses one with a key missing or of the
+  wrong type; `embedding_settings` turns it into what the Run page's Embedding card sends `make_embeddings`:
+  every run of the set-up not skipped, `picked`, `samples`, `ranking_k` and `seed`.
 - Wells are always zero-padded (`B02`), normalized by `metadata.normalize_well`, sorted by `plate_sort_key`.
 - Committed notebooks keep the placeholder `CONFIG = r'Z:\PATH\TO\EXPERIMENT\experiment.json'`; do not
   commit a local path.
@@ -263,7 +271,8 @@ rules, read from disk, for the app's Status page; change it with a step's skip r
 - `make_runs(method, dims, top_n, settings)` builds a `Run` (method, dims, top_n, settings) per combination;
   `embed_grid(exp, runs, picked, *, samples, ranking_k, seed, n_workers)` ranks once, runs every `Run` side by
   side with `parallel_map` on its top-ranked picked features, and saves each under
-  `X_{method}_{dims}d_top{n}_{setting}{value}…` (settings sorted). The same run with the same picked
+  `X_{method}_{dims}d_top{n}_{setting}{value}…` (settings sorted), the name `run_key(run)` gives, which the
+  app's set-up tab also uses, so the set-up, the Run page and `embed_grid` agree. The same run with the same picked
   features, samples, ranking k and seed replaces its embedding (the result is identical); other inputs get
   `_2`, `_3`. `.uns["embeddings"][key]` records method, dims, top_n, settings, picked, the samples actually
   used, ranking_k, seed, and the features used with their scores.

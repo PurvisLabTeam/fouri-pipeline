@@ -123,8 +123,8 @@ def _check_features(adata: ad.AnnData, features: Sequence[str]) -> None:
     not_in_file = [name for name in features if name not in adata.var_names]
     if not_in_file:
         raise ValueError(
-            "The following features were selected for ranking but do not exist in the anndata file: "
-            f"{', '.join(not_in_file)}"
+            "The following features were selected for ranking but do not exist in the anndata file:"
+            + "".join(f"\n\t{name}" for name in not_in_file)
         )
 
 
@@ -180,8 +180,8 @@ def embed_grid(
     out_of_range = [run for run in runs if not 1 <= run.top_n <= len(order)]
     if out_of_range:
         raise ValueError(
-            f"A run can use 1 to {len(order)} features, but these ask for something else: "
-            + ", ".join(_run_key(run) for run in out_of_range)
+            f"A run can use 1 to {len(order)} features, but these ask for something else:"
+            + "".join(f"\n\t{run_key(run)}" for run in out_of_range)
         )
 
     coordinates = parallel_map(
@@ -191,7 +191,7 @@ def embed_grid(
         unit="run",
         n_workers=n_workers,
         mem_per_worker=EMBED_MEM_PER_WORKER,
-        names=[_run_key(run) for run in runs],
+        names=[run_key(run) for run in runs],
     )
 
     used_samples = sorted(int(sample) for sample in adata.obs["sample_ID"][_sample_mask(adata, samples)].unique())
@@ -213,7 +213,7 @@ def embed_grid(
             "features": features,
             "scores": ranking[features].to_numpy(),
         }
-        key = _free_key(adata, _run_key(run), record)
+        key = _free_key(adata, run_key(run), record)
         adata.obsm[key] = coords
         embeddings[key] = record
         keys.append(key)
@@ -221,12 +221,15 @@ def embed_grid(
     if keys:  # a file where every run failed is left as it was
         with written_whole(path) as partial:
             adata.write_h5ad(partial)
-        say(f"Saved {len(keys)} embedding(s) to {path.name}: {', '.join(keys)}")
+        say(
+            f"Saved {len(keys)} embedding(s) to {path.name}, under these names in .obsm (the cell coordinates) "
+            'and .uns["embeddings"] (the settings that made each):' + "".join(f"\n\t{key}" for key in keys)
+        )
     check_results(coordinates, unit="run")
     return keys
 
 
-def _run_key(run: Run) -> str:
+def run_key(run: Run) -> str:
     # e.g. X_phate_3d_top10_gamma1_knn80_tauto; settings sorted by name, so a run keeps its key
     parts = [f"X_{run.method.lower()}", f"{run.dims}d", f"top{run.top_n}"]
     parts += [f"{name}{value}" for name, value in sorted(run.settings.items())]
