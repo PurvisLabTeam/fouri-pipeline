@@ -9,15 +9,17 @@ from fouri.app.shell import page_frame
 from fouri.app.state import STATE, run_going
 
 SECTION_TITLE = "text-[1.05rem] font-semibold"
+NOTES = "notes"
 COLUMNS = [
     {"name": name, "label": label, "field": name, "align": "left"}
+    | ({"style": "white-space: pre-wrap"} if name == NOTES else {})
     for name, label in [
         ("started", "Started"),
         ("steps", "Steps"),
         ("wells", "Wells"),
         ("result", "Result"),
         ("took", "Took"),
-        ("notes", "Notes"),
+        (NOTES, "Notes"),
     ]
 ]
 
@@ -39,7 +41,7 @@ def _table_row(key: int, row: RunRow) -> dict[str, object]:
         "wells": ", ".join(row.wells),
         "result": row.result,
         "took": _took_text(row.seconds),
-        "notes": "; ".join(row.notes),
+        NOTES: "\n".join(row.notes),
     }
 
 

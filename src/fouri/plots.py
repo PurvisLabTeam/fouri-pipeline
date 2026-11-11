@@ -134,7 +134,7 @@ def plot_threshold_histogram(
         font_family=FONT,
         font_size=14,
         title_text=title or f"{values.size:,} cells",
-        title_subtitle_text=_subtitle(values, shown, suggestions, low, high),
+        title_subtitle_text=_subtitle(values, shown, suggestions, low, high, sds),
         # hidden axis from 0 at the bottom of the plot to 1 at the top, for the suggestion lines
         yaxis2={"overlaying": "y", "range": [0, 1], "visible": False, "fixedrange": True},
     )
@@ -299,6 +299,7 @@ def _subtitle(
     suggestions: dict[Threshold, list[float]],
     low: float,
     high: float,
+    sds: float,
 ) -> str:
     parts = []
     if Threshold.OTSU in suggestions and Threshold.VALLEY in suggestions:
@@ -309,5 +310,5 @@ def _subtitle(
         parts.append(f"{off_screen:,} cells off screen (double-click to show)")
     far_out = values.size - shown.size
     if far_out:
-        parts.append(f"{far_out:,} cells more than 3 SD from the mean not drawn")
+        parts.append(f"{far_out:,} cells more than {sds:g} SD from the mean not drawn")
     return " · ".join(parts)

@@ -98,7 +98,19 @@ def _plural(count: int, word: str) -> str:
     return f"{count:,} {word}" if count == 1 else f"{count:,} {word}s"
 
 
-def _line(drawn: int, total: int, filtered: int, sampled: bool, no_value: int, at_or_below: int, outliers: int) -> str:
+def cells_line(
+    drawn: int,
+    total: int,
+    *,
+    filtered: int = 0,
+    not_picked: int = 0,
+    sampled: bool = False,
+    no_value: int = 0,
+    at_or_below: int = 0,
+    outliers: int = 0,
+    beyond_sds: int = 0,
+    sds: float = 3,
+) -> str:
     count = f"{drawn:,} of {total:,} cells" if drawn < total else _plural(total, "cell")
     hidden = []
     if no_value:
@@ -107,7 +119,11 @@ def _line(drawn: int, total: int, filtered: int, sampled: bool, no_value: int, a
         hidden.append(f"{at_or_below:,} at or below 0")
     if outliers:
         hidden.append(_plural(outliers, "outlier"))
+    if beyond_sds:
+        hidden.append(f"{beyond_sds:,} beyond {sds:g} {'SD' if sds == 1 else 'SDs'}")
     reasons = [f"{filtered:,} filtered"] if filtered else []
+    if not_picked:
+        reasons.append(f"{not_picked:,} in samples not picked")
     if sampled:
         reasons.append("random sample")
     if hidden:
@@ -250,4 +266,13 @@ def explore_figure(cells: Cells, choices: Choices, kept: pd.Series | None = None
         legend_title_text="",
         legend_itemsizing="constant",
     )
-    return fig, _line(len(frame), total, filtered, sampled, no_value, at_or_below, outliers)
+    line = cells_line(
+        len(frame),
+        total,
+        filtered=filtered,
+        sampled=sampled,
+        no_value=no_value,
+        at_or_below=at_or_below,
+        outliers=outliers,
+    )
+    return fig, line

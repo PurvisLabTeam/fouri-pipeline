@@ -15,6 +15,7 @@ Result = Literal["done", "failed", "stopped", "running", "did not finish"]
 EVENTS = ("started", "ended")
 STEPS = {step.value for step in Step}
 CPU_NOTE = "segmentation on the CPU"
+INDENT = "    "
 
 
 @dataclass(frozen=True)
@@ -150,23 +151,31 @@ def _on_cpu(lines: _StepLines) -> bool:
     return lines.step == Step.SEGMENT.value and isinstance(settings, dict) and settings.get("allow_cpu") is True
 
 
-def _filters(lines: _StepLines) -> list[str]:
+def _table_setting(lines: _StepLines, key: str) -> list[str]:
     settings = _first(lines).get("settings")
     if lines.step != Step.TABLE.value or not isinstance(settings, dict):
         return []
-    names = settings.get("filters")
+    names = settings.get(key)
     return [str(name) for name in names] if isinstance(names, list) else []
+
+
+def _applied(steps: list[_StepLines], key: str) -> list[str]:
+    applied: list[str] = []
+    for lines in steps:
+        for name in _table_setting(lines, key):
+            if name not in applied:
+                applied.append(name)
+    return applied
 
 
 def _notes(steps: list[_StepLines]) -> list[str]:
     notes = [CPU_NOTE] if any(_on_cpu(lines) for lines in steps) else []
-    applied: list[str] = []
-    for lines in steps:
-        for name in _filters(lines):
-            if name not in applied:
-                applied.append(name)
-    if applied:
-        notes.append(f"filters: {', '.join(applied)}")
+    filters = _applied(steps, "filters")
+    if filters:
+        notes.append(f"filters: {', '.join(filters)}")
+    labels = _applied(steps, "labels")
+    if labels:
+        notes.append("\n".join(["labels:", *(f"{INDENT}{name}" for name in labels)]))
     failed: list[str] = []
     for lines in steps:
         listed = lines.ended.get("failed") if lines.ended is not None else None

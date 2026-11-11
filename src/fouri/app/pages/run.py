@@ -20,7 +20,7 @@ from tqdm import tqdm
 from fouri.app.embeddings import embedding_settings
 from fouri.app.gpu import cpu_minutes, images_to_segment
 from fouri.app.plate import plate
-from fouri.app.rules import switched_on_filters
+from fouri.app.rules import switched_on_filters, switched_on_labels
 from fouri.app.runner import Bar, Run, StepProgress, StepRequest, time_left
 from fouri.app.shell import page_frame, running_line
 from fouri.app.state import POLL_SECONDS, STATE, run_going, stop_run
@@ -55,6 +55,9 @@ STILL_CHECKING = "Still checking for a GPU. Try again in a moment."
 ON_CPU_LINE = "Segment nuclei runs on the CPU: no GPU found."
 NO_FILTERS = "No filters switched on."
 FILTERS_UNREADABLE = "The saved filters can't be read. Fix them on the Filters page."
+NO_LABELS = "No labels switched on."
+LABELS_UNREADABLE = "The saved labels can't be read. Fix them on the Labels & gates page."
+INDENT = "    "
 NO_EMBEDDING_SETUP = "Set up the embeddings on the Embedding page first."
 EMBEDDING_UNREADABLE = "The embedding set-up can't be read. Save it again on the Embedding page."
 ALL_SKIPPED = "Every embedding set up is skipped. Tick some on the Embedding page."
@@ -285,6 +288,17 @@ def _filters_line(exp: Experiment) -> bool:
     return True
 
 
+def _labels_line(exp: Experiment) -> bool:
+    try:
+        names = switched_on_labels(exp)
+    except ValueError:
+        ui.label(LABELS_UNREADABLE).classes("text-xs text-negative mt-1")
+        return False
+    text = "\n".join(["Labels switched on:", *(f"{INDENT}{name}" for name in names)]) if names else NO_LABELS
+    ui.label(text).classes("text-xs mt-1 whitespace-pre-wrap")
+    return True
+
+
 def _embedding_line(exp: Experiment) -> bool:
     try:
         settings = embedding_settings(exp)
@@ -345,9 +359,12 @@ def _step_card(
                 ui.label(DESCRIPTIONS[step]).classes("text-xs muted -mt-1")
                 if step == Step.SEGMENT:
                     _gpu_line()
-                if step == Step.TABLE and not _filters_line(exp):
-                    ticked[step] = False
-                    box.disable()
+                if step == Step.TABLE:
+                    filters_read = _filters_line(exp)
+                    labels_read = _labels_line(exp)
+                    if not (filters_read and labels_read):
+                        ticked[step] = False
+                        box.disable()
                 if step == Step.EMBEDDING and not _embedding_line(exp):
                     ticked[step] = False
                     box.disable()
@@ -492,9 +509,12 @@ def _content(exp: Experiment) -> None:
                 ui.notify(NO_EMBEDDING_SETUP if embedding is None else ALL_SKIPPED, type="negative")
                 return
         filters: list[str] = []
+        labels: list[str] = []
         if Step.TABLE in chosen:
             try:
-                filters = switched_on_filters(load_config(exp.config_path, announce=False))
+                saved = load_config(exp.config_path, announce=False)
+                filters = switched_on_filters(saved)
+                labels = switched_on_labels(saved)
             except (OSError, ValueError) as error:
                 ui.notify(f"The run could not start: {error}", type="negative")
                 return
@@ -510,7 +530,9 @@ def _content(exp: Experiment) -> None:
         if on_cpu:  # this run only: the next run's settings start without it
             next(request for request in requests if request.step == Step.SEGMENT).settings["allow_cpu"] = True
         if Step.TABLE in chosen:
-            next(request for request in requests if request.step == Step.TABLE).settings["filters"] = filters
+            table_settings = next(request for request in requests if request.step == Step.TABLE).settings
+            table_settings["filters"] = filters
+            table_settings["labels"] = labels
         if embedding is not None:
             next(request for request in requests if request.step == Step.EMBEDDING).settings.update(embedding)
         try:

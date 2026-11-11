@@ -77,7 +77,9 @@ saves its paths and anchor round, and with its own Save the derived features; bo
   `threshold` takes `feature`, one or two `cutoffs` and `classes`, one name more than the cut-offs
   (`set_on_samples` and `sds` are the page's record of how the cut-offs were chosen; Build cell table ignores
   them); a `gates` rule takes `x`, `y` and `gates`, each gate a `class`, a `shape` and `points`, [x, y] pairs in
-  the features' own values: two opposite corners for a `rectangle`, the outline (three or more) for a `freehand`.
+  the features' own values: two opposite corners for a `rectangle`, the outline (three or more) for a `freehand`
+  (`x_log10` and `y_log10` are the page's record of whether each axis was drawn on log10, a value on such an axis
+  saved as 10 to the value drawn; Build cell table ignores them).
   `fouri.labels.saved_labels` reads them the same way and refuses two labels with one column. `app.embedding`
   is the experiment's one embedding set-up, saved by the Embedding page's set-up tab: `picked` (column names),
   `samples` (sample IDs), `ranking_k`, `top_n` (a list), `methods` (always both `PHATE` and `UMAP`, each with
