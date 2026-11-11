@@ -3,20 +3,27 @@
 from __future__ import annotations
 
 import json
+import keyword
 import os
 import platform
+from dataclasses import dataclass
+from functools import partial
 from pathlib import Path, PurePath
 from typing import Any
 
 import pandas as pd
-from nicegui import ui
+from nicegui import events, run, ui
 
+from fouri.app.cells import CONDITION, PLATE_COLUMN, PLATE_ROW, WELL, Cells, load_cells
+from fouri.app.derived import FormulaCheck, check_formulas
 from fouri.app.dialogs import pick_file, pick_folder
+from fouri.app.names import Feature, describe
 from fouri.app.plate import overall_state, plate
 from fouri.app.shell import page_frame
 from fouri.app.state import STATE, open_experiment
 from fouri.config import DEFAULT_PATHS, Experiment, save_config
 from fouri.io import read_info_file
+from fouri.metadata import default_derived_features
 from fouri.status import State
 
 SECTION_TITLE = "text-[1.05rem] font-semibold"
@@ -30,6 +37,24 @@ LEGEND = [
 ]
 CAN_NOT_OPEN = (OSError, ValueError, AttributeError, TypeError)  # what loading a file that isn't an experiment raises
 TYPE_IN_FULL = "Type the full path to experiment.json or its folder."
+
+DERIVED_INTRO = (
+    "Features calculated from the measured ones, such as a ratio. Formulas use column names and "
+    "+ - * / ( ), and may use any derived feature listed above them."
+)
+COUNTED = "Computed for {cells:,} of {total:,} cells."
+COUNTING = "Counting cells…"
+SOME_WELLS = "Counted on {measured} of {wells} wells."
+NO_WELLS = "Not checked: no wells measured yet."
+CANT_READ_CELLS = "Not checked: can't read the measured cells: {reason}"
+NEEDS_BOTH = "Give every row a name and a formula, or delete it."
+NAMED_TWICE = "Duplicate row names: change one of the rows named {name}."
+MEASURED_NAME = "{name} is already a measured column. Choose another name."
+GROUP_NAME = "{name} is already a column. Choose another name."
+FIX_RED = "Fix the formulas marked in red, then save."
+SAVED_DERIVED = "Saved {count} to experiment.json."
+GROUP_NAMES = frozenset({WELL, CONDITION, PLATE_ROW, PLATE_COLUMN})
+LINE = "text-xs ml-1"
 
 
 # -- how the paths are written ---------------------------------------------------------------
@@ -255,8 +280,268 @@ def _rounds_card(exp: Experiment, rounds: pd.DataFrame, anchor: int) -> None:
                     ui.label(marker).classes("text-sm" + (" muted" if marker in {"—", "DNA"} else " font-medium"))
 
 
+def _as_typed(column: str) -> str:
+    return column if column.isidentifier() and not keyword.iskeyword(column) else f"`{column}`"
+
+
+def _option(column: str, feature: Feature | None) -> str:
+    title = feature.title if feature is not None else column
+    return column if title == column else f"{column} ({title})"
+
+
+def _selection(args: Any) -> tuple[int, int] | None:
+    if isinstance(args, list) and len(args) == 2 and all(isinstance(value, int) for value in args):
+        return args[0], args[1]
+    return None
+
+
+@dataclass(eq=False)
+class _Row:
+    name: str
+    formula: str
+    cursor: tuple[int, int] | None = None
+    box: ui.input | None = None
+
+
+class _Derived:
+    def __init__(self) -> None:
+        self.config_path = ""
+        self.rows: list[_Row] = []
+        self.selected: _Row | None = None
+        self.info: pd.DataFrame | None = None
+        self.cells: Cells | None = None
+        self.problem = ""
+        self.loading = False
+        self.generation = 0
+        self.checks: list[FormulaCheck] = []
+        self.lines: list[ui.label] = []
+
+    def show(self, exp: Experiment, info: pd.DataFrame | None) -> None:
+        if exp.config_path != self.config_path:
+            self.config_path = exp.config_path
+            self.rows = [_Row(str(spec["name"]), str(spec["formula"])) for spec in exp.derived_features]
+            self.selected = None
+        self.info = info
+        self.cells = None
+        self.problem = ""
+        self.loading = True
+        self.generation += 1
+        with ui.card().classes("w-full max-w-[1000px] p-5 gap-2"):
+            ui.label("Derived features").classes(SECTION_TITLE)
+            ui.label(DERIVED_INTRO).classes("text-sm muted")
+            self.wells_line = ui.label().classes("text-sm muted")
+            self.body = ui.column().classes("w-full gap-1")
+            self.search = ui.select(
+                {}, label="Insert a column into the selected formula", with_input=True, on_change=self._insert
+            ).classes("w-full")
+            with ui.row().classes("gap-2 w-full"):
+                ui.button("Add a feature", icon="add", on_click=self._add).props("outline")
+                suggest = (
+                    ui.button(
+                        "Suggest from the channels",
+                        icon="auto_awesome",
+                        on_click=partial(self._suggest, exp.info_file),
+                    )
+                    .props("outline")
+                    .tooltip("pRB / RB when both are in one round")
+                )
+                suggest.set_enabled(info is not None)
+                ui.space()
+                self.save_button = ui.button("Save to experiment.json", icon="save", on_click=self._save)
+        self._draw_rows()
+        ui.timer(0, partial(self._load, exp, self.generation), once=True)
+
+    async def _load(self, exp: Experiment, generation: int) -> None:
+        try:
+            cells = await run.io_bound(load_cells, exp)
+        except Exception as error:
+            if generation != self.generation:
+                return
+            self.problem = CANT_READ_CELLS.format(reason=_reason(error))
+        else:
+            if generation != self.generation:
+                return
+            self.cells = cells
+        self.loading = False
+        self._update_search()
+        self._recheck()
+
+    def _measured(self) -> Cells | None:
+        return self.cells if self.cells is not None and self.cells.measured else None
+
+    def _draw_rows(self) -> None:
+        self.body.clear()
+        self.lines = []
+        with self.body:
+            for row in self.rows:
+                with ui.row().classes("w-full items-center no-wrap gap-2"):
+                    ui.input("Name", value=row.name, on_change=partial(self._renamed, row)).classes("w-48")
+                    row.box = ui.input("Formula", value=row.formula, on_change=partial(self._typed, row)).classes(
+                        "grow font-mono"
+                    )
+                    row.box.on("focus", partial(self._select, row), js_handler="() => emit()")
+                    row.box.on(
+                        "blur",
+                        partial(self._left, row),
+                        js_handler="(e) => emit(e.target.selectionStart, e.target.selectionEnd)",
+                    )
+                    ui.button(icon="delete", on_click=partial(self._delete, row)).props("flat dense round").tooltip(
+                        "Delete"
+                    )
+                self.lines.append(ui.label().classes(LINE))
+        self._recheck()
+
+    def _line(self, row: _Row, check: FormulaCheck | None, total: int) -> tuple[str, str]:
+        if not row.formula.strip():
+            return "", "muted"
+        if self.loading:
+            return COUNTING, "text-warning"
+        if check is None:
+            return "", "muted"
+        if check.cells is not None:
+            return "✓ " + COUNTED.format(cells=check.cells, total=total), "text-positive"
+        return "✗ " + check.problem, "text-negative" if check.stops_build else "text-warning"
+
+    def _wells_text(self) -> str:
+        if self.loading:
+            return ""
+        if self.problem:
+            return self.problem
+        cells = self._measured()
+        if cells is None:
+            return NO_WELLS
+        if cells.missing:
+            return SOME_WELLS.format(measured=len(cells.measured), wells=len(cells.measured) + len(cells.missing))
+        return ""
+
+    def _recheck(self) -> None:
+        cells = self._measured()
+        specs = [{"name": row.name, "formula": row.formula} for row in self.rows]
+        self.checks = check_formulas(cells.base, specs) if cells is not None and not self.loading else []
+        total = len(cells.base) if cells is not None else 0
+        for index, (row, line) in enumerate(zip(self.rows, self.lines, strict=True)):
+            check = self.checks[index] if self.checks else None
+            text, color = self._line(row, check, total)
+            line.set_text(text)
+            line.classes(replace=f"{LINE} {color}")
+            line.set_visibility(bool(text))
+        wells = self._wells_text()
+        self.wells_line.set_text(wells)
+        self.wells_line.set_visibility(bool(wells))
+        self.save_button.set_enabled(not self.loading)
+
+    def _update_search(self) -> None:
+        cells = self._measured()
+        if cells is None:
+            self.search.set_options([])
+            return
+        columns = cells.base.select_dtypes("number").columns.tolist()
+        names = describe(columns, self.info) if self.info is not None else {}
+        options = {column: _option(column, names.get(column)) for column in columns}
+        for row in self.rows:
+            if row.name.strip() and row.name not in options:
+                options[row.name] = row.name
+        self.search.set_options(options)
+
+    def _typed(self, row: _Row, event: events.ValueChangeEventArguments) -> None:
+        row.formula = event.value or ""
+        self._recheck()
+
+    def _renamed(self, row: _Row, event: events.ValueChangeEventArguments) -> None:
+        row.name = event.value or ""
+        self._recheck()
+        self._update_search()
+
+    def _select(self, row: _Row, _: events.GenericEventArguments) -> None:
+        self.selected = row
+
+    def _left(self, row: _Row, event: events.GenericEventArguments) -> None:
+        row.cursor = _selection(event.args)
+
+    def _insert(self, event: events.ValueChangeEventArguments) -> None:
+        column = event.value
+        if not column:
+            return
+        self.search.set_value(None)
+        if not self.rows:
+            return
+        row = self.selected if self.selected in self.rows else self.rows[-1]
+        text = _as_typed(str(column))
+        end = len(row.formula)
+        start, stop = row.cursor if row.cursor is not None else (end, end)
+        start, stop = max(0, min(start, end)), max(0, min(stop, end))
+        row.formula = row.formula[:start] + text + row.formula[stop:]
+        position = start + len(text)
+        row.cursor = (position, position)
+        if row.box is not None:
+            row.box.set_value(row.formula)
+            ui.run_javascript(
+                "setTimeout(() => {"
+                f" const box = getHtmlElement({row.box.id}).querySelector('input');"
+                f" box.focus(); box.setSelectionRange({position}, {position});"
+                " }, 50);"
+            )
+        self._recheck()
+
+    def _add(self) -> None:
+        self.rows.append(_Row("", ""))
+        self.selected = None
+        self._draw_rows()
+        self._update_search()
+
+    def _delete(self, row: _Row) -> None:
+        self.rows = [other for other in self.rows if other is not row]
+        if self.selected is row:
+            self.selected = None
+        self._draw_rows()
+        self._update_search()
+
+    def _suggest(self, info_file: str) -> None:
+        names = {row.name for row in self.rows}
+        for spec in default_derived_features(info_file):
+            if spec["name"] not in names:
+                self.rows.append(_Row(spec["name"], spec["formula"]))
+                names.add(spec["name"])
+        self._draw_rows()
+        self._update_search()
+
+    def _refusal(self) -> str:
+        if any(not row.name.strip() or not row.formula.strip() for row in self.rows):
+            return NEEDS_BOTH
+        seen: set[str] = set()
+        for row in self.rows:
+            if row.name in seen:
+                return NAMED_TWICE.format(name=row.name)
+            seen.add(row.name)
+        cells = self._measured()
+        for row in self.rows:
+            if cells is not None and row.name in cells.base.columns:
+                return MEASURED_NAME.format(name=row.name)
+            if row.name in GROUP_NAMES:
+                return GROUP_NAME.format(name=row.name)
+        if any(check.stops_build for check in self.checks):
+            return FIX_RED
+        return ""
+
+    def _save(self) -> None:
+        refusal = self._refusal()
+        if refusal:
+            ui.notify(refusal, type="negative")
+            return
+        try:
+            with open(self.config_path, encoding="utf-8") as file:
+                config = json.load(file)
+            config["derived_features"] = [{"name": row.name, "formula": row.formula} for row in self.rows]
+            save_config(config, self.config_path)
+        except (OSError, ValueError) as error:
+            ui.notify(f"Not saved: {_reason(error)}", type="negative")
+            return
+        open_experiment(self.config_path)
+        ui.notify(SAVED_DERIVED.format(count=_count(len(self.rows), "derived feature")), type="positive")
+
+
 @ui.refreshable
-def _content() -> None:
+def _content(derived: _Derived) -> None:
     exp = STATE.experiment
     with ui.row().classes("w-full gap-6 items-start"):
         with ui.card().classes("w-[560px] p-5 gap-3"):
@@ -302,19 +587,20 @@ def _content() -> None:
                 ui.space()
 
                 def save() -> None:
+                    current = STATE.experiment or exp
                     config = config_to_save(
-                        exp,
+                        current,
                         data=data_box.value,
                         info_file=info_box.value,
                         results=results_box.value,
                         anchor=anchor_box.value if anchor_box is not None else None,
                     )
                     try:
-                        save_config(config, exp.config_path)
+                        save_config(config, current.config_path)
                     except (OSError, ValueError) as error:
                         ui.notify(f"Not saved: {_reason(error)}", type="negative")
                         return
-                    open_experiment(exp.config_path)
+                    open_experiment(current.config_path)
                     ui.notify("Saved. The previous version is in experiment.json.bak.", type="positive")
                     _content.refresh()
 
@@ -326,9 +612,10 @@ def _content() -> None:
             _plate_card(exp, states)
     if rounds is not None and anchor is not None and states is not None:
         _rounds_card(exp, rounds, anchor)
+    derived.show(exp, rounds)
 
 
 @ui.page("/")
 def experiment_page() -> None:
     with page_frame("Experiment"):
-        _content()
+        _content(_Derived())

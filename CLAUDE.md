@@ -48,8 +48,8 @@ cells (one cutoff or two) meant to be run one or the other, so a top-to-bottom r
 Each notebook's first code cell is `CONFIG = r'...experiment.json'` followed by
 `exp = load_config(CONFIG)`; every folder and the well list come from `exp` (`fouri.config.Experiment`).
 `setup_experiment.ipynb` calls `fouri.setup_form` (an ipywidgets plate form), and the app's Experiment page
-saves its paths and anchor round; both write the file through `save_config`, which keeps the previous version
-as `experiment.json.bak`.
+saves its paths and anchor round, and with its own Save the derived features; both write the file through
+`save_config`, which keeps the previous version as `experiment.json.bak`.
 
 - `base_dir` is `mac_base_dir` on non-Windows if set, else `base_dir`, else the folder holding the config.
 - Folder names are `DEFAULT_PATHS` in `config.py`; each can be overridden in the config's `paths`
@@ -185,7 +185,10 @@ rules, read from disk, for the app's Status page; change it with a step's skip r
   `treatment time` in `fullest_df` and `adata.obs` (`_OBS_NAMES`), the name 07 has always used.
   `sample_ID` stays a category of numbers (08 selects samples with `isin([1, 2, …])`), other metadata text.
 - `derived_features` are `pandas.eval` formulas applied in order, so one may use an earlier one; a formula
-  naming a missing column is skipped with a printed message rather than raising.
+  naming a missing column is skipped with a printed message rather than raising, and any other error stops
+  Build cell table. The app's Experiment page checks them the same way (`fouri.app.derived.check_formulas`) on
+  `Cells.base`, the measured wells' cells as `build_fullest_df` joins them, and refuses to save a row that would
+  stop Build cell table, a blank row, a name used twice, a measured column's name or a cell-page group's.
 - Build cell table (`run.build_cell_table(exp, filters=())`) applies the saved filters named in its `filters`
   setting after the derived features, so a filter may use one, and adds the result as the column `included`.
   `fouri.filters.keep` works out one rule on every cell of the table by itself: the percentiles (numpy's

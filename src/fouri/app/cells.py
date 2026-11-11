@@ -36,6 +36,7 @@ class Cells:
     """The cells of the measured wells, with their metadata, groups and derived features."""
 
     table: pd.DataFrame
+    base: pd.DataFrame
     features: dict[str, Feature]
     groups: list[str]
     measured: list[str]
@@ -106,19 +107,36 @@ def add_groups(table: pd.DataFrame, exp: Experiment) -> list[str]:
     return groups
 
 
+def _as_built(base: pd.DataFrame, exp: Experiment) -> pd.DataFrame:
+    base = base.drop(columns=ROW_NUMBER, errors="ignore")
+    text = {column: str for column in metadata_obs_columns(exp) if column != "sample_ID" and column in base}
+    base = base.astype(text)
+    if "sample_ID" in base:
+        base["sample_ID"] = base["sample_ID"].astype("category")
+    return base.copy()
+
+
 def _load(exp: Experiment) -> Cells:
     status = step_status(exp, Step.MEASURE)
     wells = sorted(status, key=plate_sort_key)
     measured = [well for well in wells if status[well].state == State.COMPLETE]
     missing = [well for well in wells if well not in measured]
     if not measured:
-        return Cells(pd.DataFrame(), {}, [], measured, missing)
+        return Cells(pd.DataFrame(), pd.DataFrame(), {}, [], measured, missing)
 
+    obs_names = dict(zip(exp.metadata_columns, metadata_obs_columns(exp), strict=True))
+    metadata = exp.well_metadata
     frames = []
+    based = []
     for well in measured:
-        frame = pd.read_csv(cell_data_path(exp, well)).drop(columns=ROW_NUMBER, errors="ignore")
+        frame = pd.read_csv(cell_data_path(exp, well))
+        meta = metadata.get(well, {})
+        values = {obs_names.get(column, column): [value] * len(frame) for column, value in meta.items()}
+        based.append(pd.concat([frame, pd.DataFrame(values, index=frame.index)], axis=1))
+        frame = frame.drop(columns=ROW_NUMBER, errors="ignore")
         frame[WELL] = well
         frames.append(frame)
+    base = _as_built(pd.concat(based, ignore_index=True), exp)
     table = pd.concat(frames, ignore_index=True)
 
     # add_derived_features copies the table into one block, so the columns after it add quickly
@@ -126,7 +144,7 @@ def _load(exp: Experiment) -> Cells:
     groups = add_groups(table, exp)
 
     features = describe(table.select_dtypes("number").columns.tolist(), read_info_file(exp))
-    return Cells(table, features, groups, measured, missing)
+    return Cells(table, base, features, groups, measured, missing)
 
 
 def load_cells(exp: Experiment) -> Cells:
