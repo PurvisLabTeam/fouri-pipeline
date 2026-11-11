@@ -115,6 +115,13 @@ def marker_menu(features: Mapping[str, Feature], info: pd.DataFrame) -> dict[str
     return menu
 
 
+def menu_order(features: dict[str, Feature], info: pd.DataFrame) -> dict[str, str]:
+    menu = marker_menu(features, info)
+    columns = [column for measures in menu.values() for column in measures.values()]
+    columns += [column for column in features if column not in columns]
+    return {column: features[column].title for column in columns}
+
+
 def natural_key(value: object) -> tuple[Any, ...]:
     """Return a sort key that puts 24h before 96h before 120h.
 

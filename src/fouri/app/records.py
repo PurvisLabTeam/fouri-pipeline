@@ -199,6 +199,17 @@ def clock_text(moment: dt.datetime) -> str:
     return f"{moment:%Y-%m-%d} {moment.hour % 12 or 12}:{moment.minute:02d} {'AM' if moment.hour < 12 else 'PM'}"
 
 
+def done_settings(exp: Experiment, step: Step) -> list[dict[str, Any]]:
+    return [
+        dict(line["settings"])
+        for line in _read_lines(exp)
+        if line["event"] == "ended"
+        and line["step"] == step.value
+        and line.get("outcome") == "done"
+        and isinstance(line.get("settings"), dict)
+    ]
+
+
 def read_runs(exp: Experiment, *, running: str | None = None) -> list[RunRow]:
     rows = [
         RunRow(

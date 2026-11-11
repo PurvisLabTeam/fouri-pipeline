@@ -29,6 +29,7 @@ PAGES = [
     ("/labels", "Labels & gates", "label"),
     ("/batch", "Batch effects", "compare_arrows"),
     ("/embedding", "Embedding", "bubble_chart"),
+    ("/export", "Export", "download"),
     ("/models", "Models", "model_training"),
     ("/history", "History", "history"),
 ]

@@ -37,7 +37,7 @@ from fouri.app.embeddings import (
     time_text,
     total_seconds,
 )
-from fouri.app.names import Feature, describe, marker_menu
+from fouri.app.names import Feature, describe, marker_menu, menu_order
 from fouri.app.shell import empty_state, page_frame
 from fouri.app.state import STATE
 from fouri.app.steps import default
@@ -315,13 +315,6 @@ def _count(number: int, noun: str) -> str:
     return f"{number:,} {noun}" + ("" if number == 1 else "s")
 
 
-def _menu_order(features: dict[str, Feature], info: pd.DataFrame) -> dict[str, str]:
-    menu = marker_menu(features, info)
-    columns = [column for measures in menu.values() for column in measures.values()]
-    columns += [column for column in features if column not in columns]
-    return {column: features[column].title for column in columns}
-
-
 def _listed(heading: str, items: list[str]) -> str:
     return "\n".join([heading, *items])
 
@@ -341,7 +334,7 @@ class _SetupTab:
     ) -> None:
         self.exp = exp
         self.adata = adata
-        self.options = _menu_order(features, read_info_file(exp))
+        self.options = menu_order(features, read_info_file(exp))
         self.samples = sample_names(table, exp)
         numbers: Counter[int | None] = Counter()
         if "sample_ID" in table:
@@ -513,6 +506,7 @@ class _SetupTab:
         box.element.error = box.error
 
     async def new_picked(self, e: ValueChangeEventArguments[Any]) -> None:
+        e.sender.run_method("updateInputValue", "")
         chosen = set(e.value or [])
         self.picked = [column for column in self.options if column in chosen]
         self.check_top_n()
