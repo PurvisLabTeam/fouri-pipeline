@@ -48,13 +48,33 @@ cells (one cutoff or two) meant to be run one or the other, so a top-to-bottom r
 Each notebook's first code cell is `CONFIG = r'...experiment.json'` followed by
 `exp = load_config(CONFIG)`; every folder and the well list come from `exp` (`fouri.config.Experiment`).
 `setup_experiment.ipynb` calls `fouri.setup_form` (an ipywidgets plate form), and the app's Experiment page
-saves its paths and anchor round, and with its own Save the derived features; both write the file through
-`save_config`, which keeps the previous version as `experiment.json.bak`.
+starts an experiment and saves, each with its own Save, its paths and anchor round, the details, the wells
+with their metadata and condition columns, and the derived features; both write the file through
+`save_config`, which keeps the previous version as `experiment.json.bak`, and each of the page's Saves
+writes only its own keys, every other key as it was.
+
+- New experiment (`fouri.app.wells.new_config`) writes experiment.json in a results folder, which it creates
+  when missing: every well with ND2 files, no metadata, `DEFAULT_CONDITION_COLUMNS`, `anchor_round` 0, the
+  folder's name as `experiment_key` and the paths written as the page writes them (below). It refuses a
+  folder that already has an experiment.json, an ND2 folder with no well's files, or an info_exp.csv that
+  can't be read.
+- The details card (`wells.save_details`) writes `experiment_key`, `experiment_name`, `cell_type`, `passage`,
+  `date_completed` and `notes`, as the setup form does. The wells card (`wells.save_wells`) writes
+  `well_list`, `well_metadata` (`metadata.table_to_config`) and `condition_columns`, and is refused while
+  `check_metadata` finds an error. The standard three keep their Condition ticks whatever their values; an
+  added column with no value in any well is saved in neither. With no ND2 files found, wells can be removed
+  but not added, and the two ND2 checks are skipped. Import CSV replaces only the CSV's own columns for
+  the wells it lists.
+- The page never changes a sample ID already set, only one typed in its table or imported (a whole number
+  above 0; a cleared one counts as none). On Save, `wells.fill_sample_ids` gives a well with none the ID of
+  the first well in plate order with the same values in the condition columns, else one more than the
+  largest ID, in plate order; it does not call `assign_sample_ids`, which numbers every well again.
 
 - `base_dir` is `mac_base_dir` on non-Windows if set, else `base_dir`, else the folder holding the config.
 - Folder names are `DEFAULT_PATHS` in `config.py`; each can be overridden in the config's `paths`
   (relative to `base_dir` or absolute). A new folder needs an entry there and a property on `Experiment`.
-- The app's Experiment page (`config_to_save` in `fouri/app/pages/experiment.py`) writes the results folder
+- The app's Experiment page (`config_to_save` in `fouri/app/pages/experiment.py`, with `path_entry` in
+  `fouri/app/wells.py`) writes the results folder
   to the key it is read from on that PC (`mac_base_dir` on non-Windows if set, else `base_dir`), left out
   only when the same folder would be read without it (the folder holding the config, with no other key to
   take over: on non-Windows `mac_base_dir` stays while `base_dir` is set), and the ND2 folder and info_exp.csv as
@@ -195,8 +215,9 @@ rules, read from disk, for the app's Status page; change it with a step's skip r
 
 ## Metadata and notebook 07
 
-- `sample_ID` is filled by `metadata.assign_sample_ids` unless every well already has one: wells with the
-  same values in `condition_columns` share an ID, numbered in plate order.
+- `sample_ID` is filled by `metadata.assign_sample_ids` (the setup form) unless every well already has one:
+  wells with the same values in `condition_columns` share an ID, numbered in plate order. The app's
+  Experiment page fills only the wells with none (`wells.fill_sample_ids`, above).
 - `features.build_fullest_df` joins each well's CSV (via `io.cell_data_path`, dropping an old `Unnamed: 0`
   column if present) with its `well_metadata`; `treatment_time` is renamed
   `treatment time` in `fullest_df` and `adata.obs` (`_OBS_NAMES`), the name 07 has always used.

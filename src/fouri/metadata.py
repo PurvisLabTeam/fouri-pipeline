@@ -123,19 +123,32 @@ def assign_sample_ids(table, condition_columns):
     return df
 
 
+def _listed(values):
+    return ", ".join(str(value) for value in values)
+
+
+def _condition_text(values):
+    return " · ".join(value for value in values if value) or "(blank)"
+
+
+def _id_order(value):
+    text = str(value)
+    return (0, int(text), "") if text.isdigit() else (1, 0, text)
+
+
 def check_metadata(table, condition_columns, wells_with_data=None):
     """Return a list of ('error'|'warning', message) for a metadata table."""
     issues = []
-    dup = table["well"][table["well"].duplicated()].unique().tolist()
+    dup = sorted(table["well"][table["well"].duplicated()].unique(), key=plate_sort_key)
     if dup:
-        issues.append(("error", f"Wells listed more than once: {dup}"))
+        issues.append(("error", f"Wells listed more than once: {_listed(dup)}."))
     if wells_with_data is not None:
         missing = sorted(set(table["well"]) - set(wells_with_data), key=plate_sort_key)
         if missing:
-            issues.append(("error", f"No ND2 files in data/ for wells: {missing}"))
+            issues.append(("error", f"No ND2 files for wells: {_listed(missing)}."))
         unused = sorted(set(wells_with_data) - set(table["well"]), key=plate_sort_key)
         if unused:
-            issues.append(("warning", f"Wells with data that are not included: {unused}"))
+            issues.append(("warning", f"Wells with data that are not included: {_listed(unused)}."))
     if "sample_ID" in table.columns:
         cols = [c for c in condition_columns if c in table.columns]
         if cols:
@@ -143,10 +156,12 @@ def check_metadata(table, condition_columns, wells_with_data=None):
             sid = table["sample_ID"].astype(str)
             for s, c in pd.DataFrame({"s": sid, "c": conds}).groupby("s")["c"]:
                 if c.nunique() > 1:
-                    issues.append(("warning", f"sample_ID {s} covers different conditions: {sorted(set(c))}"))
+                    covered = _listed(_condition_text(cond) for cond in sorted(set(c)))
+                    issues.append(("warning", f"Sample ID {s} covers different conditions: {covered}."))
             for c, s in pd.DataFrame({"s": sid, "c": conds}).groupby("c")["s"]:
                 if s.nunique() > 1:
-                    issues.append(("warning", f"Condition {c} has several sample_IDs: {sorted(set(s))}"))
+                    ids = _listed(sorted(set(s), key=_id_order))
+                    issues.append(("warning", f"{_condition_text(c)} has several sample IDs: {ids}."))
     return issues
 
 

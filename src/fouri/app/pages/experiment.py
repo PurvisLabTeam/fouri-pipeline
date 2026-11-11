@@ -18,22 +18,35 @@ from fouri.app.cells import CONDITION, PLATE_COLUMN, PLATE_ROW, WELL, Cells, loa
 from fouri.app.derived import FormulaCheck, check_formulas
 from fouri.app.dialogs import pick_file, pick_folder
 from fouri.app.names import Feature, describe
-from fouri.app.plate import overall_state, plate
+from fouri.app.plate import DASHED, OUTLINED, overall_state, plate
 from fouri.app.shell import page_frame
 from fouri.app.state import STATE, open_experiment
-from fouri.config import DEFAULT_PATHS, Experiment, save_config
+from fouri.app.wells import (
+    DETAILS,
+    SAMPLE_ID,
+    blank,
+    fill_sample_ids,
+    in_full,
+    new_config,
+    path_entry,
+    same_path,
+    save_details,
+    save_wells,
+    wells_table,
+)
+from fouri.config import CONFIG_NAME, DEFAULT_PATHS, Experiment, save_config
 from fouri.io import read_info_file
-from fouri.metadata import default_derived_features
+from fouri.metadata import check_metadata, default_derived_features, plate_sort_key, read_metadata_table, wells_in_data
+from fouri.plots import GROUP_COLORS
 from fouri.status import State
 
 SECTION_TITLE = "text-[1.05rem] font-semibold"
 STATE_COLORS = {State.COMPLETE: "#0F9E8E", State.PARTIAL: "#D97706", State.NOT_STARTED: "#A8A3BC"}
-NOT_IMAGED = "border: 1px dashed var(--c-line)"
 LEGEND = [
     ("complete", f"background: {STATE_COLORS[State.COMPLETE]}"),
     ("partial", f"background: {STATE_COLORS[State.PARTIAL]}"),
     ("not started", f"background: {STATE_COLORS[State.NOT_STARTED]}"),
-    ("not imaged", NOT_IMAGED),
+    ("not imaged", DASHED),
 ]
 CAN_NOT_OPEN = (OSError, ValueError, AttributeError, TypeError)  # what loading a file that isn't an experiment raises
 TYPE_IN_FULL = "Type the full path to experiment.json or its folder."
@@ -56,19 +69,44 @@ SAVED_DERIVED = "Saved {count} to experiment.json."
 GROUP_NAMES = frozenset({WELL, CONDITION, PLATE_ROW, PLATE_COLUMN})
 LINE = "text-xs ml-1"
 
+NEED_RESULTS = "Pick the results folder."
+RESULTS_IN_FULL = r"Give the results folder in full, for example Z:\Experiments\2026-11-11."
+CREATED = "Created experiment.json with {wells}. Fill in their conditions below."
+CREATED_FOLDER = "Created {folder} and experiment.json in it with {wells}. Fill in their conditions below."
+
+DETAIL_LABELS = {
+    "experiment_key": "Experiment key",
+    "experiment_name": "Name",
+    "cell_type": "Cell type",
+    "passage": "Passage",
+    "date_completed": "Date completed",
+    "notes": "Notes",
+}
+SAVED_DETAILS = "Saved the experiment details."
+
+NO_ID_COLOR = "#A8A3BC"
+ROW_KEY = "_row"
+INCLUDE = "include"
+SELECT = "select"
+MODES = {INCLUDE: "Include or leave out wells", SELECT: "Select wells to fill in"}
+NO_FILES = "{well} has no ND2 files, so it cannot be added."
+NO_ND2_FOUND = "No ND2 files found in {folder}, so wells can be removed but not added."
+NAME_IT = "Name the column."
+THERE_ALREADY = 'There is already a column "{name}".'
+PAGE_NAME = '"{name}" is a name the cell pages use.'
+MEASURED_COLUMN = 'The cells already have a column "{name}".'
+CELL_PAGE_NAMES = frozenset({"label", "included", "treatment time", CONDITION, PLATE_ROW, PLATE_COLUMN})
+WHOLE_ID = "A sample ID is a whole number above 0."
+IMPORT_ID = "Can't import: a sample ID is a whole number above 0, and {wells} {verb} others."
+FIX_PROBLEMS = "Fix the problems in red, then save."
+SAVED_WELLS = "Saved {wells} to experiment.json."
+METADATA_CSV = "well_metadata.csv"
+REPLACE_CSV = "Replace well_metadata.csv in the results folder?"
+WROTE_CSV = "Wrote {path}. Fill it in, for example in Excel, then Import CSV."
+IMPORTED = "Imported {wells} from {file}."
+
 
 # -- how the paths are written ---------------------------------------------------------------
-
-
-def _same(first: str, second: str) -> bool:
-    return os.path.normcase(os.path.normpath(first)) == os.path.normcase(os.path.normpath(second))
-
-
-def _in_full(value: str, base: str) -> str:
-    """Return a typed path in full; one without a drive or root is taken as relative to ``base``."""
-    path = os.path.expanduser(value.strip())
-    pure = PurePath(path)
-    return os.path.normpath(path if pure.drive or pure.root else os.path.join(base, path))
 
 
 def _results_key(config: dict[str, Any]) -> str:
@@ -76,25 +114,6 @@ def _results_key(config: dict[str, Any]) -> str:
     if platform.system() != "Windows" and (config.get("mac_base_dir") or "").strip():
         return "mac_base_dir"
     return "base_dir"
-
-
-def _inside(path: str, folder: str) -> bool:
-    try:
-        return _same(os.path.commonpath([path, folder]), folder)
-    except ValueError:  # on different drives
-        return False
-
-
-def _path_entry(value: str, base_dir: str, default: str) -> str | None:
-    """Return a path as written under ``paths``: None when base_dir's own, else relative or full."""
-    if not value.strip():
-        return None
-    path = _in_full(value, base_dir)
-    if _same(path, os.path.join(base_dir, default)):
-        return None
-    if _inside(path, base_dir):
-        return PurePath(os.path.relpath(path, base_dir)).as_posix()
-    return path
 
 
 def config_to_save(exp: Experiment, *, data: str, info_file: str, results: str, anchor: int | None) -> dict[str, Any]:
@@ -111,15 +130,15 @@ def config_to_save(exp: Experiment, *, data: str, info_file: str, results: str, 
     """
     config = dict(exp.config)
     home = os.path.dirname(exp.config_path)
-    base_dir = _in_full(results, home) if results.strip() else home
+    base_dir = in_full(results, home) if results.strip() else home
     key = _results_key(config)
     config[key] = base_dir
     without = {name: value for name, value in config.items() if name != key}
-    if _same(Experiment(without, exp.config_path).base_dir, base_dir):
+    if same_path(Experiment(without, exp.config_path).base_dir, base_dir):
         config = without
     paths = dict(config.get("paths") or {})
     for name, value in (("data", data), ("info_file", info_file)):
-        entry = _path_entry(value, base_dir, DEFAULT_PATHS[name])
+        entry = path_entry(value, base_dir, DEFAULT_PATHS[name])
         if entry is None:
             paths.pop(name, None)
         else:
@@ -226,14 +245,14 @@ async def _open_other(box: ui.input) -> None:
         _open(chosen, box)
 
 
-async def _browse_folder(box: ui.input) -> None:
-    chosen = await pick_folder(box.value)
+async def _browse_folder(box: ui.input, start: str = "") -> None:
+    chosen = await pick_folder(box.value or start)
     if chosen is not None:
         box.value = str(chosen)
 
 
-async def _browse_csv(box: ui.input) -> None:
-    chosen = await pick_file(box.value, suffix=".csv")
+async def _browse_csv(box: ui.input, start: str = "") -> None:
+    chosen = await pick_file(box.value or start, suffix=".csv")
     if chosen is not None:
         box.value = str(chosen)
 
@@ -540,17 +559,562 @@ class _Derived:
         ui.notify(SAVED_DERIVED.format(count=_count(len(self.rows), "derived feature")), type="positive")
 
 
+def _name_of(experiment: Experiment | None) -> str:
+    return experiment.name if experiment is not None else ""
+
+
+def _has_name(experiment: Experiment | None) -> bool:
+    return bool(_name_of(experiment))
+
+
+def _text(value: object) -> str:
+    return "" if value is None else str(value)
+
+
+def _and(names: list[str]) -> str:
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+
+
+def _whole(value: object) -> int | None:
+    text = str(value).strip()
+    return int(text) if text.isascii() and text.isdigit() and int(text) > 0 else None
+
+
+def _id_key(value: object) -> tuple[int, int, str]:
+    return (0, value, "") if isinstance(value, int) else (1, 0, str(value))
+
+
+async def _ask(question: str, yes: str) -> bool:
+    with ui.dialog() as dialog, ui.card().classes("p-5 gap-3 max-w-lg"):
+        ui.label(question).classes("text-sm")
+        with ui.row().classes("w-full justify-end gap-2"):
+            ui.button("Cancel", on_click=lambda: dialog.submit(False)).props("flat")
+            ui.button(yes, on_click=lambda: dialog.submit(True))
+    answer = await dialog
+    dialog.delete()
+    return answer is True
+
+
 @ui.refreshable
-def _content(derived: _Derived) -> None:
+def _status_plate(problem: str, states: dict[str, State] | None) -> None:
+    exp = STATE.experiment
+    if exp is None:
+        return
+    if not problem and states is None:
+        states, problem = _plate_states(exp)
+    if states is None:
+        _message_card(problem)
+    else:
+        _plate_card(exp, states)
+
+
+async def _new_experiment() -> None:
+    with ui.dialog() as dialog, ui.card().classes("w-[560px] p-5 gap-3"):
+        ui.label("New experiment").classes(SECTION_TITLE)
+        results_box, browse = _path_row(
+            "Results folder (experiment.json goes here)", "", "Output folder for every step"
+        )
+        browse.on_click(lambda: _browse_folder(results_box))
+        data_box, browse = _path_row("ND2 folder", "", "Left empty: the data folder in the results folder")
+        browse.on_click(lambda: _browse_folder(data_box, results_box.value))
+        info_box, browse = _path_row("info_exp.csv", "", "Left empty: info_exp.csv in the results folder")
+        browse.on_click(lambda: _browse_csv(info_box, results_box.value))
+        problem = ui.label().classes("text-sm text-negative")
+        problem.set_visibility(False)
+
+        def refuse(text: str) -> None:
+            problem.set_text(text)
+            problem.set_visibility(True)
+
+        def create() -> None:
+            typed = results_box.value.strip()
+            if not typed:
+                refuse(NEED_RESULTS)
+                return
+            path = os.path.expanduser(typed)
+            pure = PurePath(path)
+            if not (pure.drive or pure.root):
+                refuse(RESULTS_IN_FULL)
+                return
+            folder = Path(os.path.normpath(path))
+            try:
+                config = new_config(folder, data=data_box.value, info_file=info_box.value)
+            except ValueError as error:
+                refuse(str(error))
+                return
+            except OSError as error:
+                refuse(f"Not created: {_reason(error)}")
+                return
+            made = not folder.exists()
+            try:
+                folder.mkdir(parents=True, exist_ok=True)
+                save_config(config, folder / CONFIG_NAME)
+                open_experiment(folder / CONFIG_NAME)
+            except (OSError, ValueError) as error:
+                refuse(f"Not created: {_reason(error)}")
+                return
+            wells = _count(len(config["well_list"]), "well")
+            dialog.submit(CREATED_FOLDER.format(folder=folder, wells=wells) if made else CREATED.format(wells=wells))
+
+        with ui.row().classes("w-full justify-end gap-2"):
+            ui.button("Cancel", on_click=lambda: dialog.submit(None)).props("flat")
+            ui.button("Create", icon="add", on_click=create)
+    message = await dialog
+    dialog.delete()
+    if isinstance(message, str):
+        ui.notify(message, type="positive")
+        _content.refresh()
+
+
+class _Details:
+    def __init__(self) -> None:
+        self.config_path = ""
+        self.values: dict[str, str] = {}
+
+    def show(self, exp: Experiment) -> None:
+        if exp.config_path != self.config_path:
+            self.config_path = exp.config_path
+            self.values = {key: _text(exp.config.get(key)) for key in DETAILS}
+        with ui.card().classes("w-full max-w-[1000px] p-5 gap-2"):
+            ui.label("Experiment details").classes(SECTION_TITLE)
+            with ui.grid(columns=2).classes("w-full gap-x-6 gap-y-1"):
+                for key in DETAILS:
+                    if key != "notes":
+                        ui.input(DETAIL_LABELS[key], value=self.values[key], on_change=partial(self._typed, key))
+            ui.textarea(
+                DETAIL_LABELS["notes"], value=self.values["notes"], on_change=partial(self._typed, "notes")
+            ).classes("w-full").props("autogrow")
+            with ui.row().classes("w-full"):
+                ui.space()
+                ui.button("Save details", icon="save", on_click=self._save)
+
+    def _typed(self, key: str, event: events.ValueChangeEventArguments) -> None:
+        self.values[key] = event.value or ""
+
+    def _save(self) -> None:
+        exp = STATE.experiment
+        if exp is None or exp.config_path != self.config_path:
+            return
+        try:
+            save_details(exp, self.values)
+        except (OSError, ValueError) as error:
+            ui.notify(f"Not saved: {_reason(error)}", type="negative")
+            return
+        ui.notify(SAVED_DETAILS, type="positive")
+
+
+class _Wells:
+    def __init__(self) -> None:
+        self.config_path = ""
+        self.exp: Experiment | None = None
+        self.rows: list[dict[str, Any]] = []
+        self.columns: list[str] = []
+        self.conditions: set[str] = set()
+        self.kept: dict[str, dict[str, Any]] = {}
+        self.selected: set[str] = set()
+        self.mode = INCLUDE
+        self.boxes: dict[str, str] = {}
+        self.data_wells: list[str] = []
+        self.apply_button: ui.button | None = None
+        self.column_box: ui.input | None = None
+
+    def load(self, exp: Experiment) -> None:
+        table = wells_table(exp)
+        columns = [str(column) for column in table.columns if column not in (WELL, SAMPLE_ID)]
+        for column in exp.condition_columns:
+            if column not in columns and column not in (WELL, SAMPLE_ID):
+                columns.append(column)
+                table[column] = ""
+        self.config_path = exp.config_path
+        self.columns = columns
+        self.rows = [{str(key): value for key, value in row.items()} for row in table.to_dict("records")]
+        self.conditions = set(exp.condition_columns)
+        self.kept = {}
+        self.selected = set()
+
+    def show(self, exp: Experiment) -> None:
+        if exp.config_path != self.config_path:
+            self.load(exp)
+        self.exp = exp
+        try:
+            self.data_wells = wells_in_data(exp.data_dir)
+        except OSError:
+            self.data_wells = []
+        with ui.card().classes("w-full max-w-[1000px] p-5 gap-3"):
+            with ui.row().classes("items-center w-full"):
+                ui.label("Wells and metadata").classes(SECTION_TITLE)
+                ui.space()
+                ui.button("Import CSV", icon="upload_file", on_click=self._import).props("outline")
+                ui.button("Export CSV", icon="download", on_click=self._export).props("outline")
+            if not self.data_wells:
+                ui.label(NO_ND2_FOUND.format(folder=exp.data_dir)).classes("text-sm text-warning")
+            with ui.row().classes("items-center w-full gap-2"):
+                ui.toggle(MODES, value=self.mode, on_change=self._mode_changed).props("no-caps")
+                ui.space()
+                self.select_buttons = ui.row().classes("gap-2")
+                with self.select_buttons:
+                    ui.button("All included", on_click=self._select_all).props("outline dense")
+                    ui.button("Clear selection", on_click=self._clear_selection).props("outline dense")
+                self.select_buttons.set_visibility(self.mode == SELECT)
+            with ui.row().classes("w-full no-wrap gap-8 items-start"):
+                self.plate_area = ui.column().classes("gap-3")
+                self.boxes_area = ui.column().classes("gap-1 grow")
+            self.table_area = ui.column().classes("w-full")
+            self.findings_area = ui.column().classes("w-full gap-1")
+            with ui.row().classes("w-full"):
+                ui.space()
+                ui.button("Save wells and metadata", icon="save", on_click=self._save)
+        self._draw_boxes()
+        self._draw_plate()
+        self._draw_table()
+        self._draw_findings()
+
+    def _sort(self) -> None:
+        self.rows.sort(key=lambda row: plate_sort_key(row[WELL]))
+
+    def _ids(self) -> dict[str, object]:
+        ids: dict[str, object] = {}
+        for row in self.rows:
+            ids.setdefault(row[WELL], row.get(SAMPLE_ID, ""))
+        return ids
+
+    def _hover(self, well: str) -> str:
+        row = next(row for row in self.rows if row[WELL] == well)
+        parts = [str(row[column]).strip() for column in self.columns if not blank(row.get(column))]
+        if not blank(row.get(SAMPLE_ID)):
+            parts.append(f"sample ID {row[SAMPLE_ID]}")
+        return f"{well}: {' · '.join(parts)}" if parts else well
+
+    def _draw_plate(self) -> None:
+        exp = self.exp
+        if exp is None:
+            return
+        ids = self._ids()
+        numbers = sorted({value for value in ids.values() if not blank(value)}, key=_id_key)
+        palette = {value: GROUP_COLORS[index % len(GROUP_COLORS)] for index, value in enumerate(numbers)}
+        colors = {well: NO_ID_COLOR if blank(value) else palette[value] for well, value in ids.items()}
+        outlined = [well for well in self.data_wells if well not in ids]
+        hover = {well: self._hover(well) for well in ids}
+        self.plate_area.clear()
+        with self.plate_area:
+            plate(
+                exp,
+                colors,
+                hover=hover,
+                on_click=self._click,
+                outlined=outlined,
+                selected=self.selected if self.mode == SELECT else None,
+            )
+            with ui.row().classes("gap-3 text-xs muted"):
+                for name, style in (
+                    ("included, colored by sample ID", f"background: {GROUP_COLORS[0]}"),
+                    ("not included", OUTLINED),
+                    ("no ND2 files", DASHED),
+                ):
+                    with ui.row().classes("items-center gap-1"):
+                        ui.element("div").classes("w-3 h-3 rounded").style(style)
+                        ui.label(name)
+        self._update_apply()
+
+    def _draw_boxes(self) -> None:
+        self.boxes_area.clear()
+        with self.boxes_area:
+            for column in self.columns:
+                with ui.row().classes("items-center no-wrap gap-3 w-full"):
+                    ui.input(
+                        column, value=self.boxes.get(column, ""), on_change=partial(self._box_typed, column)
+                    ).classes("grow")
+                    ui.checkbox("Condition", value=column in self.conditions, on_change=partial(self._ticked, column))
+            self.apply_button = ui.button(icon="done_all", on_click=self._apply).props("outline").classes("mt-1")
+            with ui.row().classes("items-end no-wrap gap-2 w-full mt-3"):
+                self.column_box = ui.input("New column").classes("grow")
+                self.column_box.on("keydown.enter", self._add_column)
+                ui.button("Add a column", icon="add", on_click=self._add_column).props("outline")
+        self._update_apply()
+
+    def _update_apply(self) -> None:
+        if self.apply_button is None:
+            return
+        count = len(self.selected)
+        self.apply_button.set_text(f"Apply to {count} selected well{'' if count == 1 else 's'}")
+        self.apply_button.set_enabled(count > 0)
+
+    def _draw_table(self) -> None:
+        columns = [WELL, SAMPLE_ID, *self.columns]
+        definitions: list[dict[str, Any]] = [{"field": WELL, "headerName": WELL, "editable": False, "pinned": "left"}]
+        definitions += [{"field": column, "headerName": column, "editable": True} for column in columns[1:]]
+        data = [
+            {**{column: "" if blank(row.get(column)) else row[column] for column in columns}, ROW_KEY: index}
+            for index, row in enumerate(self.rows)
+        ]
+        options: dict[str, Any] = {
+            "columnDefs": definitions,
+            "rowData": data,
+            "defaultColDef": {"cellDataType": False, "sortable": False, "resizable": True},
+            "singleClickEdit": True,
+            "stopEditingWhenCellsLoseFocus": True,
+        }
+        if len(data) <= 10:
+            options["domLayout"] = "autoHeight"
+        self.table_area.clear()
+        with self.table_area:
+            grid = ui.aggrid(options).classes("w-full")
+            if len(data) > 10:
+                grid.style("height: 360px")
+            grid.on("cellValueChanged", self._edited)
+
+    def _condition_list(self) -> list[str]:
+        return [column for column in self.columns if column in self.conditions]
+
+    def _table(self) -> pd.DataFrame:
+        return pd.DataFrame(self.rows, columns=[WELL, SAMPLE_ID, *self.columns])
+
+    def _issues(self) -> list[tuple[str, str]]:
+        conditions = self._condition_list()
+        filled = fill_sample_ids(self._table(), conditions)
+        return list(check_metadata(filled, conditions, self.data_wells or None))
+
+    def _draw_findings(self) -> None:
+        self.findings_area.clear()
+        with self.findings_area:
+            for level, message in self._issues():
+                color = "text-negative" if level == "error" else "text-warning"
+                ui.label(message).classes(f"text-sm {color}")
+
+    def _changed(self) -> None:
+        self._draw_plate()
+        self._draw_table()
+        self._draw_findings()
+
+    def _click(self, well: str) -> None:
+        included = any(row[WELL] == well for row in self.rows)
+        if self.mode == SELECT:
+            if included:
+                self.selected ^= {well}
+                self._draw_plate()
+            return
+        if included:
+            first = next(row for row in self.rows if row[WELL] == well)
+            self.kept[well] = dict(first)
+            self.rows = [row for row in self.rows if row[WELL] != well]
+            self.selected.discard(well)
+        elif well in self.data_wells:
+            row = self.kept.pop(well, None) or {WELL: well, SAMPLE_ID: ""}
+            for column in self.columns:
+                row.setdefault(column, "")
+            self.rows.append(row)
+            self._sort()
+        else:
+            ui.notify(NO_FILES.format(well=well), type="warning")
+            return
+        self._changed()
+
+    def _mode_changed(self, event: events.ValueChangeEventArguments) -> None:
+        self.mode = event.value
+        self.select_buttons.set_visibility(self.mode == SELECT)
+        self._draw_plate()
+
+    def _select_all(self) -> None:
+        self.selected = {row[WELL] for row in self.rows}
+        self._draw_plate()
+
+    def _clear_selection(self) -> None:
+        self.selected = set()
+        self._draw_plate()
+
+    def _box_typed(self, column: str, event: events.ValueChangeEventArguments) -> None:
+        self.boxes[column] = event.value or ""
+
+    def _ticked(self, column: str, event: events.ValueChangeEventArguments) -> None:
+        if event.value:
+            self.conditions.add(column)
+        else:
+            self.conditions.discard(column)
+        self._draw_findings()
+
+    def _apply(self) -> None:
+        typed = {column: self.boxes.get(column, "").strip() for column in self.columns}
+        filled = {column: value for column, value in typed.items() if value}
+        for row in self.rows:
+            if row[WELL] in self.selected:
+                row.update(filled)
+        self.selected = set()
+        self._changed()
+
+    def _edited(self, event: events.GenericEventArguments) -> None:
+        args = event.args if isinstance(event.args, dict) else {}
+        data = args.get("data") or {}
+        column = args.get("colId")
+        index = data.get(ROW_KEY)
+        if not isinstance(index, int) or not 0 <= index < len(self.rows) or column not in (SAMPLE_ID, *self.columns):
+            return
+        row = self.rows[index]
+        value = args.get("newValue")
+        if column == SAMPLE_ID:
+            if blank(value):
+                row[SAMPLE_ID] = ""
+            else:
+                number = _whole(value)
+                if number is None:
+                    ui.notify(WHOLE_ID, type="negative")
+                    self._draw_table()
+                    return
+                row[SAMPLE_ID] = number
+        else:
+            row[column] = "" if value is None else str(value).strip()
+        self._draw_plate()
+        self._draw_findings()
+
+    async def _measured_columns(self) -> set[str]:
+        exp = self.exp
+        if exp is None:
+            return set()
+        try:
+            cells = await run.io_bound(load_cells, exp)
+        except Exception:
+            return set()
+        return {str(column) for column in cells.base.columns} if cells.measured else set()
+
+    def _column_problem(self, name: str, measured: set[str]) -> tuple[str, str] | None:
+        if name in self.columns or name in (WELL, SAMPLE_ID):
+            return THERE_ALREADY.format(name=name), ""
+        derived = {str(spec.get("name", "")) for spec in self.exp.derived_features} if self.exp else set()
+        if name in CELL_PAGE_NAMES or name in derived:
+            return PAGE_NAME.format(name=name), "Choose another."
+        if name in measured:
+            return MEASURED_COLUMN.format(name=name), "Choose another name."
+        return None
+
+    def _add_row_column(self, column: str) -> None:
+        self.columns.append(column)
+        for row in [*self.rows, *self.kept.values()]:
+            row.setdefault(column, "")
+
+    async def _add_column(self) -> None:
+        if self.column_box is None:
+            return
+        name = (self.column_box.value or "").strip()
+        if not name:
+            ui.notify(NAME_IT, type="negative")
+            return
+        problem = self._column_problem(name, await self._measured_columns())
+        if problem is not None:
+            ui.notify(" ".join(part for part in problem if part), type="negative")
+            return
+        self._add_row_column(name)
+        self._draw_boxes()
+        self._changed()
+
+    async def _import(self) -> None:
+        exp = self.exp
+        if exp is None:
+            return
+        chosen = await pick_file(exp.base_dir, suffix=".csv")
+        if chosen is None:
+            return
+        try:
+            table = read_metadata_table(chosen)
+        except (OSError, ValueError) as error:
+            ui.notify(f"Can't import: {_reason(error)}", type="negative")
+            return
+        given = [str(column) for column in table.columns]
+        new_columns = [column for column in given if column not in (WELL, SAMPLE_ID) and column not in self.columns]
+        measured = await self._measured_columns() if new_columns else set()
+        for column in new_columns:
+            problem = self._column_problem(column, measured)
+            if problem is not None:
+                ui.notify(f"Can't import: {problem[0]} Rename the column in the CSV.", type="negative")
+                return
+        if SAMPLE_ID in given:
+            bad = sorted(
+                {
+                    well
+                    for well, value in zip(table[WELL], table[SAMPLE_ID], strict=True)
+                    if not blank(value) and _whole(value) is None
+                },
+                key=plate_sort_key,
+            )
+            if bad:
+                verb = "has" if len(bad) == 1 else "have"
+                ui.notify(IMPORT_ID.format(wells=_and(bad), verb=verb), type="negative")
+                return
+        for column in new_columns:
+            self._add_row_column(column)
+        listed = list(dict.fromkeys(str(well) for well in table[WELL]))
+        replaced: list[dict[str, Any]] = []
+        for well in listed:
+            existing = next((dict(row) for row in self.rows if row[WELL] == well), None)
+            stashed = self.kept.pop(well, None)
+            start = existing or stashed or {WELL: well, SAMPLE_ID: ""}
+            for column in self.columns:
+                start.setdefault(column, "")
+            for _, line in table[table[WELL] == well].iterrows():
+                row = dict(start)
+                for column in given:
+                    if column == SAMPLE_ID:
+                        if not blank(line[column]):
+                            row[SAMPLE_ID] = _whole(line[column])
+                    elif column != WELL:
+                        row[column] = line[column]
+                replaced.append(row)
+        listed_set = set(listed)
+        self.rows = [row for row in self.rows if row[WELL] not in listed_set] + replaced
+        self._sort()
+        ui.notify(IMPORTED.format(wells=_count(len(listed), "well"), file=chosen), type="positive")
+        self._draw_boxes()
+        self._changed()
+
+    async def _export(self) -> None:
+        exp = self.exp
+        if exp is None:
+            return
+        path = Path(exp.base_dir) / METADATA_CSV
+        if path.exists() and not await _ask(REPLACE_CSV, "Replace"):
+            return
+        try:
+            self._table().to_csv(path, index=False)
+        except OSError as error:
+            ui.notify(f"Not written: {_reason(error)}", type="negative")
+            return
+        ui.notify(WROTE_CSV.format(path=path), type="positive")
+
+    def _save(self) -> None:
+        exp = self.exp
+        if exp is None:
+            return
+        if any(level == "error" for level, _ in self._issues()):
+            ui.notify(FIX_PROBLEMS, type="negative")
+            return
+        try:
+            saved = save_wells(exp, self._table(), self._condition_list())
+        except (OSError, ValueError) as error:
+            ui.notify(f"Not saved: {_reason(error)}", type="negative")
+            return
+        ui.notify(SAVED_WELLS.format(wells=_count(len(saved.well_list), "well")), type="positive")
+        self.load(saved)
+        self.exp = saved
+        self._draw_boxes()
+        self._changed()
+        _status_plate.refresh(states=None)
+
+
+@ui.refreshable
+def _content(derived: _Derived, details: _Details, wells: _Wells) -> None:
     exp = STATE.experiment
     with ui.row().classes("w-full gap-6 items-start"):
         with ui.card().classes("w-[560px] p-5 gap-3"):
             ui.label("Experiment").classes(SECTION_TITLE)
-            if exp is not None and exp.name:
-                ui.label(exp.name).classes("muted -mt-2")
-            config_box, browse = _path_row(
-                "experiment.json", exp.config_path if exp else "", "Wells, conditions and settings"
-            )
+            ui.label().classes("muted -mt-2").bind_text_from(
+                STATE, "experiment", backward=_name_of
+            ).bind_visibility_from(STATE, "experiment", backward=_has_name)
+            with ui.row().classes("w-full items-end no-wrap gap-2"):
+                config_box = (
+                    ui.input("experiment.json", value=exp.config_path if exp else "")
+                    .classes("grow")
+                    .tooltip("Wells, conditions and settings")
+                )
+                browse = ui.button(icon="folder_open").props("outline").tooltip("Browse")
+                ui.button("New experiment", icon="add", on_click=_new_experiment).props("outline")
             config_box.on("keydown.enter", lambda: _open_typed(config_box))
             browse.on_click(lambda: _open_other(config_box))
             if exp is None:
@@ -606,16 +1170,15 @@ def _content(derived: _Derived) -> None:
 
                 ui.button("Save to experiment.json", icon="save", on_click=save)
 
-        if states is None:
-            _message_card(problem)
-        else:
-            _plate_card(exp, states)
+        _status_plate(problem=problem, states=states)
     if rounds is not None and anchor is not None and states is not None:
         _rounds_card(exp, rounds, anchor)
+    details.show(exp)
+    wells.show(exp)
     derived.show(exp, rounds)
 
 
 @ui.page("/")
 def experiment_page() -> None:
     with page_frame("Experiment"):
-        _content(_Derived())
+        _content(_Derived(), _Details(), _Wells())
