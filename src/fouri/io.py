@@ -72,6 +72,10 @@ def run_record_path(exp: Experiment) -> Path:
     return Path(exp.base_dir) / "run_record.jsonl"
 
 
+def export_path(exp: Experiment, name: str, file_format: str) -> Path:
+    return Path(exp.exports) / f"{name}.{file_format}"
+
+
 def read_info_file(exp: Experiment) -> pd.DataFrame:
     info = Path(exp.info_file)
     df = pd.read_csv(info)

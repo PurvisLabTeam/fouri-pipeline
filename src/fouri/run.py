@@ -43,6 +43,7 @@ STEP_NAMES = {
     Step.MEASURE: "Measure cells",
     Step.TABLE: "Build cell table",
     Step.EMBEDDING: "Embedding",
+    Step.EXPORT: "Export",
 }
 EXIT_CODES = {"done": 0, "failed": 1, "stopped": 3}
 
@@ -130,6 +131,10 @@ def step_function(step: Step) -> Callable[..., Any]:
         from fouri.measure import measure_wells
 
         return measure_wells
+    if step is Step.EXPORT:
+        from fouri.export import export_cells
+
+        return export_cells
     return build_cell_table if step is Step.TABLE else make_embeddings
 
 

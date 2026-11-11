@@ -9,7 +9,16 @@ import anndata as ad
 import numpy as np
 import pandas as pd
 import pytest
-from builders import aligned, converted, measured, measured_values, segmented, with_filters, with_labels
+from builders import (
+    aligned,
+    converted,
+    measured,
+    measured_values,
+    segmented,
+    subsampled,
+    with_filters,
+    with_labels,
+)
 
 from fouri import io, report, run
 from fouri.config import Experiment
@@ -242,3 +251,30 @@ def test_saved_rules_with_one_name_stop_no_run_that_names_none(experiment: Exper
 
     assert io.fullest_df_path(exp).exists()
     assert io.adata_path(exp).exists()
+
+
+def test_the_run_record_keeps_every_export_setting(experiment: Experiment) -> None:
+    _measured_wells(experiment)
+    exp = with_filters(experiment, [NOT_THE_BIGGEST])
+    run.build_cell_table(exp, filters=["not the biggest"])
+    standard = ad.read_h5ad(io.adata_path(exp))
+    standard.layers["combat"] = np.asarray(standard.X, dtype=float) + 1
+    standard.write_h5ad(io.adata_path(exp))
+    key = "X_umap_2d_top1_n_neighbors5"
+    subsampled(exp, [0, 4, 8], key)
+    settings = {
+        "name": "cycling",
+        "file_format": "csv",
+        "values": "both",
+        "corrected": True,
+        "features": ["nuc_area"],
+        "embeddings": [key],
+        "overwrite": True,
+    }
+
+    outcome = run.run_step("export", exp.config_path, settings=settings)
+
+    lines = Path(io.run_record_path(exp)).read_text(encoding="utf-8").splitlines()
+    started = next(entry for entry in map(json.loads, lines) if entry["event"] == "started")
+    assert outcome == "done"
+    assert started["settings"] == settings

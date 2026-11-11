@@ -39,6 +39,7 @@ class Step(StrEnum):
     MEASURE = "measure"
     TABLE = "table"
     EMBEDDING = "embedding"
+    EXPORT = "export"
 
 
 PER_WELL_STEPS = (Step.CONVERT, Step.SEGMENT, Step.ALIGN, Step.MEASURE)

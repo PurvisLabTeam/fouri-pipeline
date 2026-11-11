@@ -24,7 +24,7 @@ uv run pytest -m 'not slow and not gpu'  # the quick tests; -m slow for the ones
 # run one notebook top to bottom without touching the file in the repo
 uv run jupyter nbconvert --to notebook --execute --output-dir /tmp/nbrun 06_calculate_cell_properties.ipynb
 
-# run one step as its own program, as the app does (steps: convert segment align measure table embedding)
+# run one step as its own program, as the app does (steps: convert segment align measure table embedding export)
 uv run python -m fouri.run measure --config ~/data/4i_local_test/experiment.json --wells B02 --settings '{"overwrite": true}'
 ```
 
@@ -109,6 +109,7 @@ the writing and the reading side, so change them together.
 | 06 | `cell_data/cell_data_{well}_df.csv` (no row-number column; older ones have `Unnamed: 0`) | 07 |
 | 07 | `fullest_df.csv`, `standard_adata.h5ad` in `base_dir`: every cell, with `included` (true or false: whether the filters named in Build cell table's `filters` setting kept it) and a column per label named in its `labels` setting; excluded cells stay in both | 08 |
 | 08 | `standard_adata_sub.h5ad` in `base_dir`: the subsample with every measurement, each embedding in `.obsm` and the settings that made it in `.uns["embeddings"]`. Rerunning the subsample replaces the file and its embeddings | — |
+| Export | `exports/<name>.h5ad` or `exports/<name>.csv` in `base_dir` (`fouri.export.export_cells`, started from the app, not listed on the Run page): the included cells, or with embeddings the subsampled cells still included, each with its metadata, label columns and the features chosen, as measurements, z-scores (as built or from `layers["combat"]`) or both; an existing file is replaced only with `overwrite` | nothing in the pipeline |
 
 `NNN` is the 0-based `round_index`, zero-padded to 3 digits. A step run through `python -m fouri.run` (the app)
 also adds a "started" and an "ended" line to `run_record.jsonl` in `base_dir` (`io.run_record_path`). The app's
@@ -118,7 +119,7 @@ is the run's start time in ISO's compact form, `20261109T173005`, with `-2`, `-3
 of that id already exists.
 
 File names live in `fouri/io.py` (`round_table_path`, `tmat_path`, `cell_data_path`, `label_paths`,
-`label_path`, `fullest_df_path`, `adata_path`, `adata_sub_path`, `run_record_path`), with the functions that read and write those
+`label_path`, `fullest_df_path`, `adata_path`, `adata_sub_path`, `run_record_path`, `export_path`), with the functions that read and write those
 files.
 
 The round table is only read through `fouri.io.read_round_table`. Reading falls back to the `df_{well}.pkl`

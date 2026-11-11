@@ -55,6 +55,8 @@ DESCRIPTIONS = {
 # the steps whose n_workers counts wells: Segment nuclei has no pool, and Embedding's counts runs
 WELL_WORKER_STEPS = (Step.CONVERT, Step.ALIGN, Step.MEASURE)
 
+RUN_PAGE_STEPS: tuple[Step, ...] = tuple(step for step in Step if step is not Step.EXPORT)
+
 
 def _parameters(step: Step) -> dict[str, inspect.Parameter]:
     """Return the step function's parameters after the experiment."""

@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+import anndata as ad
 import numpy as np
 import pandas as pd
 
@@ -158,6 +159,30 @@ def measured_values(exp: Experiment, well: str, column: str, values: Sequence[fl
     table = pd.read_csv(path)
     table[column] = list(values)
     table.to_csv(path, index=False)
+
+
+def subsampled(exp: Experiment, rows: Sequence[int], key: str) -> None:
+    adata = ad.read_h5ad(io.adata_path(exp))[list(rows)].copy()
+    dims = 3 if "_3d_" in key else 2
+    adata.obsm[key] = np.arange(adata.n_obs * dims, dtype=float).reshape(adata.n_obs, dims) * 1.5 + 0.25
+    features = list(adata.var_names[:2])
+    adata.uns["subsample"] = {"cells_per_sample": adata.n_obs, "seed": 42}
+    adata.uns["embeddings"] = {
+        key: {
+            "method": key.split("_")[1].upper(),
+            "dims": dims,
+            "top_n": len(features),
+            "settings": {"knn": 5},
+            "picked": features,
+            "samples": sorted(int(sample) for sample in adata.obs["sample_ID"].unique()),
+            "ranking_k": 10,
+            "seed": 42,
+            "features": features,
+            "scores": np.linspace(0.1, 0.2, len(features)),
+        }
+    }
+    with io.written_whole(io.adata_sub_path(exp)) as partial:
+        adata.write_h5ad(partial)
 
 
 def with_filters(exp: Experiment, filters: Sequence[Mapping[str, Any]]) -> Experiment:

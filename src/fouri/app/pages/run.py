@@ -24,7 +24,16 @@ from fouri.app.rules import switched_on_filters, switched_on_labels
 from fouri.app.runner import Bar, Run, StepProgress, StepRequest, time_left
 from fouri.app.shell import page_frame, running_line
 from fouri.app.state import POLL_SECONDS, STATE, run_going, stop_run
-from fouri.app.steps import DESCRIPTIONS, Setting, can_tick, default, settings_for, shown_settings, whole_number
+from fouri.app.steps import (
+    DESCRIPTIONS,
+    RUN_PAGE_STEPS,
+    Setting,
+    can_tick,
+    default,
+    settings_for,
+    shown_settings,
+    whole_number,
+)
 from fouri.config import Experiment, load_config
 from fouri.metadata import normalize_well, plate_sort_key
 from fouri.run import STEP_NAMES
@@ -465,15 +474,15 @@ def _progress_card(start: Callable[[], Awaitable[None]]) -> None:
 def _content(exp: Experiment) -> None:
     wells = sorted({normalize_well(well) for well in exp.well_list}, key=plate_sort_key)
     picked = dict.fromkeys(wells, True)
-    ticked = dict.fromkeys(Step, False)
-    overwrite = dict.fromkeys(Step, False)
-    values = {step: {s.name: default(step, s.name) for s in shown_settings(step)} for step in Step}
+    ticked = dict.fromkeys(RUN_PAGE_STEPS, False)
+    overwrite = dict.fromkeys(RUN_PAGE_STEPS, False)
+    values = {step: {s.name: default(step, s.name) for s in shown_settings(step)} for step in RUN_PAGE_STEPS}
     workers = {"count": 0}
 
     async def start() -> None:
         if run_going():
             return
-        chosen = [step for step in Step if ticked[step] and _tickable(step)]
+        chosen = [step for step in RUN_PAGE_STEPS if ticked[step] and _tickable(step)]
         if not chosen:
             ui.notify("Tick at least one step.", type="warning")
             return
@@ -550,7 +559,7 @@ def _content(exp: Experiment) -> None:
                 ui.label("Wells already done are skipped unless Overwrite is on.").classes("text-sm muted")
             _wells_card(exp, picked)
             ui.select(WORKER_CHOICES, label="Wells processed in parallel").bind_value(workers, "count").classes("w-80")
-            for badge, step in enumerate(Step, start=1):
+            for badge, step in enumerate(RUN_PAGE_STEPS, start=1):
                 _step_card(exp, badge, step, ticked, overwrite, values[step])
         _progress_card(start)
 

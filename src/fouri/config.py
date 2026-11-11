@@ -41,6 +41,7 @@ DEFAULT_PATHS = {
     "aligned_tiffs": "aligned_tiffs",
     "masks": "masks",
     "cell_data": "cell_data",
+    "exports": "exports",
 }
 
 DEFAULT_CONDITION_COLUMNS = ["treatment", "dose", "treatment_time"]
@@ -169,6 +170,10 @@ class Experiment:
     @property
     def cell_data(self):
         return self.paths["cell_data"]
+
+    @property
+    def exports(self):
+        return self.paths["exports"]
 
     def file(self, name):
         """Path of a file directly in base_dir, e.g. exp.file('standard_adata.h5ad')."""
