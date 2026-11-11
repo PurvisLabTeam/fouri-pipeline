@@ -66,7 +66,6 @@ NO_FILTERS = "No filters switched on."
 FILTERS_UNREADABLE = "The saved filters can't be read. Fix them on the Filters page."
 NO_LABELS = "No labels switched on."
 LABELS_UNREADABLE = "The saved labels can't be read. Fix them on the Labels & gates page."
-INDENT = "    "
 NO_EMBEDDING_SETUP = "Set up the embeddings on the Embedding page first."
 EMBEDDING_UNREADABLE = "The embedding set-up can't be read. Save it again on the Embedding page."
 ALL_SKIPPED = "Every embedding set up is skipped. Tick some on the Embedding page."
@@ -303,8 +302,7 @@ def _labels_line(exp: Experiment) -> bool:
     except ValueError:
         ui.label(LABELS_UNREADABLE).classes("text-xs text-negative mt-1")
         return False
-    text = "\n".join(["Labels switched on:", *(f"{INDENT}{name}" for name in names)]) if names else NO_LABELS
-    ui.label(text).classes("text-xs mt-1 whitespace-pre-wrap")
+    ui.label(f"Labels switched on: {', '.join(names)}." if names else NO_LABELS).classes("text-xs mt-1")
     return True
 
 
@@ -394,7 +392,7 @@ def _color(bar: ui.linear_progress, name: str) -> None:
 def _progress_card(start: Callable[[], Awaitable[None]]) -> None:
     with ui.card().classes("grow p-5 gap-2"):
         ui.label("Progress").classes(SECTION_TITLE)
-        step_line = ui.label(IDLE).classes("font-medium")
+        step_line = ui.label(IDLE).classes("font-medium whitespace-pre-wrap")
         # instant-feedback: bars jump to a new value, so a new run starts empty instead of sliding
         step_bar = ui.linear_progress(value=0, show_value=False).props("size=10px color=primary instant-feedback")
         rows = []
@@ -459,9 +457,10 @@ def _progress_card(start: Callable[[], Awaitable[None]]) -> None:
                 return
             how = ending(run)
             color, text = ENDINGS[how]
-            failed = [well for progress in run.progress for well in progress.failed]
+            failed = [item for progress in run.progress for item in progress.failed]
+            keys = any(progress.step is Step.EMBEDDING and progress.failed for progress in run.progress)
             if how == "failed" and failed:
-                text += f" Failed: {', '.join(failed)}."
+                text += " Failed:\n" + "\n".join(failed) if keys else f" Failed: {', '.join(failed)}."
             step_line.text = text
             step_bar.value = 1
             _color(step_bar, color)

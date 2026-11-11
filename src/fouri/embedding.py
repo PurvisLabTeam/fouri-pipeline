@@ -124,7 +124,8 @@ def _check_features(adata: ad.AnnData, features: Sequence[str]) -> None:
     if not_in_file:
         raise ValueError(
             "The following features were selected for ranking but do not exist in the anndata file:"
-            + "".join(f"\n\t{name}" for name in not_in_file)
+            + "".join(f"\n{name}" for name in not_in_file)
+            + "\n"
         )
 
 
@@ -181,7 +182,8 @@ def embed_grid(
     if out_of_range:
         raise ValueError(
             f"A run can use 1 to {len(order)} features, but these ask for something else:"
-            + "".join(f"\n\t{run_key(run)}" for run in out_of_range)
+            + "".join(f"\n{run_key(run)}" for run in out_of_range)
+            + "\n"
         )
 
     coordinates = parallel_map(
@@ -223,7 +225,7 @@ def embed_grid(
             adata.write_h5ad(partial)
         say(
             f"Saved {len(keys)} embedding(s) to {path.name}, under these names in .obsm (the cell coordinates) "
-            'and .uns["embeddings"] (the settings that made each):' + "".join(f"\n\t{key}" for key in keys)
+            'and .uns["embeddings"] (the settings that made each):' + "".join(f"\n{key}" for key in keys) + "\n"
         )
     check_results(coordinates, unit="run")
     return keys

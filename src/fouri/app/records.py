@@ -15,7 +15,6 @@ Result = Literal["done", "failed", "stopped", "running", "did not finish"]
 EVENTS = ("started", "ended")
 STEPS = {step.value for step in Step}
 CPU_NOTE = "segmentation on the CPU"
-INDENT = "    "
 
 
 @dataclass(frozen=True)
@@ -168,6 +167,20 @@ def _applied(steps: list[_StepLines], key: str) -> list[str]:
     return applied
 
 
+def _failed_note(steps: list[_StepLines]) -> str | None:
+    failed: list[str] = []
+    keys = False
+    for lines in steps:
+        listed = lines.ended.get("failed") if lines.ended is not None else None
+        for item in listed if isinstance(listed, list) else []:
+            keys = keys or lines.step == Step.EMBEDDING.value
+            if str(item) not in failed:
+                failed.append(str(item))
+    if not failed:
+        return None
+    return "\n".join(["failed:", *failed]) if keys else f"failed: {', '.join(failed)}"
+
+
 def _notes(steps: list[_StepLines]) -> list[str]:
     notes = [CPU_NOTE] if any(_on_cpu(lines) for lines in steps) else []
     filters = _applied(steps, "filters")
@@ -175,15 +188,10 @@ def _notes(steps: list[_StepLines]) -> list[str]:
         notes.append(f"filters: {', '.join(filters)}")
     labels = _applied(steps, "labels")
     if labels:
-        notes.append("\n".join(["labels:", *(f"{INDENT}{name}" for name in labels)]))
-    failed: list[str] = []
-    for lines in steps:
-        listed = lines.ended.get("failed") if lines.ended is not None else None
-        for item in listed if isinstance(listed, list) else []:
-            if str(item) not in failed:
-                failed.append(str(item))
-    if failed:
-        notes.append(f"failed: {', '.join(failed)}")
+        notes.append(f"labels: {', '.join(labels)}")
+    failed = _failed_note(steps)
+    if failed is not None:
+        notes.append(failed)
     return notes
 
 

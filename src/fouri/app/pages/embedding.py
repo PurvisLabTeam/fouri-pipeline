@@ -77,7 +77,6 @@ CANT_READ = "The saved set-up can't be read: {reason} Save to replace it."
 RANKING_FAILED = "Can't rank the features: {error}"
 K_TITLE = "Neighbors (k) for the ranking"
 TOP_N_TITLE = "Top N"
-INDENT = "    "
 RANKING_COLUMNS = [
     {"name": "place", "label": "Place", "field": "place", "align": "right"},
     {"name": "feature", "label": "Feature", "field": "feature", "align": "left"},
@@ -323,12 +322,12 @@ def _menu_order(features: dict[str, Feature], info: pd.DataFrame) -> dict[str, s
     return {column: features[column].title for column in columns}
 
 
-def _indented(heading: str, items: list[str]) -> str:
-    return "\n".join([heading, *(f"{INDENT}{item}" for item in items)])
+def _listed(heading: str, items: list[str]) -> str:
+    return "\n".join([heading, *items])
 
 
 def _left_out(features: list[str], samples: list[int], where: str) -> str:
-    return _indented(f"Not in {where}, so left out:", [*features, *(f"sample {sample}" for sample in samples)])
+    return _listed(f"Not in {where}, so left out:", [*features, *(f"sample {sample}" for sample in samples)])
 
 
 def _not_saved(error: Exception) -> str:
@@ -454,7 +453,7 @@ class _SetupTab:
                     ui.label(RANKING_TITLE).classes(SECTION_TITLE)
                     with ui.row().classes("items-center gap-2"):
                         self.spinner = ui.spinner(size="sm")
-                        self.status = ui.label().classes("text-sm muted")
+                        self.status = ui.label().classes("text-sm muted whitespace-pre-wrap")
                     self.ranking_table = (
                         ui.table(columns=RANKING_COLUMNS, rows=[], row_key="place", pagination=12)
                         .props("flat dense")
@@ -626,7 +625,7 @@ class _SetupTab:
                     break
                 names = [self.options.get(feature, feature) for feature in in_order[shown:n]]
                 heading = f"Top {n}:" if shown == 0 else f"Top {n} adds:"
-                ui.label(_indented(heading, names)).classes("text-xs whitespace-pre-wrap")
+                ui.label(_listed(heading, names)).classes("text-xs whitespace-pre-wrap")
                 shown = n
 
     def ranking_problem(self) -> str | None:

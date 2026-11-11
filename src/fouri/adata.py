@@ -43,7 +43,8 @@ def build_adata(exp: Experiment, fullest_df: pd.DataFrame, labels: Sequence[str]
     if unusable:
         say(
             "Left out of the AnnData because some cells have unusable values or all cells have the same value:"
-            + "".join(f"\n\t{column}" for column in unusable)
+            + "".join(f"\n{column}" for column in unusable)
+            + "\n"
         )
         features = features.drop(columns=unusable)
     features.index = pd.Index(names)

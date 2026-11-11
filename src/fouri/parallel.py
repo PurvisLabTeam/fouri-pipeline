@@ -64,13 +64,10 @@ def check_results(results: Sequence[object], *, unit: str) -> None:
         raise Stopped
 
     if reasons:
-        listed = ", ".join(f"{item} ({'; '.join(why)})" for item, why in reasons.items())
+        listed = "".join(f"\n{item} ({'; '.join(why)})" for item, why in reasons.items())
         rerun = "run the step again to redo the failed ones."
-        if finished:
-            message = f"{len(reasons)} {unit}(s) failed: {listed}. The other {unit}s finished and were saved; {rerun}"
-        else:
-            message = f"{len(reasons)} {unit}(s) failed: {listed}. {rerun.capitalize()}"
-        raise StepFailed(message, list(reasons))
+        closing = f"The other {unit}s finished and were saved; {rerun}" if finished else rerun.capitalize()
+        raise StepFailed(f"{len(reasons)} {unit}(s) failed:{listed}\n\n{closing}", list(reasons))
 
 
 def _first_sentence(error: str) -> str:

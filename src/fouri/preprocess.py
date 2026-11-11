@@ -140,11 +140,11 @@ def round_table(exp: Experiment, well: str, align_signal: str = "DNA") -> pd.Dat
     df["is_align_channel"] = df["signal"] == align_signal
     duplicated = df[df.duplicated(["round_name", "signal"], keep=False)]
     if not duplicated.empty:
-        message = f"Duplicate round/signal names in well {well} rounds table:\n\n"
+        message = f"Duplicate round/signal names in well {well} rounds table:\n"
         duplicated = duplicated.drop_duplicates(["round_name", "signal"])
         for row in duplicated.itertuples():
             message += f"{row.round_name} duplicates {row.signal}\n"
-        message += "Correct info_exp.csv then run again"
+        message += "\nCorrect info_exp.csv then run again"
         raise ValueError(message)
 
     align_counts = df.groupby("round_name")["is_align_channel"].sum().reindex(rounds["round_name"], fill_value=0)
@@ -152,8 +152,8 @@ def round_table(exp: Experiment, well: str, align_signal: str = "DNA") -> pd.Dat
     if not invalid.empty:
         message = f"Some rounds have an invalid number of '{align_signal}' channels. Each must have exactly 1:\n"
         for round_name, n_channels in invalid.items():
-            message += f"\tWell {well}: {round_name} has {n_channels} '{align_signal}' channels\n"
-        message += "Check info_exp.csv or align_signal."
+            message += f"Well {well}: {round_name} has {n_channels} '{align_signal}' channels\n"
+        message += "\nCheck info_exp.csv or align_signal."
         raise ValueError(message)
 
     return df

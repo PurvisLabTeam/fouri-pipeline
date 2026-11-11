@@ -171,9 +171,9 @@ def plot_embedding(adata: ad.AnnData, key: str, color_by: str, *, title: str | N
         coordinates along it.
     """
     if key not in adata.obsm:
-        raise ValueError(
-            f"There is no embedding called {key} in this file. Its embeddings are: {', '.join(adata.obsm) or 'none'}."
-        )
+        names = "".join(f"{name}\n" for name in adata.obsm)
+        listed = f"\n{names}" if names else " none."
+        raise ValueError(f"There is no embedding called {key} in this file. Its embeddings are:{listed}")
     is_measurement = color_by in adata.var_names
     if not is_measurement and color_by not in adata.obs.columns:
         raise ValueError(
