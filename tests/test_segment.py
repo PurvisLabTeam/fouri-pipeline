@@ -22,7 +22,7 @@ class _FakeModel:
         self.device = torch.device("cpu")
 
 
-def _fake_segment_image(model, image, diameter, desc=None):
+def _fake_segment_image(model, image, diameter, *, flow_threshold, cellprob_threshold, min_size, desc=None):
     if (image == FAILING_VALUE).all():
         raise RuntimeError("made-up Cellpose failure")
     return np.zeros(image.shape, dtype=np.uint16), None

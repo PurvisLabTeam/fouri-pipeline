@@ -3,7 +3,9 @@
 import warnings
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
+import numpy.typing as npt
 from tifffile import imread
 
 from fouri.config import Experiment
@@ -22,6 +24,9 @@ def gpu_name() -> str | None:
 def segment_wells(
     exp: Experiment,
     diameter: float = 30,
+    flow_threshold: float = 0.4,
+    cellprob_threshold: float = 0.0,
+    min_size: int = 15,
     allow_cpu: bool = False,
     overwrite: bool = False,
     wells: Sequence[str] | None = None,
@@ -59,13 +64,17 @@ def segment_wells(
     gpu = torch.cuda.is_available()
     if not gpu:
         if not allow_cpu:
-            raise RuntimeError(
-                f"No GPU available to PyTorch (torch {torch.__version__}, CUDA build "
-                f"{torch.version.cuda}). Segmenting on CPU takes significantly longer. To do it "
-                "anyway choose 'Run on the CPU' in the app or set allow_cpu=True. If this PC has "
-                "a GPU and CUDA build is None, PyTorch was installed without GPU support. Run "
-                "'uv sync'."
+            message = "No GPU found, so Segment nuclei would run on the CPU. "
+            cuda_version = torch.version.cuda
+            message += (
+                f"PyTorch was installed with no GPU support (torch {torch.__version__}, no CUDA version found)."
+                if cuda_version is None
+                else (
+                    "The NVIDIA GPU drivers may be missing or too old for this PyTorch version "
+                    f"(torch {torch.__version__}, CUDA {cuda_version}). Update the NVIDIA drivers."
+                )
             )
+            raise RuntimeError(message)
         say("GPU not detected, segmenting on the CPU.")
 
     model = models.CellposeModel(gpu=gpu)
@@ -85,7 +94,15 @@ def segment_wells(
             with progress(work, desc=f"Segmenting {well}", unit="round", leave=False) as round_bar:
                 for round_index, path_image, path_label in round_bar:
                     image = imread(path_image)
-                    labels, peak_gb = segment_image(model, image, diameter, desc=f"Segmenting round {round_index}")
+                    labels, peak_gb = segment_image(
+                        model,
+                        image,
+                        diameter,
+                        desc=f"Segmenting round {round_index}",
+                        min_size=min_size,
+                        cellprob_threshold=cellprob_threshold,
+                        flow_threshold=flow_threshold,
+                    )
                     write_tiff(path_label, labels)
 
                     if peak_gb is not None:
@@ -104,7 +121,16 @@ def segment_wells(
     check_results(outcomes, unit="well")
 
 
-def segment_image(model, im, diameter, desc=None):
+def segment_image(
+    model: Any,
+    im: npt.NDArray[Any],
+    diameter: float,
+    *,
+    flow_threshold: float,
+    cellprob_threshold: float,
+    min_size: int,
+    desc: str | None = None,
+) -> tuple[npt.NDArray[Any], float | None]:
     """Segment one 2D image with a Cellpose model, showing a bar over its tiles.
 
     Returns labels and peak gpu memory in GB, or None when the model isn't on
@@ -121,7 +147,13 @@ def segment_image(model, im, diameter, desc=None):
             "(cellpose.transforms.make_tiles is missing).",
             stacklevel=1,
         )
-        labels, _, _ = model.eval(im, diameter=diameter)
+        labels, _, _ = model.eval(
+            im,
+            diameter=diameter,
+            flow_threshold=flow_threshold,
+            cellprob_threshold=cellprob_threshold,
+            min_size=min_size,
+        )
         return labels, None
 
     on_gpu = torch.device(model.device).type == "cuda"
@@ -143,7 +175,13 @@ def segment_image(model, im, diameter, desc=None):
     # lets the bar show total tiles, put back in `finally` below.
     transforms.make_tiles = make_tiles_and_count
     try:
-        labels, _, _ = model.eval(im, diameter=diameter)
+        labels, _, _ = model.eval(
+            im,
+            diameter=diameter,
+            flow_threshold=flow_threshold,
+            cellprob_threshold=cellprob_threshold,
+            min_size=min_size,
+        )
     finally:
         hook.remove()
         transforms.make_tiles = original_make_tiles

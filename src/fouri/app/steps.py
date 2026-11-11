@@ -32,6 +32,7 @@ SETTINGS: dict[Step, list[Setting]] = {
         Setting("diameter", "Cell diameter", "number"),
         Setting("flow_threshold", "Flow threshold", "number"),
         Setting("cellprob_threshold", "Cell probability threshold", "number"),
+        Setting("min_size", "Smallest nucleus kept (px)", "number"),
     ],
     Step.ALIGN: [Setting("downscale_factor", "Downscale factor", "number")],
     Step.MEASURE: [Setting("ring_width", "Ring width", "number"), Setting("ring_gap", "Ring gap", "number")],

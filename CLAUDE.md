@@ -38,7 +38,7 @@ which ship no type information. `fouri` is installed editable, so changes under 
 kernel restart.
 
 Not every notebook runs headless: `01` needs a CUDA GPU (it raises if Cellpose can't use one, unless its
-`allow_cpu` setting is `True`: about 20 minutes per image on the processor); `03` is hand work in napari and
+`allow_cpu` setting is `True`); `03` is hand work in napari and
 `02` ends with an optional check, both in the alignment viewer (`fouri.viewers.AlignmentViewer`);
 `05` is not used for now (see the file table); `07` has two alternative threshold
 cells (one cutoff or two) meant to be run one or the other, so a top-to-bottom run keeps the two-cutoff labels.
