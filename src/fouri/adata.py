@@ -1,6 +1,6 @@
 """@TODO."""
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from typing import Any
 
 import anndata as ad
@@ -14,7 +14,6 @@ from fouri.report import say
 
 POSITION_COLUMNS = ["centroid-0", "centroid-1", "bbox-0", "bbox-1", "bbox-2", "bbox-3", "orientation"]
 OLD_COLS_TO_DROP = ["nuc_mask", "ring_mask"]
-LABEL_COLUMN = "pRB_label"  # made by the threshold step, when it has run
 
 MEASURES = ["nuc_mean", "ring_mean", "total_nuc_protein", "nuc_cyto_ratio"]
 CHANNEL_COLUMNS = ["round_index", "channel_name", "excitation_nm", "emission_nm", "exposure_ms"]
@@ -22,12 +21,12 @@ MICROSCOPE_COLUMNS = ["pixel_size_um", "objective", "bit_depth"]
 EXPERIMENT_KEYS = ["experiment_key", "experiment_name", "cell_type", "passage", "date_completed", "notes"]
 
 
-def build_adata(exp: Experiment, fullest_df: pd.DataFrame) -> ad.AnnData:
+def build_adata(exp: Experiment, fullest_df: pd.DataFrame, labels: Sequence[str] = ()) -> ad.AnnData:
     """@TODO."""
     fullest_df = fullest_df.drop(columns=OLD_COLS_TO_DROP, errors="ignore")
     names = [f"C_{i}" for i in range(len(fullest_df))]
 
-    obs_columns = ["label", "well", "included", *metadata_obs_columns(exp), *POSITION_COLUMNS, LABEL_COLUMN]
+    obs_columns = ["label", "well", "included", *labels, *metadata_obs_columns(exp), *POSITION_COLUMNS]
     obs = fullest_df[[col for col in obs_columns if col in fullest_df.columns]].copy()
     obs.index = pd.Index(names)
 

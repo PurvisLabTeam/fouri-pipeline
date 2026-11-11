@@ -20,13 +20,8 @@ from fouri.report import say
 # column names notebook 07 has always used in fullest_df / adata.obs
 _OBS_NAMES = {"treatment_time": "treatment time"}
 
-_PRB_LO = "pRB_lo"
-_PRB_MID = "pRB_mid"
-_PRB_HI = "pRB_hi"
-
 _NO_LABEL = np.array(None)
 
-_Z_SCORE_THRESH = 3
 _OTSU_BINS = 1024
 
 
@@ -55,32 +50,38 @@ def build_fullest_df(exp):
     return fullest_df
 
 
-def threshold_labels(values: pd.Series, cutoffs: Sequence[float]) -> pd.Categorical:
+def threshold_labels(values: pd.Series, cutoffs: Sequence[float], classes: Sequence[str]) -> pd.Categorical:
     cutoffs = sorted(cutoffs)
+    classes = list(classes)
     n_cutoffs = len(cutoffs)
+    finite = np.isfinite(values)
     if n_cutoffs == 1:
         cutoff = cutoffs[0]
         return pd.Categorical(
-            np.select([values < cutoff, values >= cutoff], [_PRB_LO, _PRB_HI], default=_NO_LABEL),
-            categories=[_PRB_LO, _PRB_HI],
+            np.select([finite & (values < cutoff), finite & (values >= cutoff)], classes, default=_NO_LABEL),
+            categories=classes,
         )
     if n_cutoffs == 2:
         cut_lo = cutoffs[0]
         cut_hi = cutoffs[1]
         return pd.Categorical(
             np.select(
-                [values < cut_lo, (values >= cut_lo) & (values <= cut_hi), values > cut_hi],
-                [_PRB_LO, _PRB_MID, _PRB_HI],
+                [
+                    finite & (values < cut_lo),
+                    finite & ((values >= cut_lo) & (values <= cut_hi)),
+                    finite & (values > cut_hi),
+                ],
+                classes,
                 default=_NO_LABEL,
             ),
-            categories=[_PRB_LO, _PRB_MID, _PRB_HI],
+            categories=classes,
         )
     raise ValueError(f"Invalid number of cutoffs: {n_cutoffs}. Use 1 or 2 values only.")
 
 
-def middle_values(values: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+def middle_values(values: npt.NDArray[np.float64], sds: float = 3) -> npt.NDArray[np.float64]:
     z_scores = zscore(values, nan_policy="omit")
-    mask = np.abs(z_scores) <= _Z_SCORE_THRESH
+    mask = np.abs(z_scores) <= sds
     return values[mask]
 
 
@@ -91,16 +92,16 @@ def _smoothed_curve(values: npt.NDArray[np.float64]) -> tuple[npt.NDArray[np.flo
     return positions, heights
 
 
-def curve_range(values: npt.NDArray[np.float64]) -> tuple[float, float]:
-    trimmed = middle_values(values)
+def curve_range(values: npt.NDArray[np.float64], sds: float = 3) -> tuple[float, float]:
+    trimmed = middle_values(values, sds)
     positions, heights = _smoothed_curve(trimmed)
     tallest = np.max(heights)
     positions = positions[heights >= 0.01 * tallest]
     return float(positions[0]), float(positions[-1])
 
 
-def suggest_cutoffs(values: npt.NDArray[np.float64]) -> dict[Threshold, list[float]]:
-    values = middle_values(values)
+def suggest_cutoffs(values: npt.NDArray[np.float64], sds: float = 3) -> dict[Threshold, list[float]]:
+    values = middle_values(values, sds)
 
     cutoffs = {}
     cutoffs[Threshold.OTSU] = [float(threshold_otsu(values, nbins=_OTSU_BINS))]

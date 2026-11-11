@@ -33,10 +33,11 @@ def plot_threshold_histogram(
     bins: int = 256,
     title: str | None = None,
     x_title: str = "pRB / RB",
+    sds: float = 3,
 ) -> go.Figure:
     """Histogram of one feature with the suggested cut-offs and the chosen ones.
 
-    Bars show the cells within 3 standard deviations of the mean, the same cells the
+    Bars show the cells within ``sds`` standard deviations of the mean, the same cells the
     suggestions are worked out from. The figure opens on the stretch where the smoothed
     curve stays above 1 % of its tallest peak, widened to keep every line on screen;
     `bins` bars fill that stretch. Double-clicking the plot zooms out to every bar.
@@ -51,8 +52,11 @@ def plot_threshold_histogram(
         Number of bars across the opening view.
     title : str, optional
         Figure title; by default the number of cells.
-    x_title : str
-        Label of the x axis.
+    x_title : str, optional
+        Label of the x axis. By default "pRB / RB"
+    sds : float, optional
+        How many standard deviations from the mean a cell may lie and still be
+        drawn as a bar and used for suggestions. By default, 3.
 
     Returns
     -------
@@ -68,9 +72,9 @@ def plot_threshold_histogram(
     if values.size == 0:
         raise ValueError("There are no cells with a value to draw.")
 
-    shown = middle_values(values)
-    suggestions = suggest_cutoffs(values)
-    view_start, view_end = curve_range(values)
+    shown = middle_values(values, sds)
+    suggestions = suggest_cutoffs(values, sds)
+    view_start, view_end = curve_range(values, sds)
     lines = [cut for cuts in suggestions.values() for cut in cuts] + [float(cut) for cut in cutoffs]
     low, high = min(view_start, *lines), max(view_end, *lines)
 

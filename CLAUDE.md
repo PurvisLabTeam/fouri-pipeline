@@ -72,7 +72,13 @@ saves its paths and anchor round, and with its own Save the derived features; bo
   `R0_DNA_total_nuc_protein`): `middle_percentiles` takes `low`/`high` as percentiles from 0 to 100,
   `robust_sd` takes `sds`, `between` takes `low`/`high` in the feature's own values, and `per_sample`
   (optional, false when left out) judges each `sample_ID` on its own cells. `fouri.filters.saved_filters`
-  reads them, an empty list when either key is missing, and refuses two rules with one name.
+  reads them, an empty list when either key is missing, and refuses two rules with one name. `app.labels` is a
+  list of label rules, each with `column` (the label's name, and the column it becomes), `use` and `rule`: a
+  `threshold` takes `feature`, one or two `cutoffs` and `classes`, one name more than the cut-offs
+  (`set_on_samples` and `sds` are the page's record of how the cut-offs were chosen; Build cell table ignores
+  them); a `gates` rule takes `x`, `y` and `gates`, each gate a `class`, a `shape` and `points`, [x, y] pairs in
+  the features' own values: two opposite corners for a `rectangle`, the outline (three or more) for a `freehand`.
+  `fouri.labels.saved_labels` reads them the same way and refuses two labels with one column.
 - Wells are always zero-padded (`B02`), normalized by `metadata.normalize_well`, sorted by `plate_sort_key`.
 - Committed notebooks keep the placeholder `CONFIG = r'Z:\PATH\TO\EXPERIMENT\experiment.json'`; do not
   commit a local path.
@@ -91,7 +97,7 @@ the writing and the reading side, so change them together.
 | 04 | removed: 06 moves the anchor's outlines into each round instead of measuring aligned copies of the images | — |
 | 05 | not used for now: it draws masks on 04's aligned images and its masks never removed cells (07 dropped `nuc_mask`/`ring_mask`). Masks return with the artifact U-Net, and will remove the cells they cover | — |
 | 06 | `cell_data/cell_data_{well}_df.csv` (no row-number column; older ones have `Unnamed: 0`) | 07 |
-| 07 | `fullest_df.csv`, `standard_adata.h5ad` in `base_dir`: every cell, with `included` (true or false: whether the filters named in Build cell table's `filters` setting kept it); excluded cells stay in both | 08 |
+| 07 | `fullest_df.csv`, `standard_adata.h5ad` in `base_dir`: every cell, with `included` (true or false: whether the filters named in Build cell table's `filters` setting kept it) and a column per label named in its `labels` setting; excluded cells stay in both | 08 |
 | 08 | `standard_adata_sub.h5ad` in `base_dir`: the subsample with every measurement, each embedding in `.obsm` and the settings that made it in `.uns["embeddings"]`. Rerunning the subsample replaces the file and its embeddings | — |
 
 `NNN` is the 0-based `round_index`, zero-padded to 3 digits. A step run through `python -m fouri.run` (the app)
@@ -189,8 +195,9 @@ rules, read from disk, for the app's Status page; change it with a step's skip r
   Build cell table. The app's Experiment page checks them the same way (`fouri.app.derived.check_formulas`) on
   `Cells.base`, the measured wells' cells as `build_fullest_df` joins them, and refuses to save a row that would
   stop Build cell table, a blank row, a name used twice, a measured column's name or a cell-page group's.
-- Build cell table (`run.build_cell_table(exp, filters=())`) applies the saved filters named in its `filters`
-  setting after the derived features, so a filter may use one, and adds the result as the column `included`.
+- Build cell table (`run.build_cell_table(exp, filters=(), labels=())`) applies the saved filters named in its
+  `filters` setting after the derived features, so a filter may use one, and adds the result as the column
+  `included`.
   `fouri.filters.keep` works out one rule on every cell of the table by itself: the percentiles (numpy's
   linear ones) and `robust_sd`'s median and median absolute deviation (times 1.4826) come from the cells with a
   value, per `sample_ID` when `per_sample` is set (it changes nothing for `between`), both bounds are kept, and
@@ -199,10 +206,28 @@ rules, read from disk, for the app's Status page; change it with a step's skip r
   its own, whatever the others do. Build cell table refuses, before writing anything, a name no saved filter
   has, a feature the table lacks, or a rule that can't be applied (unknown kind, missing field, bad bounds,
   `per_sample` without `sample_ID`); it says each rule's count and the total kept. With no names every cell is
-  included and nothing is said about filters. The run record's settings name the filters applied.
-- 07's pRB thresholds are its own cells, unchanged until the app. `fouri.adata.build_adata(exp, fullest_df)`
-  then builds the AnnData: `.obs` = label, well, `included`, metadata, centroid, bbox, orientation and
-  `pRB_label` if a threshold ran; `.X` = every other number column z-scored with the mean and sample SD of the
+  included and nothing is said about filters.
+- Then Build cell table applies the saved labels named in its `labels` setting (`fouri.labels`) to every cell,
+  included or not, each as a column named as the label's `column`: a category with the classes in saved order,
+  every one listed even with no cell in it, and no value for a cell in no class. `label_cells` splits a
+  threshold as `features.threshold_labels` does: with one cut-off, below it the first class and at or above it
+  the second; with two, below the lower the first, from the lower to the upper both kept the second, above the
+  upper the third. Gates are tried in saved order and a cell takes the first that holds it: a rectangle holds
+  the cells between its corners on both axes, both bounds kept, a freehand gate those inside its outline as
+  matplotlib's `Path` finds them; gates with one class name form one class. An empty or infinite value gives
+  no class. `apply_labels` checks every rule before working any out; Build cell table refuses, before writing
+  anything, a name no saved label has, a feature the table lacks, a label named as a column the table already
+  has, or a rule that can't be applied (unknown kind, missing field, no cut-off or more than two, classes not
+  one more than the cut-offs, no gate, an unknown shape, a rectangle without two corners, a freehand gate with
+  fewer than three points, a point that isn't two finite numbers); it says each label's cells per class and in
+  no class. Given no names, `named_filters` and `named_labels` return no rules without reading the saved ones,
+  so a mistake in saved rules stops only a run that names some. The run record's settings name the filters and
+  labels applied.
+- 07's pRB thresholds are its own cells, unchanged until the app.
+  `fouri.adata.build_adata(exp, fullest_df, labels=())` then builds the AnnData: `.obs` = label, well,
+  `included`, the label columns Build cell table hands it (kept as categories), metadata, centroid, bbox and
+  orientation; 07's own `pRB_label` stays in `fullest_df.csv` but no longer reaches `.obs`, since the notebooks
+  are not kept working; `.X` = every other number column z-scored with the mean and sample SD of the
   included cells, applied to every cell. A column is dropped from `.X` and named when an included cell has no
   usable value (missing or infinite) or when its included cells all hold one value, judged by the values
   themselves, not by the SD coming out 0, which values not stored exactly in binary miss (old 07 dropped such
@@ -213,9 +238,10 @@ rules, read from disk, for the app's Status page; change it with a step's skip r
   left empty and named); `.uns` = setup-form details, condition columns, derived formulas, plate, microscope,
   round tables. It saves `fullest_df.csv` (no row-number column) and `standard_adata.h5ad`.
 - For the app: `features.suggest_cutoffs` (Otsu, two-cut Otsu, the valley of the smoothed curve, on cells
-  within 3 SD of the mean), `features.threshold_labels` and `plots.plot_threshold_histogram` (plotly; the
-  cut-off lines are its only shapes, so a page can make every shape draggable, and the Otsu–valley band is a
-  trace). 07 doesn't use them yet.
+  within `sds` SD of the mean, 3 by default; `middle_values`, `curve_range` and `plot_threshold_histogram`
+  take the same `sds`), `features.threshold_labels(values, cutoffs, classes)` (the classes are the label's
+  names; `fouri.labels` uses it) and `plots.plot_threshold_histogram` (plotly; the cut-off lines are its only
+  shapes, so a page can make every shape draggable, and the Otsu–valley band is a trace). 07 doesn't use them.
 
 ## Embeddings (08)
 

@@ -1,6 +1,7 @@
 """A step run as the app runs it records the wells that failed."""
 
 import json
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -8,10 +9,11 @@ import anndata as ad
 import numpy as np
 import pandas as pd
 import pytest
-from builders import aligned, converted, measured, measured_values, segmented, with_filters
+from builders import aligned, converted, measured, measured_values, segmented, with_filters, with_labels
 
 from fouri import io, report, run
 from fouri.config import Experiment
+from fouri.labels import apply_labels, named_labels
 
 
 def _nuc_area_between(name: str, low: float, high: float) -> dict[str, Any]:
@@ -21,6 +23,30 @@ def _nuc_area_between(name: str, low: float, high: float) -> dict[str, Any]:
 NOT_THE_BIGGEST = _nuc_area_between("not the biggest", 0, 40)
 NOT_THE_SMALLEST = _nuc_area_between("not the smallest", 31, 100)
 MISSING_COLUMN = {"name": "EdU spread", "use": True, "rule": "robust_sd", "feature": "R3_EdU_nuc_mean", "sds": 3}
+
+SIZE_LABEL = {
+    "column": "size",
+    "use": True,
+    "rule": "threshold",
+    "feature": "nuc_area",
+    "cutoffs": [34, 38],
+    "classes": ["small", "medium", "large"],
+    "set_on_samples": [1],
+    "sds": 3,
+}
+PHASE_LABEL = {
+    "column": "phase",
+    "use": True,
+    "rule": "gates",
+    "x": "nuc_area",
+    "y": "R2_EdU_nuc_mean",
+    "gates": [
+        {"class": "early", "shape": "rectangle", "points": [[29.5, 3000], [33.5, 3500]]},
+        {"class": "late", "shape": "freehand", "points": [[37.5, 3000], [45, 3000], [37.5, 3600]]},
+    ],
+}
+MISSING_FEATURE_LABEL = {**SIZE_LABEL, "column": "EdU state", "feature": "R3_EdU_nuc_mean"}
+WELL_LABEL = {**SIZE_LABEL, "column": "well"}
 
 
 def _measured_wells(exp: Experiment) -> None:
@@ -34,6 +60,10 @@ def _measured_wells(exp: Experiment) -> None:
 
 def _column(adata: ad.AnnData, name: str) -> np.ndarray:
     return np.asarray(adata[:, name].X).ravel()
+
+
+def _names(classes: Iterable[Any]) -> list[str | None]:
+    return [None if pd.isna(name) else str(name) for name in classes]
 
 
 def test_a_real_step_records_its_failed_wells(experiment: Experiment) -> None:
@@ -147,3 +177,68 @@ def test_the_run_record_names_the_filters_applied(experiment: Experiment) -> Non
     started = next(entry for entry in map(json.loads, lines) if entry["event"] == "started")
     assert outcome == "done"
     assert started["settings"] == {"filters": names}
+
+
+@pytest.mark.parametrize(("named", "other"), [("size", "phase"), ("phase", "size")], ids=["threshold", "gates"])
+def test_build_cell_table_adds_the_named_labels(experiment: Experiment, named: str, other: str) -> None:
+    _measured_wells(experiment)
+    exp = with_labels(with_filters(experiment, [NOT_THE_BIGGEST]), [SIZE_LABEL, PHASE_LABEL])
+
+    run.build_cell_table(exp, filters=["not the biggest"], labels=[named])
+
+    table = pd.read_csv(io.fullest_df_path(exp))
+    obs = ad.read_h5ad(io.adata_path(exp)).obs
+    expected = apply_labels(table.drop(columns=named), named_labels(exp, [named]))[named]
+    assert _names(table[named]) == _names(expected)
+    assert _names(obs[named]) == _names(expected)
+    assert obs[named].cat.categories.tolist() == expected.categories.tolist()
+    assert table.loc[~table["included"], named].notna().all()
+    assert other not in table.columns
+    assert other not in obs.columns
+
+
+@pytest.mark.parametrize(
+    ("saved", "names"),
+    [
+        ([SIZE_LABEL, PHASE_LABEL], ["size", "sise"]),
+        ([SIZE_LABEL, MISSING_FEATURE_LABEL], ["size", "EdU state"]),
+        ([SIZE_LABEL, WELL_LABEL], ["size", "well"]),
+        ([SIZE_LABEL, {**PHASE_LABEL, "column": "size"}], ["size"]),
+    ],
+    ids=["unknown-name", "missing-feature", "column-the-table-has", "two-labels-one-column"],
+)
+def test_a_label_that_cannot_be_applied_writes_nothing(
+    experiment: Experiment, saved: list[dict[str, Any]], names: list[str]
+) -> None:
+    _measured_wells(experiment)
+    exp = with_labels(experiment, saved)
+
+    with pytest.raises(ValueError):
+        run.build_cell_table(exp, labels=names)
+
+    assert not io.fullest_df_path(exp).exists()
+    assert not io.adata_path(exp).exists()
+
+
+def test_the_run_record_names_the_labels_applied(experiment: Experiment) -> None:
+    _measured_wells(experiment)
+    exp = with_labels(experiment, [SIZE_LABEL, PHASE_LABEL])
+    names = ["phase", "size"]
+
+    outcome = run.run_step("table", exp.config_path, settings={"labels": names})
+
+    lines = Path(io.run_record_path(exp)).read_text(encoding="utf-8").splitlines()
+    started = next(entry for entry in map(json.loads, lines) if entry["event"] == "started")
+    assert outcome == "done"
+    assert started["settings"] == {"labels": names}
+
+
+def test_saved_rules_with_one_name_stop_no_run_that_names_none(experiment: Experiment) -> None:
+    _measured_wells(experiment)
+    exp = with_filters(experiment, [NOT_THE_BIGGEST, {**NOT_THE_SMALLEST, "name": "not the biggest"}])
+    exp = with_labels(exp, [SIZE_LABEL, {**PHASE_LABEL, "column": "size"}])
+
+    run.build_cell_table(exp)
+
+    assert io.fullest_df_path(exp).exists()
+    assert io.adata_path(exp).exists()

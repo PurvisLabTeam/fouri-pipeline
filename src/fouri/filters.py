@@ -11,7 +11,7 @@ import pandas as pd
 from fouri.config import Experiment
 
 
-class Rule(StrEnum):
+class FilterRule(StrEnum):
     MIDDLE_PERCENTILES = "middle_percentiles"
     ROBUST_SD = "robust_sd"
     BETWEEN = "between"
@@ -19,9 +19,9 @@ class Rule(StrEnum):
     @property
     def fields(self) -> list[str]:
         match self:
-            case Rule.MIDDLE_PERCENTILES | Rule.BETWEEN:
+            case FilterRule.MIDDLE_PERCENTILES | FilterRule.BETWEEN:
                 return ["low", "high"]
-            case Rule.ROBUST_SD:
+            case FilterRule.ROBUST_SD:
                 return ["sds"]
             case _ as unhandled:
                 assert_never(unhandled)
@@ -44,12 +44,14 @@ def saved_filters(exp: Experiment) -> list[dict[str, Any]]:
 
 def named_filters(exp: Experiment, names: Sequence[str]) -> list[dict[str, Any]]:
     """@TODO."""
+    if len(names) == 0:
+        return []
     filters_dict = {f.get("name"): f for f in saved_filters(exp)}
     not_found = [name for name in names if name not in filters_dict]
     if not_found:
         raise ValueError(
-            f"Could not find the following saved filters: {', '.join(not_found)}. "
-            f"The saved filters are: {', '.join(map(str, filters_dict.keys()))}"
+            f"Could not find the following saved filter(s): {', '.join(not_found)}. "
+            f"The saved filters are: {', '.join(map(str, filters_dict.keys()))}."
         )
     return [filters_dict[name] for name in names]
 
@@ -59,26 +61,26 @@ def keep(table: pd.DataFrame, rule: Mapping[str, Any]) -> pd.Series:
     kind = _check_rule(table, rule)
     feature = table[rule["feature"]]
     per_sample = rule.get("per_sample", False)
-    if not per_sample or kind is Rule.BETWEEN:
+    if not per_sample or kind is FilterRule.BETWEEN:
         return _keep_group(feature, rule, kind)
     return feature.groupby(table["sample_ID"], observed=True).transform(_keep_group, rule=rule, kind=kind)
 
 
-def _keep_group(values: pd.Series, rule: Mapping[str, Any], kind: Rule) -> pd.Series:
+def _keep_group(values: pd.Series, rule: Mapping[str, Any], kind: FilterRule) -> pd.Series:
     values_finite = values[np.isfinite(values)]
     if values_finite.empty:
         return pd.Series(data=False, index=values.index, dtype=bool)
 
     match kind:
-        case Rule.MIDDLE_PERCENTILES:
+        case FilterRule.MIDDLE_PERCENTILES:
             low = np.percentile(values_finite, cast(float, rule["low"]))
             high = np.percentile(values_finite, cast(float, rule["high"]))
 
-        case Rule.BETWEEN:
+        case FilterRule.BETWEEN:
             low = cast(float, rule["low"])
             high = cast(float, rule["high"])
 
-        case Rule.ROBUST_SD:
+        case FilterRule.ROBUST_SD:
             sds = cast(float, rule["sds"])
             median = np.median(values_finite)
             mad = np.median(np.abs(values_finite - median))
@@ -91,17 +93,19 @@ def _keep_group(values: pd.Series, rule: Mapping[str, Any], kind: Rule) -> pd.Se
     return (values >= low) & (values <= high)
 
 
-def _check_rule(table: pd.DataFrame, rule: Mapping[str, Any]) -> Rule:
+def _check_rule(table: pd.DataFrame, rule: Mapping[str, Any]) -> FilterRule:
     name = rule.get("name")
     if name is None:
         raise ValueError("A saved filter can't be applied: it has no name.")
     for key in ("rule", "feature"):
         if key not in rule:
-            raise ValueError(f"The filter '{name}' can't be applied. It does not have a {key}.")
+            raise ValueError(f"The filter '{name}' can't be applied. It does not have a {key} key.")
     try:
-        kind = Rule(rule["rule"])
+        kind = FilterRule(rule["rule"])
     except ValueError as e:
-        raise ValueError(f"Invalid rule name: {rule['rule']}. Must be one of: {(', ').join(r for r in Rule)}") from e
+        raise ValueError(
+            f"Invalid rule name: {rule['rule']}. Must be one of: {(', ').join(r for r in FilterRule)}"
+        ) from e
 
     for key in kind.fields:
         if key not in rule:
@@ -120,17 +124,17 @@ def _check_rule(table: pd.DataFrame, rule: Mapping[str, Any]) -> Rule:
     high = rule.get("high", -1)
     sds = rule.get("sds", -1)
     match kind:
-        case Rule.MIDDLE_PERCENTILES if not ((0 <= low <= 100) and (0 <= high <= 100) and (low < high)):
+        case FilterRule.MIDDLE_PERCENTILES if not ((0 <= low <= 100) and (0 <= high <= 100) and (low < high)):
             raise ValueError(
                 f"Invalid low/high values for '{kind}' rule. Low and high must be in [0, 100] and "
                 f"low must be less than high. Got low={low}, high={high}."
             )
-        case Rule.BETWEEN if low > high:
+        case FilterRule.BETWEEN if low > high:
             raise ValueError(
                 f"Invalid low/high values for '{kind}' rule. "
                 f"Low must be less than or equal to high. Got low={low}, high={high}."
             )
-        case Rule.ROBUST_SD if sds <= 0:
+        case FilterRule.ROBUST_SD if sds <= 0:
             raise ValueError(f"Invalid sds value for '{kind}' rule. sds must be greater than 0. Got sds={sds}")
 
     return kind

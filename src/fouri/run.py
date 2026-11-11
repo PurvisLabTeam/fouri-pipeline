@@ -47,19 +47,20 @@ STEP_NAMES = {
 EXIT_CODES = {"done": 0, "failed": 1, "stopped": 3}
 
 
-def build_cell_table(exp: Experiment, filters: Sequence[str] = ()) -> None:
+def build_cell_table(exp: Experiment, filters: Sequence[str] = (), labels: Sequence[str] = ()) -> None:
     """Combine the wells' cell data, add derived features, save fullest_df.csv and the AnnData."""
     from fouri.adata import build_adata
     from fouri.features import add_derived_features, build_fullest_df
     from fouri.filters import apply_filters, named_filters
+    from fouri.labels import apply_labels, named_labels
 
     table = add_derived_features(build_fullest_df(exp), exp.derived_features)
-    rules = named_filters(exp, filters)
-    included, counts = apply_filters(table, rules)
+    filter_rules = named_filters(exp, filters)
+    included, filter_counts = apply_filters(table, filter_rules)
     table["included"] = included
     total_cells = len(table)
     if filters:
-        for rule, count in counts.items():
+        for rule, count in filter_counts.items():
             report.say(f"{rule}: left out {count:,} cells of {total_cells:,}.")
 
         total_dropped = (~included).sum()
@@ -67,8 +68,18 @@ def build_cell_table(exp: Experiment, filters: Sequence[str] = ()) -> None:
             f"Kept {(total_cells - total_dropped):,} of {total_cells:,} cells. "
             f"Filters dropped {total_dropped:,} cells."
         )
+    if labels:
+        label_rules = named_labels(exp, labels)
+        applied_labels = apply_labels(table, label_rules)
+        for label, col in applied_labels.items():
+            table[label] = col
+            label_counts = col.value_counts()
+            no_group = col.isna().sum()
+            message = f"'{label}': {', '.join(f'{group}: {count:,}' for group, count in label_counts.items())}."
+            message = message if no_group == 0 else message + f" {no_group:,} cells are not in a class."
+            report.say(message)
 
-    build_adata(exp, table)
+    build_adata(exp, table, labels)
 
 
 def make_embeddings(

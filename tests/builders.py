@@ -161,6 +161,14 @@ def measured_values(exp: Experiment, well: str, column: str, values: Sequence[fl
 
 
 def with_filters(exp: Experiment, filters: Sequence[Mapping[str, Any]]) -> Experiment:
-    app = {**exp.config.get("app", {}), "filters": [dict(rule) for rule in filters]}
+    return _with_app_rules(exp, "filters", filters)
+
+
+def with_labels(exp: Experiment, labels: Sequence[Mapping[str, Any]]) -> Experiment:
+    return _with_app_rules(exp, "labels", labels)
+
+
+def _with_app_rules(exp: Experiment, key: str, rules: Sequence[Mapping[str, Any]]) -> Experiment:
+    app = {**exp.config.get("app", {}), key: [dict(rule) for rule in rules]}
     save_config({**exp.config, "app": app}, exp.config_path)
     return load_config(exp.config_path, announce=False)
