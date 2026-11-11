@@ -47,12 +47,28 @@ STEP_NAMES = {
 EXIT_CODES = {"done": 0, "failed": 1, "stopped": 3}
 
 
-def build_cell_table(exp: Experiment) -> None:
+def build_cell_table(exp: Experiment, filters: Sequence[str] = ()) -> None:
     """Combine the wells' cell data, add derived features, save fullest_df.csv and the AnnData."""
     from fouri.adata import build_adata
     from fouri.features import add_derived_features, build_fullest_df
+    from fouri.filters import apply_filters, named_filters
 
-    build_adata(exp, add_derived_features(build_fullest_df(exp), exp.derived_features))
+    table = add_derived_features(build_fullest_df(exp), exp.derived_features)
+    rules = named_filters(exp, filters)
+    included, counts = apply_filters(table, rules)
+    table["included"] = included
+    total_cells = len(table)
+    if filters:
+        for rule, count in counts.items():
+            report.say(f"{rule}: left out {count:,} cells of {total_cells:,}.")
+
+        total_dropped = (~included).sum()
+        report.say(
+            f"Kept {(total_cells - total_dropped):,} of {total_cells:,} cells. "
+            f"Filters dropped {total_dropped:,} cells."
+        )
+
+    build_adata(exp, table)
 
 
 def make_embeddings(

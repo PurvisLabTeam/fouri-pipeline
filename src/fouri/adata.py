@@ -1,6 +1,6 @@
 """@TODO."""
 
-from collections.abc import Sequence
+from collections.abc import Iterable
 from typing import Any
 
 import anndata as ad
@@ -27,14 +27,25 @@ def build_adata(exp: Experiment, fullest_df: pd.DataFrame) -> ad.AnnData:
     fullest_df = fullest_df.drop(columns=OLD_COLS_TO_DROP, errors="ignore")
     names = [f"C_{i}" for i in range(len(fullest_df))]
 
-    obs_columns = ["label", "well", *metadata_obs_columns(exp), *POSITION_COLUMNS, LABEL_COLUMN]
+    obs_columns = ["label", "well", "included", *metadata_obs_columns(exp), *POSITION_COLUMNS, LABEL_COLUMN]
     obs = fullest_df[[col for col in obs_columns if col in fullest_df.columns]].copy()
     obs.index = pd.Index(names)
 
-    features = standardize_columns(fullest_df.drop(columns=obs.columns).select_dtypes("number"))
-    unusable = [col for col in features.columns if features[col].isna().any()]
+    included = (
+        fullest_df["included"] if "included" in fullest_df.columns else pd.Series(data=True, index=fullest_df.index)
+    )
+    numbered = fullest_df.drop(columns=obs.columns).select_dtypes("number")
+    features = standardize_columns(numbered, included)
+    features_included = features[included]
+    numbered_included = numbered[included]
+    unusable = [
+        col for col in features.columns if features_included[col].isna().any() or numbered_included[col].nunique() <= 1
+    ]
     if unusable:
-        say(f"Left out of the AnnData because some cells have no usable value: {', '.join(unusable)}")
+        say(
+            f"Left out of the AnnData because some cells have unusable values or all cells have the same value: "
+            f"{', '.join(unusable)}"
+        )
         features = features.drop(columns=unusable)
     features.index = pd.Index(names)
 
@@ -56,7 +67,7 @@ def build_adata(exp: Experiment, fullest_df: pd.DataFrame) -> ad.AnnData:
     return adata
 
 
-def _feature_table(exp: Experiment, features: Sequence[str], round_tables: pd.DataFrame) -> pd.DataFrame:
+def _feature_table(exp: Experiment, features: Iterable[str], round_tables: pd.DataFrame) -> pd.DataFrame:
     """Describe each feature: its kind, and for channel features round, signal and acquisition."""
     channels = _same_in_every_well(round_tables, ["round_name", "signal"], CHANNEL_COLUMNS)
     rows = [
@@ -101,7 +112,7 @@ def _experiment_info(exp: Experiment, round_tables: pd.DataFrame) -> dict[str, A
             for col, value in microscope.iloc[0].items()
             if col != "all"
         },
-        "round_tables": round_tables.astype(dict.fromkeys(round_tables.select_dtypes("object").columns, str)),
+        "round_tables": round_tables.astype(dict.fromkeys(round_tables.select_dtypes(["object", "str"]).columns, str)),
     }
 
 

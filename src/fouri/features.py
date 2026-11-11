@@ -1,11 +1,15 @@
 """Helpers for notebook 07 (cell data -> AnnData)."""
 
+from __future__ import annotations
+
+import warnings
 from collections.abc import Sequence
 from enum import StrEnum
 
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
+from scipy import stats
 from scipy.signal import find_peaks
 from scipy.stats import gaussian_kde, zscore
 from skimage.filters import threshold_multiotsu, threshold_otsu
@@ -136,9 +140,14 @@ def add_derived_features(df, derived_features):
     return df
 
 
-def standardize_columns(df):
+def standardize_columns(df: pd.DataFrame, include: pd.Series[bool] | None = None) -> pd.DataFrame:
     """z-score every column (sample standard deviation, as before)."""
-    return (df - df.mean()) / df.std()
+    include = include if include is not None else pd.Series(True, index=df.index)
+    selected = df[include]
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=RuntimeWarning, message="Precision loss")
+        standardized = stats.zmap(df, selected, ddof=1)
+    return pd.DataFrame(data=standardized, columns=df.columns, index=df.index)
 
 
 def default_threshold_sample(exp):

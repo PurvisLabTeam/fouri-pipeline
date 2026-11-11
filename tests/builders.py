@@ -6,14 +6,15 @@ A test arranges a state in its temporary folder with these, without ND2 files, C
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
 from fouri import io, measure
-from fouri.config import Experiment, load_config
+from fouri.config import Experiment, load_config, save_config
 
 INFO_EXP = """\
 myRound,DAPI,Cy3,Cy5
@@ -150,3 +151,16 @@ def aligned(exp: Experiment, well: str, rounds: Sequence[int] | None = None) -> 
 def measured(exp: Experiment, well: str) -> None:
     """Run ``measure.measure_well`` on a well already converted, segmented and aligned."""
     measure.measure_well(exp, well)
+
+
+def measured_values(exp: Experiment, well: str, column: str, values: Sequence[float]) -> None:
+    path = io.cell_data_path(exp, well)
+    table = pd.read_csv(path)
+    table[column] = list(values)
+    table.to_csv(path, index=False)
+
+
+def with_filters(exp: Experiment, filters: Sequence[Mapping[str, Any]]) -> Experiment:
+    app = {**exp.config.get("app", {}), "filters": [dict(rule) for rule in filters]}
+    save_config({**exp.config, "app": app}, exp.config_path)
+    return load_config(exp.config_path, announce=False)

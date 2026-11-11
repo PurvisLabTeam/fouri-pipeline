@@ -30,15 +30,25 @@ class Method(StrEnum):
 
 def subsample(exp: Experiment, cells_per_sample: int = 2000, seed: int = 42) -> ad.AnnData:
     rpath = adata_path(exp)
-    data = ad.read_h5ad(rpath)
-    cells_per_sample_actual = data.obs["sample_ID"].value_counts()
+    adata = ad.read_h5ad(rpath)
+    selected = adata if "included" not in adata.obs.columns else adata[adata.obs["included"]]
+    adata_samples = set(adata.obs["sample_ID"])
+    selected_samples = set(selected.obs["sample_ID"])
+    if adata_samples != selected_samples:
+        missing_samples = sorted(str(s) for s in (adata_samples - selected_samples))
+        raise ValueError(
+            "The folowing samples have no cells left after filters so they cannot be subsampled. "
+            "Either change the filters on the Filters page, or leave the sample(s) out of the experiment: "
+            f"{', '.join(missing_samples)}"
+        )
+    cells_per_sample_actual = selected.obs["sample_ID"].value_counts()
     min_cells = cells_per_sample_actual.min()
     min_cells_sample = typing.cast(int, cells_per_sample_actual.idxmin())
     if min_cells < cells_per_sample:
         say(f"Subsampling to {min_cells} cells because sample {min_cells_sample} only has that many cells.")
         cells_per_sample = min_cells
     _, subsampled = sketch(
-        data, sample_set_key="sample_ID", num_subsamples=cells_per_sample, frequency_seed=seed, n_jobs=-1
+        selected, sample_set_key="sample_ID", num_subsamples=cells_per_sample, frequency_seed=seed, n_jobs=-1
     )
     subsampled.uns["subsample"] = {"cells_per_sample": cells_per_sample, "seed": seed}
     with written_whole(adata_sub_path(exp)) as partial:

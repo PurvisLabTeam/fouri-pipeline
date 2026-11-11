@@ -67,6 +67,12 @@ as `experiment.json.bak`.
 - Optional `anchor_round`: the round every other round is aligned onto, counted from 0 like `round_index`;
   default 0, the first round in `info_exp.csv`. The app's Experiment page sets it and always writes it, 0
   included. It is not in the setup form, which keeps any key it does not manage when it saves.
+- Optional `app`: what the app's pages save, through `save_config`. `app.filters` is a list of filter rules,
+  each with `name`, `use` (the page's switch), `rule` and `feature` (a column name such as
+  `R0_DNA_total_nuc_protein`): `middle_percentiles` takes `low`/`high` as percentiles from 0 to 100,
+  `robust_sd` takes `sds`, `between` takes `low`/`high` in the feature's own values, and `per_sample`
+  (optional, false when left out) judges each `sample_ID` on its own cells. `fouri.filters.saved_filters`
+  reads them, an empty list when either key is missing, and refuses two rules with one name.
 - Wells are always zero-padded (`B02`), normalized by `metadata.normalize_well`, sorted by `plate_sort_key`.
 - Committed notebooks keep the placeholder `CONFIG = r'Z:\PATH\TO\EXPERIMENT\experiment.json'`; do not
   commit a local path.
@@ -85,7 +91,7 @@ the writing and the reading side, so change them together.
 | 04 | removed: 06 moves the anchor's outlines into each round instead of measuring aligned copies of the images | — |
 | 05 | not used for now: it draws masks on 04's aligned images and its masks never removed cells (07 dropped `nuc_mask`/`ring_mask`). Masks return with the artifact U-Net, and will remove the cells they cover | — |
 | 06 | `cell_data/cell_data_{well}_df.csv` (no row-number column; older ones have `Unnamed: 0`) | 07 |
-| 07 | `fullest_df.csv`, `standard_adata.h5ad` in `base_dir` | 08 |
+| 07 | `fullest_df.csv`, `standard_adata.h5ad` in `base_dir`: every cell, with `included` (true or false: whether the filters named in Build cell table's `filters` setting kept it); excluded cells stay in both | 08 |
 | 08 | `standard_adata_sub.h5ad` in `base_dir`: the subsample with every measurement, each embedding in `.obsm` and the settings that made it in `.uns["embeddings"]`. Rerunning the subsample replaces the file and its embeddings | — |
 
 `NNN` is the 0-based `round_index`, zero-padded to 3 digits. A step run through `python -m fouri.run` (the app)
@@ -180,11 +186,26 @@ rules, read from disk, for the app's Status page; change it with a step's skip r
   `sample_ID` stays a category of numbers (08 selects samples with `isin([1, 2, …])`), other metadata text.
 - `derived_features` are `pandas.eval` formulas applied in order, so one may use an earlier one; a formula
   naming a missing column is skipped with a printed message rather than raising.
+- Build cell table (`run.build_cell_table(exp, filters=())`) applies the saved filters named in its `filters`
+  setting after the derived features, so a filter may use one, and adds the result as the column `included`.
+  `fouri.filters.keep` works out one rule on every cell of the table by itself: the percentiles (numpy's
+  linear ones) and `robust_sd`'s median and median absolute deviation (times 1.4826) come from the cells with a
+  value, per `sample_ID` when `per_sample` is set (it changes nothing for `between`), both bounds are kept, and
+  an empty or infinite value is never kept. `apply_filters` checks every rule before working any out, then
+  returns `included` (true where every rule keeps the cell) and each rule's count of the cells it leaves out on
+  its own, whatever the others do. Build cell table refuses, before writing anything, a name no saved filter
+  has, a feature the table lacks, or a rule that can't be applied (unknown kind, missing field, bad bounds,
+  `per_sample` without `sample_ID`); it says each rule's count and the total kept. With no names every cell is
+  included and nothing is said about filters. The run record's settings name the filters applied.
 - 07's pRB thresholds are its own cells, unchanged until the app. `fouri.adata.build_adata(exp, fullest_df)`
-  then builds the AnnData: `.obs` = label, well, metadata, centroid, bbox, orientation and `pRB_label` if a
-  threshold ran; `.X` = every other number column z-scored, a column left with NaN (a missing or infinite
-  value, or one value in every cell) dropped and named (old 07 dropped them silently: Clara's 1.3 file lost
-  all 22 `_nuc_cyto_ratio` features to a few cells with a ring mean of 0); `.var` = kind (channel, shape,
+  then builds the AnnData: `.obs` = label, well, `included`, metadata, centroid, bbox, orientation and
+  `pRB_label` if a threshold ran; `.X` = every other number column z-scored with the mean and sample SD of the
+  included cells, applied to every cell. A column is dropped from `.X` and named when an included cell has no
+  usable value (missing or infinite) or when its included cells all hold one value, judged by the values
+  themselves, not by the SD coming out 0, which values not stored exactly in binary miss (old 07 dropped such
+  columns silently, judged over every cell: an earlier experiment lost all 22 `_nuc_cyto_ratio` features to a
+  few cells with a ring mean of 0). An excluded cell may hold an empty value in `.X`; a table with no
+  `included` column counts every cell as included. `.var` = kind (channel, shape,
   derived), round, signal, measure and acquisition from the round tables (a value differing between wells
   left empty and named); `.uns` = setup-form details, condition columns, derived formulas, plate, microscope,
   round tables. It saves `fullest_df.csv` (no row-number column) and `standard_adata.h5ad`.
@@ -197,9 +218,10 @@ rules, read from disk, for the app's Status page; change it with a step's skip r
 
 `fouri/embedding.py`, one call per step, all on `standard_adata_sub.h5ad` (`io.adata_sub_path`):
 
-- `subsample(exp, cells_per_sample=2000, seed=42)`: sketchKH kernel herding grouped by `sample_ID`, from
-  `standard_adata.h5ad`; lowered to the smallest sample's count (sketch would do it silently), recorded in
-  `.uns["subsample"]`. Every feature stays in `.X`, so an embedding can be colored by any measurement.
+- `subsample(exp, cells_per_sample=2000, seed=42)`: sketchKH kernel herding grouped by `sample_ID`, on the
+  included cells of `standard_adata.h5ad` (every cell when it has no `included` column); a sample the filters
+  left with no included cell is refused, by name, before anything is sketched or written; lowered to the
+  smallest sample's count of included cells (sketch would do it silently), recorded in `.uns["subsample"]`. Every feature stays in `.X`, so an embedding can be colored by any measurement.
 - `rank_features(adata, features, samples=None, k=100)`: the picked features decide which cells are
   neighbors (k of them), and delve's `feature_select` scores every feature by how smoothly it changes
   between neighbors, lower is better. For the picked features this is exactly old 08's Laplacian ranking.
