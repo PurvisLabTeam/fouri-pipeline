@@ -92,7 +92,8 @@ the writing and the reading side, so change them together.
 also adds a "started" and an "ended" line to `run_record.jsonl` in `base_dir` (`io.run_record_path`). The app's
 Run page starts its steps that way one after another (`fouri.app.runner.Run`), each step's progress file, stop file
 and printed output in `fouri-app/<run id>/` under the system's temporary folder; the run id, also in the run record,
-is the run's start time in ISO's compact form, `20261109T173005`.
+is the run's start time in ISO's compact form, `20261109T173005`, with `-2`, `-3` and so on added when a run's folder
+of that id already exists.
 
 File names live in `fouri/io.py` (`round_table_path`, `tmat_path`, `cell_data_path`, `label_paths`,
 `label_path`, `fullest_df_path`, `adata_path`, `adata_sub_path`, `run_record_path`), with the functions that read and write those

@@ -12,6 +12,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -28,6 +29,8 @@ from fouri.status import Step
 Outcome = Literal["done", "failed", "stopped"]
 OUTCOMES = ("done", "failed", "stopped")
 RUNS_FOLDER = "fouri-app"
+TRACEBACK = "Traceback (most recent call last):"
+PRINTED_NOTHING = "No output on stdout or stderr."
 
 
 @dataclass(frozen=True)
@@ -137,6 +140,46 @@ def _take(progress: StepProgress, line: dict[str, Any]) -> None:
         progress.error = str(line.get("error") or "")
 
 
+def printed_error(log: Path) -> str:
+    try:
+        lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if not lines:
+        return ""
+    headers = [index for index, line in enumerate(lines) if line == TRACEBACK]
+    if headers:
+        after = lines[headers[-1] + 1 :]
+        start = next((index for index, line in enumerate(after) if not line.startswith(" ")), None)
+        if start is not None:
+            return "\n".join(after[start:])
+    return lines[-1]
+
+
+def _exit_text(exit_code: int) -> str:
+    if exit_code < 0:
+        try:
+            return f"exit code {exit_code}, {signal.Signals(-exit_code).name}"
+        except ValueError:
+            pass
+    return f"exit code {exit_code}"
+
+
+def _new_folder(parent: Path, stamp: str) -> tuple[str, Path]:
+    parent.mkdir(parents=True, exist_ok=True)
+    run_id, number = stamp, 1
+    while True:
+        try:
+            (parent / run_id).mkdir()
+        except FileExistsError:
+            number += 1
+            run_id = f"{stamp}-{number}"
+        else:
+            return run_id, parent / run_id
+
+
 def _quiet() -> dict[str, Any]:
     """Return how to start a step program: no console window on Windows, its own session elsewhere.
 
@@ -167,8 +210,11 @@ class Run:
             raise ValueError("A run needs at least one step.")
         self.config = str(config)
         self.requests = list(requests)
-        self.run_id = dt.datetime.now().strftime("%Y%m%dT%H%M%S")  # ISO's compact form, allowed in folder names
-        self.folder = folder if folder is not None else Path(tempfile.gettempdir()) / RUNS_FOLDER / self.run_id
+        stamp = dt.datetime.now().strftime("%Y%m%dT%H%M%S")  # ISO's compact form, allowed in folder names
+        if folder is not None:
+            self.run_id, self.folder = stamp, folder
+        else:
+            self.run_id, self.folder = _new_folder(Path(tempfile.gettempdir()) / RUNS_FOLDER, stamp)
         self.progress = [StepProgress(request.step) for request in self.requests]
         self._command = command if command is not None else step_command
         self._current = -1  # index of the step running, or of the last one started
@@ -198,7 +244,8 @@ class Run:
             progress=progress_file,
             run=self.run_id,
         )
-        environment = {**os.environ, "PYTHONIOENCODING": "utf-8"}  # the log reads the same on every PC
+        # the log reads the same on every PC
+        environment = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
         try:
             self._log = open(log_file, "wb")  # noqa: SIM115 (closed when the step ends)
             self._process = subprocess.Popen(
@@ -241,10 +288,8 @@ class Run:
             _take(progress, self._finished_line)
         else:  # it ended without saying how: killed, or crashed before reporting
             progress.outcome = "failed"
-            progress.error = (
-                f"{STEP_NAMES[progress.step]} ended unexpectedly (exit code {exit_code}). "
-                f"What it printed is in {self._log_file(self._current)}"
-            )
+            printed = printed_error(self._log_file(self._current)) or PRINTED_NOTHING
+            progress.error = f"{STEP_NAMES[progress.step]} ended unexpectedly ({_exit_text(exit_code)}).\n{printed}"
         # a failed or stopped step ends the run, and so does Stop
         if progress.outcome == "done" and not self._stopped and self._current + 1 < len(self.requests):
             self._start_step(self._current + 1)

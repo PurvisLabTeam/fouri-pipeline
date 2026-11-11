@@ -44,7 +44,8 @@ ENDINGS = {
     ),
     "stopped": ("warning", "Stopped. Completed wells are kept; run again to continue."),
 }
-FAILURE_LINE = "text-negative font-semibold"
+LOG_LINE = "whitespace-pre-wrap wrap-anywhere"
+FAILURE_LINE = f"{LOG_LINE} text-negative font-semibold"
 GPU_LINE_SECONDS = 0.5  # how often the GPU line looks for the check's answer
 CHECKING_GPU = "Checking for a GPU…"
 NO_GPU = "No GPU found"
@@ -344,7 +345,7 @@ def _progress_card(start: Callable[[], Awaitable[None]]) -> None:
             """Add the messages written since the last look, and each step's error in red."""
             for index, progress in enumerate(run.progress):
                 for text in progress.messages[shown["messages"][index] :]:
-                    log.push(text)
+                    log.push(text, classes=LOG_LINE)
                 shown["messages"][index] = len(progress.messages)
                 if progress.outcome is not None and progress.error and index not in shown["errors"]:
                     log.push(progress.error, classes=FAILURE_LINE)
@@ -366,7 +367,7 @@ def _progress_card(start: Callable[[], Awaitable[None]]) -> None:
                 log.clear()
                 shown.update(run=run, messages=[0] * len(run.progress) if run else [], errors=set())
                 if run is not None and segments_on_cpu(run):
-                    log.push(ON_CPU_LINE)
+                    log.push(ON_CPU_LINE, classes=LOG_LINE)
             if run is None:
                 return
             show_log(run)
@@ -441,8 +442,8 @@ def _content(exp: Experiment) -> None:
         ]
         if on_cpu:  # this run only: the next run's settings start without it
             next(request for request in requests if request.step == Step.SEGMENT).settings["allow_cpu"] = True
-        run = Run(exp.config_path, requests)
         try:
+            run = Run(exp.config_path, requests)
             run.start()
         except OSError as error:
             ui.notify(f"The run could not start: {error}", type="negative")
