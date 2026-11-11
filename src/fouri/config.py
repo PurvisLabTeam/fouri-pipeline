@@ -9,7 +9,7 @@ Every pipeline notebook starts with::
 and takes all of its paths and the well list from ``exp``. Create or edit the
 file with ``setup_experiment.ipynb``.
 
-The JSON format is compatible with Lauryn's ``project_config`` configs
+The JSON format is compatible with the older ``project_config`` configs
 (experiment_key, experiment_name, base_dir, mac_base_dir, well_list,
 well_metadata, ...). Fields added here are optional:
 
@@ -174,7 +174,7 @@ class Experiment:
         """Path of a file directly in base_dir, e.g. exp.file('standard_adata.h5ad')."""
         return os.path.join(self.base_dir, name)
 
-    # dict-style access for code written against Lauryn's project_config
+    # dict-style access for code written against the older project_config
     def __getitem__(self, item):
         if item == "base_dir":
             return self.base_dir
@@ -191,7 +191,7 @@ class Experiment:
 
 
 def _resolve_base_dir(config, config_path):
-    """base_dir from the config if set (Lauryn-style), else the config file's folder."""
+    """base_dir from the config if set (project_config style), else the config file's folder."""
     if platform.system() != "Windows" and (config.get("mac_base_dir") or "").strip():
         return os.path.normpath(config["mac_base_dir"].strip())
     if (config.get("base_dir") or "").strip():

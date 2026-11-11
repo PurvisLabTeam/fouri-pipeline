@@ -49,7 +49,7 @@ def plate_sort_key(well):
 
 
 def to_sample_id(value):
-    """Sample IDs are ints when they look like ints (Lauryn's configs store '1')."""
+    """Sample IDs are ints when they look like ints (the older project_config files store '1')."""
     if isinstance(value, str) and value.strip().lstrip("-").isdigit():
         return int(value.strip())
     if isinstance(value, float) and value.is_integer():

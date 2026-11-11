@@ -61,7 +61,7 @@ as `experiment.json.bak`.
   `paths.data`/`paths.info_file`, each left out when its box is empty or it is base_dir's own `data` or
   `info_exp.csv`, relative to `base_dir` when inside it, in full otherwise. A path typed without a drive or
   root is read as relative to the results folder.
-- The format stays readable as Lauryn's older `project_config` files (`experiment_key`, `base_dir`,
+- The format stays readable as the older `project_config` files (`experiment_key`, `base_dir`,
   `mac_base_dir`, `well_list`, `well_metadata`); `Experiment.__getitem__`/`.get` exist for code written
   against that dict. New fields must be optional.
 - Optional `anchor_round`: the round every other round is aligned onto, counted from 0 like `round_index`;
@@ -303,7 +303,7 @@ rules, read from disk, for the app's Status page; change it with a step's skip r
 
 ## Checking a change
 
-On Omar's workstation, `~/data/4i_refactor_test/experiment.json` is a one-well (B02) experiment whose
+On the maintainer's workstation, `~/data/4i_refactor_test/experiment.json` is a one-well (B02) experiment whose
 `paths` point at the raw data and pre-refactor segmentation in `~/data/4i_baseline/`.
 `~/data/4i_baseline/old/` holds the pre-refactor outputs to compare against, e.g.
 `old/cell_data/cell_data_B02_df.csv` against `~/data/4i_refactor_test/cell_data/cell_data_B02_df.csv`.

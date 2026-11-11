@@ -24,7 +24,7 @@ To pick up changes later: `git pull`, then `uv sync`.
    This writes `experiment.json` into the experiment folder.
 2. In each pipeline notebook, set the `CONFIG` line at the top to that file, e.g.
    ```python
-   CONFIG = r'Z:\Clara\1.3_20260310_Working Folder 4i\experiment.json'
+   CONFIG = r'Z:\PATH\TO\EXPERIMENT\experiment.json'
    ```
    Every folder and the well list come from the config; nothing else needs editing.
 3. Run the notebooks in order: 00, 01, 02, 03 (only when an alignment is wrong), 06, 07, 08. There is no 04 any more,
