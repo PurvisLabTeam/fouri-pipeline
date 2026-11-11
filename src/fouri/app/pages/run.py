@@ -19,11 +19,12 @@ from tqdm import tqdm
 
 from fouri.app.gpu import cpu_minutes, images_to_segment
 from fouri.app.plate import plate
+from fouri.app.rules import switched_on_filters
 from fouri.app.runner import Bar, Run, StepProgress, StepRequest, time_left
 from fouri.app.shell import page_frame, running_line
 from fouri.app.state import POLL_SECONDS, STATE, run_going, stop_run
 from fouri.app.steps import DESCRIPTIONS, Setting, can_tick, default, settings_for, shown_settings, whole_number
-from fouri.config import Experiment
+from fouri.config import Experiment, load_config
 from fouri.metadata import normalize_well, plate_sort_key
 from fouri.run import STEP_NAMES
 from fouri.status import PER_WELL_STEPS, Step
@@ -51,6 +52,8 @@ CHECKING_GPU = "Checking for a GPU…"
 NO_GPU = "No GPU found"
 STILL_CHECKING = "Still checking for a GPU. Try again in a moment."
 ON_CPU_LINE = "Segment nuclei runs on the CPU: no GPU found."
+NO_FILTERS = "No filters switched on."
+FILTERS_UNREADABLE = "The saved filters can't be read. Fix them on the Filters page."
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")  # not %a, which follows the PC's language
 
 
@@ -268,6 +271,16 @@ def _gpu_line() -> None:
     timer = ui.timer(GPU_LINE_SECONDS, show)
 
 
+def _filters_line(exp: Experiment) -> bool:
+    try:
+        names = switched_on_filters(exp)
+    except ValueError:
+        ui.label(FILTERS_UNREADABLE).classes("text-xs text-negative mt-1")
+        return False
+    ui.label(f"Filters switched on: {', '.join(names)}." if names else NO_FILTERS).classes("text-xs mt-1")
+    return True
+
+
 async def _ask_cpu(images: int) -> bool:
     """Ask before Segment nuclei runs on the CPU; return whether to go ahead."""
     count = f"{images} image{'' if images == 1 else 's'}"
@@ -287,7 +300,12 @@ async def _ask_cpu(images: int) -> bool:
 
 
 def _step_card(
-    badge: int, step: Step, ticked: dict[Step, bool], overwrite: dict[Step, bool], values: dict[str, Any]
+    exp: Experiment,
+    badge: int,
+    step: Step,
+    ticked: dict[Step, bool],
+    overwrite: dict[Step, bool],
+    values: dict[str, Any],
 ) -> None:
     with ui.card().classes("w-full p-3 gap-1"):
         with ui.row().classes("items-center no-wrap w-full gap-3"):
@@ -301,6 +319,9 @@ def _step_card(
                 ui.label(DESCRIPTIONS[step]).classes("text-xs muted -mt-1")
                 if step == Step.SEGMENT:
                     _gpu_line()
+                if step == Step.TABLE and not _filters_line(exp):
+                    ticked[step] = False
+                    box.disable()
             if step in PER_WELL_STEPS:
                 ui.switch("Overwrite").bind_value(overwrite, step).props("dense")
         settings = shown_settings(step)
@@ -431,6 +452,13 @@ def _content(exp: Experiment) -> None:
                 if not await _ask_cpu(images) or run_going():
                     return
                 on_cpu = True
+        filters: list[str] = []
+        if Step.TABLE in chosen:
+            try:
+                filters = switched_on_filters(load_config(exp.config_path, announce=False))
+            except (OSError, ValueError) as error:
+                ui.notify(f"The run could not start: {error}", type="negative")
+                return
         requests = [
             StepRequest(
                 step,
@@ -442,6 +470,8 @@ def _content(exp: Experiment) -> None:
         ]
         if on_cpu:  # this run only: the next run's settings start without it
             next(request for request in requests if request.step == Step.SEGMENT).settings["allow_cpu"] = True
+        if Step.TABLE in chosen:
+            next(request for request in requests if request.step == Step.TABLE).settings["filters"] = filters
         try:
             run = Run(exp.config_path, requests)
             run.start()
@@ -458,7 +488,7 @@ def _content(exp: Experiment) -> None:
             _wells_card(exp, picked)
             ui.select(WORKER_CHOICES, label="Wells processed in parallel").bind_value(workers, "count").classes("w-80")
             for badge, step in enumerate(Step, start=1):
-                _step_card(badge, step, ticked, overwrite, values[step])
+                _step_card(exp, badge, step, ticked, overwrite, values[step])
         _progress_card(start)
 
 

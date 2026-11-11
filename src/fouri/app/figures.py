@@ -98,7 +98,7 @@ def _plural(count: int, word: str) -> str:
     return f"{count:,} {word}" if count == 1 else f"{count:,} {word}s"
 
 
-def _line(drawn: int, total: int, sampled: bool, no_value: int, at_or_below: int, outliers: int) -> str:
+def _line(drawn: int, total: int, filtered: int, sampled: bool, no_value: int, at_or_below: int, outliers: int) -> str:
     count = f"{drawn:,} of {total:,} cells" if drawn < total else _plural(total, "cell")
     hidden = []
     if no_value:
@@ -107,18 +107,26 @@ def _line(drawn: int, total: int, sampled: bool, no_value: int, at_or_below: int
         hidden.append(f"{at_or_below:,} at or below 0")
     if outliers:
         hidden.append(_plural(outliers, "outlier"))
-    reasons = ["random sample"] if sampled else []
+    reasons = [f"{filtered:,} filtered"] if filtered else []
+    if sampled:
+        reasons.append("random sample")
     if hidden:
         reasons.append(", ".join(hidden) + " hidden")
     return f"{count} ({'; '.join(reasons)})" if reasons else count
 
 
-def explore_figure(cells: Cells, choices: Choices) -> tuple[go.Figure, str]:
+def explore_figure(cells: Cells, choices: Choices, kept: pd.Series | None = None) -> tuple[go.Figure, str]:
     kind = choices.kind
     table = cells.table
     if kind is Kind.WELL_MAP:
         table = table[table[WELL].astype(str) == str(choices.well)]
     total = len(table)
+    filtered = 0
+    if kept is not None:
+        inside = kept.loc[table.index].to_numpy(dtype=bool)
+        filtered = total - int(inside.sum())
+        table = table[inside]
+    count = len(table)
 
     columns = {X: choices.x}
     logged = {X: choices.log_x}
@@ -134,7 +142,7 @@ def explore_figure(cells: Cells, choices: Choices) -> tuple[go.Figure, str]:
 
     values = {name: _numbers(table, column) for name, column in columns.items()}
     keep = np.logical_and.reduce([np.isfinite(numbers) for numbers in values.values()])
-    no_value = total - int(keep.sum())
+    no_value = count - int(keep.sum())
 
     with_value = int(keep.sum())
     for name, log in logged.items():
@@ -143,7 +151,7 @@ def explore_figure(cells: Cells, choices: Choices) -> tuple[go.Figure, str]:
     at_or_below = with_value - int(keep.sum())
     for name, log in logged.items():
         if log:
-            values[name] = np.log10(values[name], out=np.full(total, np.nan), where=keep)
+            values[name] = np.log10(values[name], out=np.full(count, np.nan), where=keep)
 
     outliers = 0
     if choices.hide_outliers and keep.any():
@@ -242,4 +250,4 @@ def explore_figure(cells: Cells, choices: Choices) -> tuple[go.Figure, str]:
         legend_title_text="",
         legend_itemsizing="constant",
     )
-    return fig, _line(len(frame), total, sampled, no_value, at_or_below, outliers)
+    return fig, _line(len(frame), total, filtered, sampled, no_value, at_or_below, outliers)

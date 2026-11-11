@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
+import pandas as pd
 import plotly.graph_objects as go
 from nicegui import run, ui
 from nicegui.events import ValueChangeEventArguments
@@ -26,6 +27,7 @@ from fouri.app.figures import (
     explore_figure,
 )
 from fouri.app.names import MEASURES, marker_menu
+from fouri.app.rules import kept_cells
 from fouri.app.shell import empty_state, page_frame
 from fouri.app.state import STATE
 from fouri.app.theme import on_white_panel, restyle
@@ -64,6 +66,7 @@ class _View:
     bins_x: int = 100
     bins_y: int = 100
     max_points: int = 20000
+    every_cell: bool = False
     figure: go.Figure | None = None
     dark: bool = False
     drawing: int = 0
@@ -146,7 +149,7 @@ def _feature_picker(menu: Menu, label: str, column: str, on_pick: Callable[[str]
     return row
 
 
-def _explorer(cells: Cells, menu: Menu) -> None:
+def _explorer(cells: Cells, menu: Menu, kept: pd.Series | None, problem: str | None) -> None:
     view = _opening(cells, menu)
 
     async def draw() -> None:
@@ -154,7 +157,8 @@ def _explorer(cells: Cells, menu: Menu) -> None:
         ticket = view.drawing
         spinner.set_visibility(True)
         try:
-            fig, text = await run.io_bound(explore_figure, cells, view.choices())
+            shown = None if view.every_cell else kept
+            fig, text = await run.io_bound(explore_figure, cells, view.choices(), shown)
         finally:
             if ticket == view.drawing:
                 spinner.set_visibility(False)
@@ -231,6 +235,7 @@ def _explorer(cells: Cells, menu: Menu) -> None:
             ui.checkbox("log10 x", value=view.log_x, on_change=on("log_x"))
             log_y_box = ui.checkbox("log10 y", value=view.log_y, on_change=on("log_y"))
             ui.checkbox(HIDE_OUTLIERS, value=view.hide_outliers, on_change=on("hide_outliers"))
+            ui.switch("Show all cells", value=view.every_cell, on_change=on("every_cell"))
             with ui.row().classes("w-full no-wrap gap-2"):
                 bins_x_box = (
                     ui.number(
@@ -272,6 +277,8 @@ def _explorer(cells: Cells, menu: Menu) -> None:
             )
 
         with ui.column().classes("grow min-w-0 gap-1"):
+            if problem:
+                ui.label(problem).classes("text-sm text-warning")
             plot = ui.plotly({"data": [], "layout": {}}).classes("w-full h-[80vh]")
             with ui.row().classes("items-center gap-2"):
                 spinner = ui.spinner(size="sm")
@@ -316,4 +323,5 @@ def explore_page() -> None:
         empty_state(cells)
         if not cells.measured:
             return
-        _explorer(cells, marker_menu(cells.features, read_info_file(exp)))
+        kept, problem = kept_cells(cells, exp)
+        _explorer(cells, marker_menu(cells.features, read_info_file(exp)), kept, problem)
