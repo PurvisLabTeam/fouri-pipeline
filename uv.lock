@@ -55,6 +55,7 @@ dev = [
     { name = "mypy" },
     { name = "nbstripout" },
     { name = "pandas-stubs" },
+    { name = "pyqt6-webengine", marker = "sys_platform == 'linux'" },
     { name = "pytest" },
     { name = "pytest-sugar" },
     { name = "pytest-xdist" },
@@ -109,6 +110,7 @@ dev = [
     { name = "mypy", specifier = ">=2.4.1" },
     { name = "nbstripout", specifier = ">=0.8" },
     { name = "pandas-stubs", specifier = ">=3.1.0.261029" },
+    { name = "pyqt6-webengine", marker = "sys_platform == 'linux'", specifier = "==6.11.*" },
     { name = "pytest", specifier = ">=9.2.0" },
     { name = "pytest-sugar", specifier = ">=1.1.1" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
@@ -3213,6 +3215,30 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/64/f4/4ce0629bf6780c62d3bb4ebe33dfe1aa9523888baab5a8d0a4b13708c5ab/pyqt6_sip-13.13.0-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:42544406d4519122ad9ee7a79bc9195cdceba6d777d2e481d346e6ad2801f38a", size = 322837, upload-time = "2026-10-04T12:26:26.802Z" },
     { url = "https://files.pythonhosted.org/packages/37/d4/ea91156975216008e5fbfb8158478fc6f0b1b4d8c4de63e8819a8a69d6f0/pyqt6_sip-13.13.0-cp312-cp312-win_amd64.whl", hash = "sha256:c6b67d301ef64e13d313c728020616315c952473abb27029b2e5857b44a7b3e6", size = 53464, upload-time = "2026-10-04T12:26:31.563Z" },
     { url = "https://files.pythonhosted.org/packages/85/de/e9edaf5990240ee608566429447478de2d71311d43d165d966122540565b/pyqt6_sip-13.13.0-cp312-cp312-win_arm64.whl", hash = "sha256:ff5d5bd3920d1e2bc251a931233c7909df08fa12786c2ddbcef935b6105bfb0c", size = 48845, upload-time = "2026-10-04T12:26:32.538Z" },
+]
+
+[[package]]
+name = "pyqt6-webengine"
+version = "6.11.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyqt6" },
+    { name = "pyqt6-sip" },
+    { name = "pyqt6-webengine-qt6" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9a/c6/b4f777c46ff42a759180dc65ad49a207748ea2e83ac4df21e89eaf4834c3/pyqt6_webengine-6.11.0.tar.gz", hash = "sha256:15cf49efbbbd4c6bc87653b2c4ae80d6049f800e31620b336734ae2e37cbedae", size = 37331, upload-time = "2026-03-30T09:18:15.561Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/02/63/99f0032137dd76d7c401d467887bcee112df4fc9f496cf92b11de6b93551/pyqt6_webengine-6.11.0-cp310-abi3-manylinux_2_34_x86_64.whl", hash = "sha256:a9c07d18ab6aa4be95dea5bdbced2690cf0659637634e960bd5cf90c9aa5bc1b", size = 318292, upload-time = "2026-03-30T09:18:10.297Z" },
+    { url = "https://files.pythonhosted.org/packages/ac/4a/a262c8828f35acec6dba2bf2f90d1c00b82d91f8b31f8ec830ac2f7c5d6c/pyqt6_webengine-6.11.0-cp310-abi3-manylinux_2_39_aarch64.whl", hash = "sha256:a115d14205b037bf2e8aa52176fc30260c112cf3a252047e69999e5d52f7b868", size = 319166, upload-time = "2026-03-30T09:18:11.515Z" },
+]
+
+[[package]]
+name = "pyqt6-webengine-qt6"
+version = "6.11.2"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/95/8a/898587477eec44d62aede99040a14aa6197a624bc055b82da0be03f23c88/pyqt6_webengine_qt6-6.11.2-py3-none-manylinux_2_34_x86_64.whl", hash = "sha256:764891ae20e81828ed8ba0dc153daffca10f8060c9a9b0303a7d407e3e72ce9b", size = 116332252, upload-time = "2026-08-23T12:58:41.09Z" },
+    { url = "https://files.pythonhosted.org/packages/69/bb/671fed81ceb4cb0aba977946468f163005fd5e8da5075f4a94a1ebfdb3aa/pyqt6_webengine_qt6-6.11.2-py3-none-manylinux_2_39_aarch64.whl", hash = "sha256:17796086d6a6fd4aa58d4cd50ba9410d6ab5f1f9597b6e04443a7ee960c341bb", size = 111830458, upload-time = "2026-08-23T12:58:47.367Z" },
 ]
 
 [[package]]

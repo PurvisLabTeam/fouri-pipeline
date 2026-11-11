@@ -45,6 +45,7 @@ dev = [
     "mypy>=2.4.1",
     "nbstripout>=0.8",
     "pandas-stubs>=3.1.0.261029",
+    "pyqt6-webengine==6.11.* ; sys_platform == 'linux'",
     "pytest>=9.2.0",
     "pytest-sugar>=1.1.1",
     "pytest-xdist>=3.8.0",
