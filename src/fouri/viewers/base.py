@@ -1,5 +1,7 @@
 """@TODO."""
 
+from __future__ import annotations
+
 import abc
 import textwrap
 from collections.abc import Callable
@@ -8,6 +10,8 @@ from enum import StrEnum
 import napari
 import pandas as pd
 from magicgui.widgets import ComboBox, Container, Label, PushButton, Widget
+from qtpy.QtCore import QEvent, QObject, QTimer
+from qtpy.QtWidgets import QMessageBox
 
 from fouri.config import Experiment
 from fouri.io import read_round_table
@@ -40,6 +44,9 @@ class BaseViewer(abc.ABC):
     well_picker: ComboBox
     round_picker: ComboBox
 
+    _close_guard: _CloseGuard
+    _self_close: bool
+
     def __init__(self, exp: Experiment, well: str, round_name: str | None = None) -> None:
         self.exp = exp
         self.viewer = napari.Viewer()
@@ -51,6 +58,7 @@ class BaseViewer(abc.ABC):
 
         self.well_picker.changed.connect(self._on_well_picked)
         self.round_picker.changed.connect(self._on_round_picked)
+        self._self_close = False
 
         button_up = PushButton(text="▲")
         button_down = PushButton(text="▼")
@@ -88,6 +96,7 @@ class BaseViewer(abc.ABC):
             f"{keys.WELL_FIRST} / {keys.WELL_LAST}: first / last well",
             "Scroll: zoom",
             "Space + drag: pan",
+            *self._extra_shortcuts(),
         ]
         shortcut_help = Label(value="\n".join(shortcut_lines), label="")
 
@@ -96,9 +105,13 @@ class BaseViewer(abc.ABC):
         )
         panel.min_width = 250
         self.viewer.window.add_dock_widget(panel.native, area="right", name=self.title)
+
+        self._close_guard = _CloseGuard(self)
+        self.viewer.window._qt_window.installEventFilter(self._close_guard)
+
         self.viewer.canvas.overlays.text.visible = True
         self._bind_keys()
-        self.show_well(well, round_name)
+        self.show_well(well, round_name if round_name is not None else self._start_round())
 
     def show_well(self, well: str, round_name: str | None = None) -> None:
         round_table = read_round_table(self.exp, well)
@@ -115,8 +128,7 @@ class BaseViewer(abc.ABC):
         with self.round_picker.changed.blocked():
             self.round_picker.choices = choices
 
-        with self.well_picker.changed.blocked():
-            self.well_picker.value = well
+        self._set_quiet(self.well_picker, well)
 
         current = getattr(self, "round_name", None)
         target = round_name if round_name is not None else current if current in choices else choices[0]
@@ -127,24 +139,30 @@ class BaseViewer(abc.ABC):
     def show_round(self, round_name: str) -> None:
         self._load_round(round_name)
         self.round_name = round_name
-        with self.round_picker.changed.blocked():
-            self.round_picker.value = round_name
+        self._set_quiet(self.round_picker, round_name)
 
     def _on_well_picked(self, well: str) -> None:
+        may_leave = self._may_leave()
+        if not may_leave:
+            self._set_quiet(self.well_picker, self.well)
+            return
         try:
             self.show_well(well)
         except (FileNotFoundError, ValueError) as error:
             self.prompt(f"Could not open well {well}: {error}")
-            with self.well_picker.changed.blocked():
-                self.well_picker.value = self.well
+            self._set_quiet(self.well_picker, self.well)
+
+    @staticmethod
+    def _set_quiet(picker: ComboBox, value: str) -> None:
+        with picker.changed.blocked():
+            picker.value = value
 
     def _on_round_picked(self, round_name: str) -> None:
         try:
             self.show_round(round_name)
         except (FileNotFoundError, ValueError) as error:
             self.prompt(f"Could not open round {round_name}: {error}")
-            with self.round_picker.changed.blocked():
-                self.round_picker.value = self.round_name
+            self._set_quiet(self.round_picker, self.round_name)
 
     def step_round(self, step: int) -> None:
         self._go_to_round(self.current_round_position + step)
@@ -154,6 +172,36 @@ class BaseViewer(abc.ABC):
 
     def prompt(self, message: str) -> None:
         self.viewer.canvas.overlays.text.text = textwrap.fill(message, width=PROMPT_WIDTH)
+
+    def _start_round(self) -> str | None:
+        return None
+
+    def _extra_shortcuts(self) -> list[str]:
+        return []
+
+    def _unsaved_rounds(self) -> list[str]:
+        return []
+
+    def _may_leave(self) -> bool:
+        unsaved = self._unsaved_rounds()
+        if unsaved == []:
+            return True
+        msg_box = QMessageBox(self.viewer.window._qt_window)
+        msg_box.setText(f"{self.well} has unsaved edits in {', '.join(unsaved)}. Save before leaving?")
+        msg_box.setStandardButtons(
+            QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel
+        )
+        msg_box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        result = msg_box.exec()
+
+        match result:
+            case QMessageBox.StandardButton.Save:
+                self.save()
+                return not self._unsaved_rounds()
+            case QMessageBox.StandardButton.Discard:
+                return True
+            case _:
+                return False
 
     def _bind_keys(self) -> None:
         keys: dict[str, Callable[[], None]] = {
@@ -217,3 +265,22 @@ class BaseViewer(abc.ABC):
 
     @abc.abstractmethod
     def _extra_keys(self) -> dict[str, Callable[[], None]]: ...
+
+
+class _CloseGuard(QObject):
+    def __init__(self, editor: BaseViewer) -> None:
+        super().__init__()
+        self.editor = editor
+
+    def eventFilter(self, watched: QObject | None, event: QEvent | None) -> bool:  # noqa: N802
+        if event is None or event.type() != QEvent.Type.Close:
+            return False
+        if self.editor._self_close or self.editor._unsaved_rounds() == []:
+            return False
+        may_leave = self.editor._may_leave()
+        if may_leave:
+            self.editor._self_close = True
+            QTimer.singleShot(0, self.editor.viewer.close)
+
+        event.ignore()
+        return True

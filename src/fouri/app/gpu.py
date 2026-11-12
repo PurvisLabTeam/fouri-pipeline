@@ -1,4 +1,4 @@
-"""Whether this PC has a GPU for Segment nuclei, and how long segmenting takes without one.
+"""Whether this PC has a GPU for Segment nuclei, and how many images it would segment.
 
 The check runs in a program of its own, so the app never loads PyTorch.
 """
@@ -13,9 +13,9 @@ from collections.abc import Sequence
 from typing import Any
 
 from fouri.config import Experiment
+from fouri.io import label_path, original_label_path
 from fouri.status import Step, step_status
 
-CPU_MINUTES_PER_IMAGE = 20
 # prints the GPU's name, or an empty line when PyTorch finds none
 GPU_PROGRAM = "from fouri.segment import gpu_name; print(gpu_name() or '')"
 
@@ -60,9 +60,9 @@ def images_to_segment(exp: Experiment, wells: Sequence[str], *, overwrite: bool)
     if not wells:
         return 0
     status = step_status(exp, Step.SEGMENT, wells)
-    return sum(well.total if overwrite else well.total - well.done for well in status.values())
-
-
-def cpu_minutes(images: int) -> int:
-    """Return the minutes segmenting ``images`` images takes on the CPU."""
-    return images * CPU_MINUTES_PER_IMAGE
+    return sum(
+        not original_label_path(exp, well, round_index).exists()
+        and (overwrite or not label_path(exp, well, round_index).exists())
+        for well, state in status.items()
+        for round_index in range(state.total)
+    )

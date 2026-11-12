@@ -18,7 +18,7 @@ from nicegui import ui
 from tqdm import tqdm
 
 from fouri.app.embeddings import embedding_settings
-from fouri.app.gpu import cpu_minutes, images_to_segment
+from fouri.app.gpu import images_to_segment
 from fouri.app.plate import plate
 from fouri.app.rules import switched_on_filters, switched_on_labels
 from fouri.app.runner import Bar, Run, StepProgress, StepRequest, time_left
@@ -169,18 +169,6 @@ def time_left_text(seconds: float, now: float) -> str:
     if done_at.date() != dt.datetime.fromtimestamp(now).date():
         clock = f"{WEEKDAYS[done_at.weekday()]} {clock}"
     return f"{tqdm.format_interval(seconds)} left, done about {clock}"
-
-
-def duration(minutes: int) -> str:
-    """Return a time in hours and minutes, the minutes left out when there are none.
-
-    About 20 minutes, about 2 hours 20 minutes, about 6 hours.
-    """
-    hours, rest = divmod(minutes, 60)
-    parts = [f"{hours} hour{'' if hours == 1 else 's'}"] if hours else []
-    if rest or not hours:
-        parts.append(f"{rest} minute{'' if rest == 1 else 's'}")
-    return "about " + " ".join(parts)
 
 
 def segments_on_cpu(run: Run) -> bool:
@@ -335,9 +323,7 @@ async def _ask_cpu(images: int) -> bool:
         with ui.row().classes("items-center gap-2 no-wrap"):
             ui.icon("warning").classes("text-2xl text-warning")
             ui.label("No GPU found").classes(SECTION_TITLE)
-        ui.label(f"Segment nuclei would segment {count} on the CPU, {duration(cpu_minutes(images))}.").classes(
-            "text-sm"
-        )
+        ui.label(f"Segment nuclei would segment {count} on the CPU.").classes("text-sm")
         with ui.row().classes("w-full justify-end gap-2"):
             ui.button("Cancel", on_click=lambda: dialog.submit(False)).props("flat")
             ui.button("Run on the CPU", icon="play_arrow", on_click=lambda: dialog.submit(True))

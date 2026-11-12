@@ -9,7 +9,7 @@ import numpy.typing as npt
 from tifffile import imread
 
 from fouri.config import Experiment
-from fouri.io import alignment_paths, label_path, write_tiff
+from fouri.io import alignment_paths, label_path, original_label_path, write_tiff
 from fouri.parallel import Failed, check_results, error_in_words
 from fouri.report import Stopped, progress, say, say_skipped
 
@@ -34,19 +34,27 @@ def segment_wells(
     """Segment all the round images for all wells in the experiment."""
     worklist = {}
     skipped = []
+    hand_edited = []
     for well in exp.pick_wells(wells):
         paths = alignment_paths(exp, well)
+        edited = [index for index in range(len(paths)) if original_label_path(exp, well, index).exists()]
         well_work = tuple(
             (round_index, image_path, label)
             for round_index, image_path in enumerate(paths)
-            if not (label := label_path(exp, well, round_index)).exists() or overwrite
+            if round_index not in edited and (not (label := label_path(exp, well, round_index)).exists() or overwrite)
         )
         if well_work:
             worklist[well] = well_work
+        if edited:
+            rounds = "round" if len(edited) == 1 else "rounds"
+            hand_edited.append(f"{well} ({rounds} {', '.join(str(round_index) for round_index in edited)})")
 
-        n_skipped = len(paths) - len(well_work)
+        n_skipped = len(paths) - len(well_work) - len(edited)
         if n_skipped > 0:
             skipped.append(f"{well} ({n_skipped} of {len(paths)} rounds)")
+
+    if hand_edited:
+        say(f"Edited by hand, so kept even with Overwrite: {', '.join(hand_edited)}.")
 
     if not worklist:
         say("Every round already has labels, nothing to segment. To overwrite them from scratch, use overwrite=True")

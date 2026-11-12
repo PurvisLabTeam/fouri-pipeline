@@ -10,8 +10,9 @@ import napari
 from fouri.config import load_config
 from fouri.viewers.alignment import AlignmentViewer
 from fouri.viewers.base import BaseViewer
+from fouri.viewers.segmentation import SegmentationViewer
 
-EDITORS: dict[str, type[BaseViewer]] = {"alignment": AlignmentViewer}
+EDITORS: dict[str, type[BaseViewer]] = {"alignment": AlignmentViewer, "segmentation": SegmentationViewer}
 
 
 def main(argv: Sequence[str] | None = None) -> int:

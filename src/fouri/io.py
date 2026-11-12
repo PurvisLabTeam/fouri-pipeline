@@ -142,6 +142,11 @@ def label_path(exp: Experiment, well: str, round_index: int) -> Path:
     return Path(exp.segmented) / well / f"labels_{well}_round_{round_index:03d}.tif"
 
 
+def original_label_path(exp: Experiment, well: str, round_index: int) -> Path:
+    p = label_path(exp, well, round_index)
+    return p.parent / "cellpose_original" / p.name
+
+
 def read_labels(labels_path, well, indices=None):
     """Stack of a well's label images (sorted by file name).
 
