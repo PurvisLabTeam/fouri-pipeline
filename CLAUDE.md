@@ -214,9 +214,11 @@ rules, read from disk, for the app's Status page; change it with a step's skip r
   round with `align.move_to_round` (inverse of the round's transform, nearest pixel, cv2; `move_to_anchor`
   goes the other way), blanks pixels where every channel of the round is 0 (no image data in the montage),
   and measures 00's TIFFs. A cell is dropped if its nucleus or ring, in any round, falls outside the image
-  or on such a blank area, or within 1 px of one: each round's has-data area is moved into the anchor's
-  frame, the areas are combined, and the result is eroded once (3 × 3). `measure_well` returns the count
-  with its path and `measure_wells` prints it per well. Cells with no ring are dropped by the inner joins.
+  or on such a blank area, or within `edge_margin` px of one (Measure cells' setting, 1 by default; 0 drops
+  only cells that reach a blank area): each round's has-data area is moved into the anchor's frame, the areas
+  are combined, and the result is eroded `edge_margin` times (3 × 3). `measure_wells` refuses a negative
+  margin before measuring any well. `measure_well` returns the count with its path and `measure_wells` prints
+  it per well. Cells with no ring are dropped by the inner joins.
 - Cytoplasmic rings come from `fouri.rings.make_rings(labels, width, gap)` (06's `ring_width`/`ring_gap`
   settings, 6 and 1): a pixel joins a ring only if exactly one nucleus lies within `width`, so pixels two
   cells could claim are dropped. cv2 dilate/erode, identical to the original skimage version.

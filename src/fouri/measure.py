@@ -26,11 +26,18 @@ def measure_wells(
     exp: Experiment,
     ring_width: int = 6,
     ring_gap: int = 1,
+    edge_margin: int = 1,
     n_workers: int | None = None,
     overwrite: bool = False,
     wells: Sequence[str] | None = None,
 ) -> list[Path]:
-    """Measure every well without cell data (every well with overwrite); return the CSVs written."""
+    """Measure every well without cell data (every well with overwrite); return the CSVs written.
+
+    @TODO.
+    """
+    if edge_margin < 0:
+        raise ValueError(f"Edge margin must be >= 0. Got {edge_margin}")
+
     chosen = exp.pick_wells(wells)
     worklist = [well for well in chosen if overwrite or not _is_measured(exp, well)]
     if not worklist:
@@ -43,7 +50,9 @@ def measure_wells(
         say(f"{well}: cell data has no columns for some rounds, measuring again.")
 
     results = parallel_map(
-        function=functools.partial(measure_well, exp, ring_width=ring_width, ring_gap=ring_gap),
+        function=functools.partial(
+            measure_well, exp, ring_width=ring_width, ring_gap=ring_gap, edge_margin=edge_margin
+        ),
         items=worklist,
         desc="Measuring cells",
         unit="well",
@@ -76,7 +85,9 @@ def _is_measured(exp: Experiment, well: str) -> bool:
     return expected_cols.issubset(columns)
 
 
-def measure_well(exp: Experiment, well: str, ring_width: int = 6, ring_gap: int = 1) -> tuple[Path, int]:
+def measure_well(
+    exp: Experiment, well: str, ring_width: int = 6, ring_gap: int = 1, edge_margin: int = 1
+) -> tuple[Path, int]:
     round_table = read_round_table(exp, well)
     require_raw_files(round_table, well)
     transforms = load_transforms(exp, well)
@@ -139,7 +150,9 @@ def measure_well(exp: Experiment, well: str, ring_width: int = 6, ring_gap: int 
         ring_means.append(_mean_per_cell(round_rings, images, columns=[prfx + "_ring_mean" for prfx in prefixes]))
         col_prefixes.extend(prefixes)
 
-    covered = cv2.erode(covered.astype(np.uint8), np.full((3, 3), 1, dtype=np.uint8)).astype(bool)
+    covered = cv2.erode(covered.astype(np.uint8), np.full((3, 3), 1, dtype=np.uint8), iterations=edge_margin).astype(
+        bool
+    )
 
     tables = [table, *nuc_means, rings_table, *ring_means]
     cells = functools.reduce(lambda left, right: pd.merge(left, right, on="label", how="inner"), tables)
@@ -152,7 +165,7 @@ def measure_well(exp: Experiment, well: str, ring_width: int = 6, ring_gap: int 
     cells = pd.concat([cells, total_nuc_protein, nuc_cyto_ratio], axis=1)
     cells["well"] = well
 
-    # drop cells not fully inside every round's image data (with a 1 px margin)
+    # drop cells not fully inside every round's image data (with a margin of edge_margin px)
     lost_nuclei = cleaned[~covered]
     lost_rings = rings[~covered]
     lost_labels = np.unique(np.concatenate([lost_nuclei, lost_rings]))

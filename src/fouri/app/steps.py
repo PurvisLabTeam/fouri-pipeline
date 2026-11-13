@@ -35,7 +35,11 @@ SETTINGS: dict[Step, list[Setting]] = {
         Setting("min_size", "Smallest nucleus kept (px)", "number"),
     ],
     Step.ALIGN: [Setting("downscale_factor", "Downscale factor", "number")],
-    Step.MEASURE: [Setting("ring_width", "Ring width", "number"), Setting("ring_gap", "Ring gap", "number")],
+    Step.MEASURE: [
+        Setting("ring_width", "Ring width", "number"),
+        Setting("ring_gap", "Ring gap", "number"),
+        Setting("edge_margin", "Edge margin (px)", "number"),
+    ],
     Step.TABLE: [],
     Step.EMBEDDING: [
         Setting("cells_per_sample", "Cells per sample", "number"),
