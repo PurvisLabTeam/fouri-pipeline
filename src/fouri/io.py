@@ -158,6 +158,16 @@ def read_labels(labels_path, well, indices=None):
     return np.array([imread(pth) for pth in paths])
 
 
+def mask_path(exp: Experiment, well: str, round_index: int) -> Path:
+    """@TODO."""
+    return Path(exp.masks) / well / f"masks_{well}_round_{round_index:03d}.npz"
+
+
+def mask_record_path(exp: Experiment, well: str, round_index: int) -> Path:
+    """@TODO."""
+    return mask_path(exp, well, round_index).with_suffix(".json")
+
+
 @contextmanager
 def written_whole(path: str | Path) -> Generator[Path]:
     """Yield a .partial name to write to.

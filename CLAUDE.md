@@ -120,12 +120,13 @@ the writing and the reading side, so change them together.
 
 | Step | Writes | Read by |
 |------|--------|---------|
-| 00 | `output_df/round_table_{well}.csv`: one row per round × channel listed in `info_exp.csv`, with its ND2 file, acquisition settings, `is_align_channel` and `raw_file_name`. `output_images/{well}/Round_{round_name}_well{well}_{signal}.tif` (the `raw_file_name`): every channel of every round, cropped to the smallest image, with an OME header (pixel size, wavelengths, exposure); 0.3–0.9 GB per well | table: 01, 02, 03, 06; images: 01 (the `is_align_channel` ones), 06 (all) |
+| 00 | `output_df/round_table_{well}.csv`: one row per round × channel listed in `info_exp.csv`, with its ND2 file, acquisition settings, `is_align_channel` and `raw_file_name`. `output_images/{well}/Round_{round_name}_well{well}_{signal}.tif` (the `raw_file_name`): every channel of every round, cropped to the smallest image, with an OME header (pixel size, wavelengths, exposure); 0.3–0.9 GB per well | table: 01, 02, 03, 06, Find artifacts; images: 01 (the `is_align_channel` ones), 06 (all), Find artifacts (the image size from each header) |
 | 01 | `segmented/{well}/labels_{well}_round_{NNN}.tif` (Cellpose-SAM). The segmentation editor saves over these, and the first time it saves a round keeps the file as Cellpose left it in `segmented/{well}/cellpose_original/` under the same name; a round with a file there is hand-edited | 02, 03, 06 (anchor round only) |
 | 02 | `output_df/tmat_{well}.npy`: rigid transforms (rounds × 3 × 3) indexed by `round_index`, identity for the anchor; found on the outlines at half size by default (`downscale_factor` 2: within 0.27 px of full size on the local wells, 4× faster) | 03, 06 |
 | 03 | replaces one entry of `tmat_{well}.npy` per saved round with a hand alignment: matching cells clicked in the alignment viewer (`fouri.viewers.AlignmentViewer`); creates the file if 02 never ran | 06 |
 | 04 | removed: 06 moves the anchor's outlines into each round instead of measuring aligned copies of the images | — |
 | 05 | not used for now: it draws masks on 04's aligned images and its masks never removed cells (07 dropped `nuc_mask`/`ring_mask`). Masks return with the artifact U-Net, and will remove the cells they cover | — |
+| Find artifacts | `masks/{well}/masks_{well}_round_{NNN}.npz` (`fouri.artifacts.find_artifacts`, not yet a step of `fouri.run` or the Run page): `final_{signal}` (true or false per pixel) and `outlines_{signal}` (numbered objects, 0 for none) for every channel in the round's round table, in the shape of the round's images; `masks_{well}_round_{NNN}.json` beside the `.npz`: `edited` and, per signal, `spread` and `pad`. Until the artifact U-Net is retrained, the step is a stub: every mask empty, `spread` and `pad` 0, `edited` false; `fouri.artifacts.round_masks` is the one function the U-Net replaces | not read yet; the mask editor and Measure cells later |
 | 06 | `cell_data/cell_data_{well}_df.csv` (no row-number column; older ones have `Unnamed: 0`) | 07 |
 | 07 | `fullest_df.csv`, `standard_adata.h5ad` in `base_dir`: every cell, with `included` (true or false: whether the filters named in Build cell table's `filters` setting kept it) and a column per label named in its `labels` setting; excluded cells stay in both | 08 |
 | 08 | `standard_adata_sub.h5ad` in `base_dir`: the subsample with every measurement, each embedding in `.obsm` and the settings that made it in `.uns["embeddings"]`. Rerunning the subsample replaces the file and its embeddings | — |
@@ -139,13 +140,13 @@ is the run's start time in ISO's compact form, `20261109T173005`, with `-2`, `-3
 of that id already exists.
 
 File names live in `fouri/io.py` (`round_table_path`, `tmat_path`, `cell_data_path`, `label_paths`,
-`label_path`, `original_label_path`, `fullest_df_path`, `adata_path`, `adata_sub_path`, `run_record_path`, `export_path`), with the functions that read and write those
+`label_path`, `original_label_path`, `mask_path`, `mask_record_path`, `fullest_df_path`, `adata_path`, `adata_sub_path`, `run_record_path`, `export_path`), with the functions that read and write those
 files.
 
 The round table is only read through `fouri.io.read_round_table`. Reading falls back to the `df_{well}.pkl`
 that 00 wrote before the switch, renaming `nameRound` → `round_name`, `alignRound` → `round_index` and
-`alignIm` → `is_align_channel`, so 02 and 03 still run on older experiments. 01 and 06 open 00's TIFFs, so
-they need `raw_file_name`, which only the new table has: `io.require_raw_files` stops with "rerun 00" for an
+`alignIm` → `is_align_channel`, so 02 and 03 still run on older experiments. 01, 06 and Find artifacts open 00's
+TIFFs, so they need `raw_file_name`, which only the new table has: `io.require_raw_files` stops with "rerun 00" for an
 older one.
 
 The transforms file is only read and written through `fouri.io.load_transforms` and `save_transforms`
@@ -155,7 +156,7 @@ stored as a 3 × 3 matrix of NaN (the identity at the anchor): `align.save_manua
 that way when a round is aligned by hand before 02 has run, and `measure_well` refuses a well with any NaN
 round, naming the rounds.
 
-00, 01, 02 and 06 only create outputs that are missing, unless their `overwrite` argument (a setting in each
+00, 01, 02, Find artifacts and 06 only create outputs that are missing, unless their `overwrite` argument (a setting in each
 notebook, default `False`) is `True`. Done means done for the rounds `info_exp.csv` lists now, so rounds added
 at the end of `info_exp.csv` are processed without redoing the earlier ones:
 
@@ -172,6 +173,11 @@ at the end of `info_exp.csv` are processed without redoing the earlier ones:
   them and aligns only the new ones. It refuses a well whose label images don't match its rounds, that has no
   label image for `anchor_round`, or whose saved file has more rounds than the well or a non-identity matrix at
   `anchor_round` (the anchor changed); the checks run in that order and a well gets the first one's message.
+- Find artifacts skips a round whose `.npz` exists, and never replaces a round whose `.json` has `edited` true
+  (masks painted by hand), even with `overwrite=True`; the step names those rounds apart from the ones skipped as
+  done. The `.json` is written before the `.npz`, so a round with an `.npz` always has its `.json`. Find artifacts
+  refuses a well whose round table is missing or predates `raw_file_name`, or whose round has a `.json` without
+  an `edited` of true or false.
 - A refused well is a failed well: it is left out of the work and passed to `check_results` with the others, so
   the other wells still run and the step ends failed naming it.
 - 06 skips a well whose CSV has a `{prefix}_nuc_mean` column for every channel in its round table; a well
