@@ -43,6 +43,47 @@ Not every notebook runs headless: `01` needs a CUDA GPU (it raises if Cellpose c
 `05` is not used for now (see the file table); `07` has two alternative threshold
 cells (one cutoff or two) meant to be run one or the other, so a top-to-bottom run keeps the two-cutoff labels.
 
+Lab members install the app by the README's steps; there is no installer and no setup script. On Windows, Git for
+Windows must be installed first, by the user or IT; then, in PowerShell:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"   # then a new PowerShell window
+git clone https://github.com/PurvisLabTeam/fouri-pipeline "$env:LOCALAPPDATA\fouri-pipeline"
+cd "$env:LOCALAPPDATA\fouri-pipeline"
+uv sync
+uv run fouri-shortcuts
+```
+
+On Linux and macOS, git must be installed first (on macOS: `xcode-select --install`):
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh   # then a new terminal
+git clone https://github.com/PurvisLabTeam/fouri-pipeline ~/.local/share/fouri-pipeline
+cd ~/.local/share/fouri-pipeline
+uv sync
+uv run fouri-shortcuts
+```
+
+To update: in the clone's directory (`$env:LOCALAPPDATA\fouri-pipeline` on Windows, `~/.local/share/fouri-pipeline`
+on Linux and macOS), `git pull`, then `uv sync`. The app never checks for or offers updates.
+
+`fouri-shortcuts` (`fouri.app.shortcuts`, a `[project.scripts]` console command) makes the 4i Pipeline shortcuts to
+the launcher of the clone the command runs from (`.venv\Scripts\fouri-pipeline.exe` on Windows,
+`.venv/bin/fouri-pipeline` on Linux and macOS), with the clone as working directory, replacing any already there:
+`4i Pipeline.lnk` in the Start menu's Programs and on the Desktop on Windows, both directories found through
+WScript.Shell (pywin32, a dependency on Windows only); `4i Pipeline.desktop` in `$XDG_DATA_HOME/applications` and in
+the directory `xdg-user-dir DESKTOP` gives on Linux, the Desktop copy executable and marked trusted with `gio`;
+`~/Applications/4i Pipeline.app` and a symbolic link to the bundle on the Desktop on macOS. The menu directory is
+created when missing, a Desktop directory never; with no Desktop directory on Linux only the menu entry is written.
+The command exits 1, writing no shortcut, on any other system or when the launcher is missing (`uv sync` writes it).
+
+The lab's icon is in `src/fouri/app/icons/`, made once and committed: `fouri-pipeline.ico` (7 images, 16 to 256 px)
+is the `.lnk`'s icon on Windows; `fouri-pipeline.png` (256 px) is the desktop entry's `Icon=` on Linux and any other
+system, the app's favicon in both modes (`ui.run(favicon=…)` in `fouri.app.main`) and, in the native window on Linux,
+pywebview's window icon (`app.native.start_args["icon"]`); `fouri-pipeline.icns` (made from the `.ico` with Pillow)
+is copied into the bundle's `Contents/Resources/` and named in `CFBundleIconFile` on macOS.
+`fouri.app.shortcuts.icon_file` gives this system's file, found from `fouri/app/`'s own directory.
+
 ## experiment.json drives every notebook
 
 Each notebook's first code cell is `CONFIG = r'...experiment.json'` followed by

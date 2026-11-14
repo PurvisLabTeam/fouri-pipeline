@@ -24,6 +24,7 @@ dependencies = [
     "psutil>=7.2.2",
     "pystackreg>=0.2.8",
     "python-pptx>=1.0.2",
+    "pywin32>=312 ; sys_platform == 'win32'",
     "scanpy>=1.11.1",
     "scikit-image>=0.26.0",
     "scikit-learn>=1.5.2",
@@ -104,7 +105,7 @@ mypy_path = "src"
 module = [
     "pystackreg", "pystackreg.*", "cellpose", "cellpose.*", "ipywidgets", "ipywidgets.*", "napari", "napari.*",
     "plotly", "plotly.*", "sketchKH", "sketchKH.*", "delve", "delve.*", "phate", "phate.*", "umap", "umap.*",
-    "threadpoolctl", "threadpoolctl.*", "h5py", "h5py.*",
+    "threadpoolctl", "threadpoolctl.*", "h5py", "h5py.*", "win32com", "win32com.*",
 ]
 ignore_missing_imports = true
 
@@ -115,6 +116,9 @@ markers = [
     "gpu: needs a CUDA GPU",
     "slow: imports torch, Cellpose, PHATE or UMAP",
 ]
+
+[project.scripts]
+fouri-shortcuts = "fouri.app.shortcuts:main"
 
 [project.gui-scripts]
 fouri-pipeline = "fouri.app:main"

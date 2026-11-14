@@ -14,6 +14,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 APP_FOLDER = "4i Pipeline"
+ICON = Path(__file__).resolve().parent / "icons" / "fouri-pipeline.png"
 
 
 def storage_folder() -> Path:
@@ -50,7 +51,17 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     # only this PC can reach the app, not the rest of the network
     if args.browser:
-        ui.run(title="4i pipeline", dark=False, reload=False, host="127.0.0.1", port=8080)
+        ui.run(title="4i pipeline", dark=False, reload=False, host="127.0.0.1", port=8080, favicon=ICON)
     else:
         app.native.window_args["confirm_close"] = True  # the window asks before it closes
-        ui.run(title="4i pipeline", dark=False, reload=False, host="127.0.0.1", native=True, window_size=(1400, 900))
+        if sys.platform == "linux":
+            app.native.start_args["icon"] = str(ICON)
+        ui.run(
+            title="4i pipeline",
+            dark=False,
+            reload=False,
+            host="127.0.0.1",
+            native=True,
+            window_size=(1400, 900),
+            favicon=ICON,
+        )
