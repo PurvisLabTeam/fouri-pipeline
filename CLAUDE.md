@@ -24,7 +24,7 @@ uv run pytest -m 'not slow and not gpu'  # the quick tests; -m slow for the ones
 # run one notebook top to bottom without touching the file in the repo
 uv run jupyter nbconvert --to notebook --execute --output-dir /tmp/nbrun 06_calculate_cell_properties.ipynb
 
-# run one step as its own program, as the app does (steps: convert segment align measure table embedding export)
+# run one step as its own program, as the app does (steps: convert segment align artifacts measure table embedding export)
 uv run python -m fouri.run measure --config ~/data/4i_local_test/experiment.json --wells B02 --settings '{"overwrite": true}'
 ```
 
@@ -126,7 +126,7 @@ the writing and the reading side, so change them together.
 | 03 | replaces one entry of `tmat_{well}.npy` per saved round with a hand alignment: matching cells clicked in the alignment viewer (`fouri.viewers.AlignmentViewer`); creates the file if 02 never ran | 06 |
 | 04 | removed: 06 moves the anchor's outlines into each round instead of measuring aligned copies of the images | — |
 | 05 | not used for now: it draws masks on 04's aligned images and its masks never removed cells (07 dropped `nuc_mask`/`ring_mask`). Masks return with the artifact U-Net, and will remove the cells they cover | — |
-| Find artifacts | `masks/{well}/masks_{well}_round_{NNN}.npz` (`fouri.artifacts.find_artifacts`, not yet a step of `fouri.run` or the Run page): `final_{signal}` (true or false per pixel) and `outlines_{signal}` (numbered objects, 0 for none) for every channel in the round's round table, in the shape of the round's images; `masks_{well}_round_{NNN}.json` beside the `.npz`: `edited` and, per signal, `spread` and `pad`. Until the artifact U-Net is retrained, the step is a stub: every mask empty, `spread` and `pad` 0, `edited` false; `fouri.artifacts.round_masks` is the one function the U-Net replaces | not read yet; the mask editor and Measure cells later |
+| Find artifacts | `masks/{well}/masks_{well}_round_{NNN}.npz` (`fouri.artifacts.find_artifacts`; the step `artifacts` in `fouri.run`, Find artifacts on the Run page): `final_{signal}` (true or false per pixel) and `outlines_{signal}` (numbered objects, 0 for none) for every channel in the round's round table, in the shape of the round's images; `masks_{well}_round_{NNN}.json` beside the `.npz`: `edited` and, per signal, `spread` and `pad`. Until the artifact U-Net is retrained, the step is a stub: every mask empty, `spread` and `pad` 0, `edited` false; `fouri.artifacts.round_masks` is the one function the U-Net replaces | not read yet; the mask editor and Measure cells later |
 | 06 | `cell_data/cell_data_{well}_df.csv` (no row-number column; older ones have `Unnamed: 0`) | 07 |
 | 07 | `fullest_df.csv`, `standard_adata.h5ad` in `base_dir`: every cell, with `included` (true or false: whether the filters named in Build cell table's `filters` setting kept it) and a column per label named in its `labels` setting; excluded cells stay in both | 08 |
 | 08 | `standard_adata_sub.h5ad` in `base_dir`: the subsample with every measurement, each embedding in `.obsm` and the settings that made it in `.uns["embeddings"]`. Rerunning the subsample replaces the file and its embeddings | — |

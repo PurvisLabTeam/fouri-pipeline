@@ -40,6 +40,7 @@ STEP_NAMES = {
     Step.CONVERT: "Convert images",
     Step.SEGMENT: "Segment nuclei",
     Step.ALIGN: "Align rounds",
+    Step.ARTIFACTS: "Find artifacts",
     Step.MEASURE: "Measure cells",
     Step.TABLE: "Build cell table",
     Step.EMBEDDING: "Embedding",
@@ -127,6 +128,10 @@ def step_function(step: Step) -> Callable[..., Any]:
         from fouri.align import find_transforms
 
         return find_transforms
+    if step is Step.ARTIFACTS:
+        from fouri.artifacts import find_artifacts
+
+        return find_artifacts
     if step is Step.MEASURE:
         from fouri.measure import measure_wells
 

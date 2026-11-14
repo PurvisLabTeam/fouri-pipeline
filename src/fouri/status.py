@@ -8,6 +8,7 @@ follows the rule its step uses to skip work, counted against the rounds info_exp
 from __future__ import annotations
 
 import datetime as dt
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -23,6 +24,8 @@ from fouri.io import (
     cell_data_path,
     label_path,
     load_transforms,
+    mask_path,
+    mask_record_path,
     read_info_file,
     read_round_table,
     round_table_path,
@@ -36,13 +39,14 @@ class Step(StrEnum):
     CONVERT = "convert"
     SEGMENT = "segment"
     ALIGN = "align"
+    ARTIFACTS = "artifacts"
     MEASURE = "measure"
     TABLE = "table"
     EMBEDDING = "embedding"
     EXPORT = "export"
 
 
-PER_WELL_STEPS = (Step.CONVERT, Step.SEGMENT, Step.ALIGN, Step.MEASURE)
+PER_WELL_STEPS = (Step.CONVERT, Step.SEGMENT, Step.ALIGN, Step.ARTIFACTS, Step.MEASURE)
 
 
 class State(StrEnum):
@@ -150,7 +154,46 @@ def _measure(exp: Experiment, well: str, rounds: pd.DataFrame) -> WellStatus:
     return WellStatus(_state(done, total), done, total)
 
 
-_CHECKS = {Step.CONVERT: _convert, Step.SEGMENT: _segment, Step.ALIGN: _align, Step.MEASURE: _measure}
+def _record_readable(path: Path) -> bool:
+    if not path.exists():
+        return True
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(record, dict) and isinstance(record.get("edited"), bool)
+
+
+def _artifacts(exp: Experiment, well: str, rounds: pd.DataFrame) -> WellStatus:
+    total = len(rounds)
+    done = sum(mask_path(exp, well, round_index).exists() for round_index in range(total))
+    try:
+        table = read_round_table(exp, well)
+    except FileNotFoundError:
+        if done:
+            return WellStatus(State.BLOCKED, 0, total, "masks saved but no round table; rerun Convert images")
+        return WellStatus(State.NOT_STARTED, 0, total)
+    if "raw_file_name" not in table.columns:
+        return WellStatus(State.BLOCKED, 0, total, "round table made by an older version; rerun Convert images")
+    unreadable = [
+        str(round_index)
+        for round_index in range(total)
+        if not _record_readable(mask_record_path(exp, well, round_index))
+    ]
+    if len(unreadable) == 1:
+        return WellStatus(State.BLOCKED, 0, total, f"mask record of round {unreadable[0]} can't be read")
+    if unreadable:
+        return WellStatus(State.BLOCKED, 0, total, f"mask records of rounds {', '.join(unreadable)} can't be read")
+    return WellStatus(_state(done, total), done, total)
+
+
+_CHECKS = {
+    Step.CONVERT: _convert,
+    Step.SEGMENT: _segment,
+    Step.ALIGN: _align,
+    Step.ARTIFACTS: _artifacts,
+    Step.MEASURE: _measure,
+}
 
 
 def _updated(path: Path) -> dt.datetime | None:

@@ -35,6 +35,7 @@ SETTINGS: dict[Step, list[Setting]] = {
         Setting("min_size", "Smallest nucleus kept (px)", "number"),
     ],
     Step.ALIGN: [Setting("downscale_factor", "Downscale factor", "number")],
+    Step.ARTIFACTS: [],
     Step.MEASURE: [
         Setting("ring_width", "Ring width", "number"),
         Setting("ring_gap", "Ring gap", "number"),
@@ -51,6 +52,7 @@ DESCRIPTIONS = {
     Step.CONVERT: "Read the ND2 files and save every channel as a TIFF",
     Step.SEGMENT: "Outline every nucleus with Cellpose",
     Step.ALIGN: "Align every round to the anchor round",
+    Step.ARTIFACTS: "Mask artifacts in every channel; for now every mask is empty",
     Step.MEASURE: "Measure every cell in every channel; exclude cells touching an image edge or a blank area",
     Step.TABLE: "Combine the wells, add derived features, filters and labels, save the AnnData",
     Step.EMBEDDING: "Subsample each sample and compute the embeddings set up on the Embedding page",
