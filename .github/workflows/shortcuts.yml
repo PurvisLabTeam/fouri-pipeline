@@ -316,7 +316,7 @@ jobs:
       - name: Open the Desktop shortcut
         id: open
         run: |
-          open --stdout "$RUNNER_TEMP/app-stdout.txt" --stderr "$RUNNER_TEMP/app-stderr.txt" "$HOME/Desktop/4i Pipeline.app"
+          open "$HOME/Desktop/4i Pipeline.app"
           sleep 60
 
       - name: Take a screenshot
@@ -350,10 +350,6 @@ jobs:
       - name: Show the app's output
         if: ${{ failure() && steps.open.outcome == 'success' }}
         run: |
-          echo "--- standard output of the app opened from the Desktop shortcut"
-          cat "$RUNNER_TEMP/app-stdout.txt" || true
-          echo "--- standard error of the app opened from the Desktop shortcut"
-          cat "$RUNNER_TEMP/app-stderr.txt" || true
           echo "--- Python and fouri processes"
           ps -axo pid,ppid,command | grep -i -E 'python|fouri' | grep -v grep || true
           echo "--- system log entries naming the bundle"
