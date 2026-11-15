@@ -13,6 +13,8 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from fouri.app.shortcuts import icon_file
+
 APP_FOLDER = "4i Pipeline"
 ICON = Path(__file__).resolve().parent / "icons" / "fouri-pipeline.png"
 
@@ -49,9 +51,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     app.timer(POLL_SECONDS, poll_run)
     app.on_shutdown(stop_run)
 
+    favicon = icon_file() if sys.platform == "win32" else ICON
+
     # only this PC can reach the app, not the rest of the network
     if args.browser:
-        ui.run(title="4i pipeline", dark=False, reload=False, host="127.0.0.1", port=8080, favicon=ICON)
+        ui.run(title="4i pipeline", dark=False, reload=False, host="127.0.0.1", port=8080, favicon=favicon)
     else:
         app.native.window_args["confirm_close"] = True  # the window asks before it closes
         if sys.platform == "linux":
@@ -63,5 +67,5 @@ def main(argv: Sequence[str] | None = None) -> None:
             host="127.0.0.1",
             native=True,
             window_size=(1400, 900),
-            favicon=ICON,
+            favicon=favicon,
         )

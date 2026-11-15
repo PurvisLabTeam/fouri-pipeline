@@ -5,6 +5,7 @@ on:
     branches: ["**"]
     paths:
       - src/fouri/app/shortcuts.py
+      - src/fouri/app/__init__.py
       - pyproject.toml
       - uv.lock
       - .github/workflows/shortcuts.yml
