@@ -23,6 +23,7 @@ jobs:
         shell: pwsh
     env:
       BRANCH: ${{ github.ref_name }}
+      UV_PYTHON_PREFERENCE: only-managed
     steps:
       - name: Install uv
         run: |
@@ -104,6 +105,22 @@ jobs:
           }
           if ($failed) { exit 1 }
 
+      - name: Take a screenshot of the Desktop
+        run: |
+          try {
+            (New-Object -ComObject Shell.Application).MinimizeAll()
+            Start-Sleep -Seconds 3
+            Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+            $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+            $bitmap = [System.Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
+            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+            $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+            $bitmap.Save("$env:RUNNER_TEMP\screenshot-windows-desktop.png", [System.Drawing.Imaging.ImageFormat]::Png)
+            "Screenshot saved: $($bounds.Width) x $($bounds.Height) px."
+          } catch {
+            "::warning::The screenshot of the Desktop failed: $($_.Exception.Message)"
+          }
+
       - name: Open the Desktop shortcut
         id: open
         run: |
@@ -129,7 +146,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: screenshot-windows
-          path: ${{ runner.temp }}/screenshot-windows.png
+          path: |
+            ${{ runner.temp }}/screenshot-windows-desktop.png
+            ${{ runner.temp }}/screenshot-windows.png
           if-no-files-found: warn
 
       - name: Check the launcher is running
@@ -200,6 +219,7 @@ jobs:
         shell: bash
     env:
       BRANCH: ${{ github.ref_name }}
+      UV_PYTHON_PREFERENCE: only-managed
     steps:
       - name: Move ~/Applications aside
         run: |
@@ -285,10 +305,18 @@ jobs:
           done
           exit "$failed"
 
+      - name: Take a screenshot of the Desktop
+        run: |
+          if screencapture -x "$RUNNER_TEMP/screenshot-macos-desktop.png" && [ -s "$RUNNER_TEMP/screenshot-macos-desktop.png" ]; then
+            echo "Screenshot saved."
+          else
+            echo "::warning::The screenshot of the Desktop failed."
+          fi
+
       - name: Open the Desktop shortcut
         id: open
         run: |
-          open "$HOME/Desktop/4i Pipeline.app"
+          open --stdout "$RUNNER_TEMP/app-stdout.txt" --stderr "$RUNNER_TEMP/app-stderr.txt" "$HOME/Desktop/4i Pipeline.app"
           sleep 60
 
       - name: Take a screenshot
@@ -303,7 +331,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: screenshot-macos
-          path: ${{ runner.temp }}/screenshot-macos.png
+          path: |
+            ${{ runner.temp }}/screenshot-macos-desktop.png
+            ${{ runner.temp }}/screenshot-macos.png
           if-no-files-found: warn
 
       - name: Check the launcher is running
@@ -316,6 +346,32 @@ jobs:
             echo "::error::$launcher is not running 60 seconds after the Desktop shortcut was opened."
             exit 1
           fi
+
+      - name: Show the app's output
+        if: ${{ failure() && steps.open.outcome == 'success' }}
+        run: |
+          echo "--- standard output of the app opened from the Desktop shortcut"
+          cat "$RUNNER_TEMP/app-stdout.txt" || true
+          echo "--- standard error of the app opened from the Desktop shortcut"
+          cat "$RUNNER_TEMP/app-stderr.txt" || true
+          echo "--- Python and fouri processes"
+          ps -axo pid,ppid,command | grep -i -E 'python|fouri' | grep -v grep || true
+          echo "--- system log entries naming the bundle"
+          log show --last 5m --style compact --predicate 'eventMessage CONTAINS[c] "4i Pipeline" OR eventMessage CONTAINS[c] "fouri-pipeline"' | tail -n 60 || true
+          echo "--- the bundle's executable started from the shell, 30 seconds"
+          "$HOME/Applications/4i Pipeline.app/Contents/MacOS/fouri-pipeline" > "$RUNNER_TEMP/direct.txt" 2>&1 &
+          pid=$!
+          sleep 30
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "Running after 30 seconds."
+            pkill -TERM -P "$pid" || true
+            kill -TERM "$pid" || true
+          else
+            code=0
+            wait "$pid" || code=$?
+            echo "Exited with code $code."
+          fi
+          cat "$RUNNER_TEMP/direct.txt"
 
       - name: Stop the app
         if: ${{ always() && steps.open.outcome != 'skipped' }}
