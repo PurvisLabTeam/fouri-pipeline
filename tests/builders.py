@@ -149,6 +149,28 @@ def aligned(exp: Experiment, well: str, rounds: Sequence[int] | None = None) -> 
     io.save_transforms(exp, well, transforms)
 
 
+def masked(exp: Experiment, well: str, round_index: int, regions: Mapping[str, tuple[slice, slice]]) -> None:
+    table = io.read_round_table(exp, well)
+    signals = [str(signal) for signal in table.loc[table["round_index"] == round_index, "signal"]]
+    unknown = sorted(set(regions) - set(signals))
+    if unknown:
+        raise ValueError(f"Round {round_index} of {well} has no channel {', '.join(unknown)}")
+    arrays = {}
+    for signal in signals:
+        final = np.zeros((SIZE, SIZE), dtype=bool)
+        outlines = np.zeros((SIZE, SIZE), dtype=np.uint16)
+        if signal in regions:
+            final[regions[signal]] = True
+            outlines[regions[signal]] = 1
+        arrays[f"final_{signal}"] = final
+        arrays[f"outlines_{signal}"] = outlines
+    record = {"edited": False, "masks": {signal: {"spread": 0, "pad": 0} for signal in signals}}
+    path = io.mask_path(exp, well, round_index)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    io.mask_record_path(exp, well, round_index).write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    np.savez_compressed(path, **arrays)
+
+
 def measured(exp: Experiment, well: str) -> None:
     """Run ``measure.measure_well`` on a well already converted, segmented and aligned."""
     measure.measure_well(exp, well)

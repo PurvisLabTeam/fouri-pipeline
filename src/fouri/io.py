@@ -1,7 +1,7 @@
 """File helpers shared by the pipeline notebooks."""
 
 import pickle
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -163,6 +163,12 @@ def mask_path(exp: Experiment, well: str, round_index: int) -> Path:
     return Path(exp.masks) / well / f"masks_{well}_round_{round_index:03d}.npz"
 
 
+def mask_paths(masks_path, well: str) -> list[Path]:
+    """@TODO."""
+    folder = Path(masks_path) / well
+    return sorted(path for path in folder.iterdir() if path.suffix == ".npz")
+
+
 def mask_record_path(exp: Experiment, well: str, round_index: int) -> Path:
     """@TODO."""
     return mask_path(exp, well, round_index).with_suffix(".json")
@@ -182,6 +188,11 @@ def written_whole(path: str | Path) -> Generator[Path]:
     except BaseException:
         partial_path.unlink(missing_ok=True)
         raise
+
+
+def write_npz(path: Path, masks_to_write: Mapping[str, npt.NDArray[Any]]):
+    with written_whole(path) as partial, open(partial, "wb") as fh:
+        np.savez_compressed(fh, **masks_to_write, allow_pickle=False)
 
 
 def write_tiff(path: str | Path, array: npt.NDArray[Any], metadata: dict[str, Any] | None = None) -> None:

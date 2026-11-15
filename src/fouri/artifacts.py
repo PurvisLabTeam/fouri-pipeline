@@ -8,10 +8,12 @@ from typing import cast
 
 import numpy as np
 import numpy.typing as npt
+import pandas as pd
 from tifffile import TiffFile
 
 from fouri import io
 from fouri.config import Experiment
+from fouri.io import write_npz
 from fouri.parallel import Failed, check_results, error_in_words
 from fouri.report import Stopped, progress, say, say_skipped
 
@@ -24,6 +26,37 @@ class _Plan:
     skipped: list[str]
     painted: list[str]
     refused: list[Failed]
+
+
+def final_masks(
+    exp: Experiment, well: str, round_index: int, signals: Sequence[str]
+) -> dict[str, npt.NDArray[np.bool]] | None:
+    mask_path = io.mask_path(exp, well, round_index)
+    if not mask_path.exists():
+        return None
+
+    masks: dict[str, npt.NDArray[np.bool]] = {}
+    with np.load(mask_path) as fh:
+        for signal in signals:
+            key = f"final_{signal}"
+            if key not in fh:
+                raise ValueError(
+                    f"Well {well}: the artifact masks of round {round_index} have no mask for {signal}. "
+                    "Run Find artifacts on this well again with Overwrite."
+                )
+            arr = fh[key]
+            masks[signal] = arr
+    return masks
+
+
+def remove_covered(table: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    """@TODO."""
+    cover_cols = table[[col for col in table.columns if col.endswith("_covered")]].fillna(False)
+    mask = (cover_cols).any(axis=1)
+    count = int(mask.sum())
+    table = table[~mask]
+    table = table.drop(columns=cover_cols.columns)
+    return table, count
 
 
 def round_masks(images: Mapping[str, Path]) -> dict[str, tuple[npt.NDArray[np.bool], npt.NDArray[np.uint16]]]:
@@ -89,8 +122,7 @@ def _write_round(
         for signal, arrs in masks.items()
         for prefix, arr in zip(("final_", "outlines_"), arrs, strict=True)
     }
-    with io.written_whole(path) as partial, open(partial, "wb") as fh:
-        np.savez_compressed(fh, **masks_write, allow_pickle=False)
+    write_npz(path, masks_write)
 
 
 def _plan_wells(exp: Experiment, overwrite: bool = False, wells: Sequence[str] | None = None) -> _Plan:

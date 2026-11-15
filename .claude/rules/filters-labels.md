@@ -29,9 +29,9 @@ labels with one column.
 ## Build cell table
 
 - Build cell table (`run.build_cell_table(exp, filters=(), labels=())`) applies the saved filters named in its
-  `filters` setting after the derived features, so a filter may use one, and adds the result as the column
-  `included`.
-  `fouri.filters.keep` works out one rule on every cell of the table by itself: the percentiles (numpy's
+  `filters` setting after the derived features and the removal of the cells an artifact mask covers, so a
+  filter may use a derived feature, and adds the result as the column `included`.
+  `fouri.filters.keep` works out one rule on every cell left in the table by itself: the percentiles (numpy's
   linear ones) and `robust_sd`'s median and median absolute deviation (times 1.4826) come from the cells with a
   value, per `sample_ID` when `per_sample` is set (it changes nothing for `between`), both bounds are kept, and
   an empty or infinite value is never kept. `apply_filters` checks every rule before working any out, then

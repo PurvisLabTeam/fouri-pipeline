@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import numpy.typing as npt
 import pandas as pd
 from tifffile import imread
@@ -14,12 +15,14 @@ from tifffile import imread
 from fouri.config import Experiment
 from fouri.io import (
     label_paths,
+    mask_paths,
     nd2_metadata,
     read_info_file,
     read_nd2,
     read_round_table,
     round_table_path,
     save_round_table,
+    write_npz,
     write_tiff,
 )
 from fouri.parallel import Failed, check_results, parallel_map
@@ -43,11 +46,17 @@ def convert_well(exp: Experiment, well: str, align_signal: str = "DNA", overwrit
         dims = (int(table["width_min"].iloc[0]), int(table["height_min"].iloc[0]))
         if existing_dims == dims:
             to_write = table[~table["round_name"].isin(existing_round_table["round_name"])]
-        elif (Path(exp.segmented) / well).exists():
-            segmentation_files = label_paths(exp.segmented, well)
-            for f in segmentation_files:
-                label_img = trim(imread(f), width=dims[0], height=dims[1])
-                write_tiff(f, label_img)
+        else:
+            if (Path(exp.segmented) / well).exists():
+                for f in label_paths(exp.segmented, well):
+                    label_img = trim(imread(f), width=dims[0], height=dims[1])
+                    write_tiff(f, label_img)
+
+            if (Path(exp.masks) / well).exists():
+                for path in mask_paths(exp.masks, well):
+                    with np.load(path) as fh:
+                        masks = {name: trim(arr, width=dims[0], height=dims[1]) for name, arr in fh.items()}
+                    write_npz(path, masks)
 
     output_images = Path(exp.output_images) / well
     output_images.mkdir(parents=True, exist_ok=True)

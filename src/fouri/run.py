@@ -52,12 +52,17 @@ EXIT_CODES = {"done": 0, "failed": 1, "stopped": 3}
 def build_cell_table(exp: Experiment, filters: Sequence[str] = (), labels: Sequence[str] = ()) -> None:
     """Combine the wells' cell data, add derived features, save fullest_df.csv and the AnnData."""
     from fouri.adata import build_adata
+    from fouri.artifacts import remove_covered
     from fouri.features import add_derived_features, build_fullest_df
     from fouri.filters import apply_filters, named_filters
     from fouri.labels import apply_labels, named_labels
 
     table = add_derived_features(build_fullest_df(exp), exp.derived_features)
+    initial_count = len(table)
+    table, dropped_count = remove_covered(table)
     filter_rules = named_filters(exp, filters)
+    report.say(f"Artifact masks removed {dropped_count:,} of {initial_count:,} cells.")
+
     included, filter_counts = apply_filters(table, filter_rules)
     table["included"] = included
     total_cells = len(table)

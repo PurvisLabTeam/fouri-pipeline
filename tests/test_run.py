@@ -10,8 +10,11 @@ import numpy as np
 import pandas as pd
 import pytest
 from builders import (
+    NUCLEUS_SIDE,
+    NUCLEUS_STARTS,
     aligned,
     converted,
+    masked,
     measured,
     measured_values,
     segmented,
@@ -58,11 +61,29 @@ MISSING_FEATURE_LABEL = {**SIZE_LABEL, "column": "EdU state", "feature": "R3_EdU
 WELL_LABEL = {**SIZE_LABEL, "column": "well"}
 
 
-def _measured_wells(exp: Experiment) -> None:
+MIDDLE_AREAS = {
+    "name": "middle areas",
+    "use": True,
+    "rule": "middle_percentiles",
+    "feature": "nuc_area",
+    "low": 10,
+    "high": 90,
+}
+
+
+def _nucleus(label: int) -> tuple[slice, slice]:
+    row = NUCLEUS_STARTS[(label - 1) // 2]
+    col = NUCLEUS_STARTS[(label - 1) % 2]
+    return slice(row, row + NUCLEUS_SIDE), slice(col, col + NUCLEUS_SIDE)
+
+
+def _measured_wells(exp: Experiment, covered: tuple[str, int] | None = None) -> None:
     for index, well in enumerate(exp.well_list):
         converted(exp, well)
         segmented(exp, well)
         aligned(exp, well)
+        if covered is not None and covered[0] == well:
+            masked(exp, well, 2, {"EdU": _nucleus(covered[1])})
         measured(exp, well)
         measured_values(exp, well, "nuc_area", [30.0 + 4 * index + cell for cell in range(4)])
 
@@ -73,6 +94,18 @@ def _column(adata: ad.AnnData, name: str) -> np.ndarray:
 
 def _names(classes: Iterable[Any]) -> list[str | None]:
     return [None if pd.isna(name) else str(name) for name in classes]
+
+
+def _cells(frame: pd.DataFrame) -> list[tuple[str, int]]:
+    return sorted((str(well), int(label)) for well, label in zip(frame["well"], frame["label"], strict=True))
+
+
+def _left_out(frame: pd.DataFrame) -> list[tuple[str, int]]:
+    return _cells(frame[~frame["included"].astype(bool)])
+
+
+def _every_cell(exp: Experiment) -> list[tuple[str, int]]:
+    return sorted((well, label) for well in exp.well_list for label in range(1, 5))
 
 
 def test_a_real_step_records_its_failed_wells(experiment: Experiment) -> None:
@@ -278,3 +311,43 @@ def test_the_run_record_keeps_every_export_setting(experiment: Experiment) -> No
     started = next(entry for entry in map(json.loads, lines) if entry["event"] == "started")
     assert outcome == "done"
     assert started["settings"] == settings
+
+
+def test_build_cell_table_removes_the_covered_cells_and_the_cover_columns(experiment: Experiment) -> None:
+    _measured_wells(experiment, covered=("B03", 2))
+
+    run.build_cell_table(experiment)
+
+    table = pd.read_csv(io.fullest_df_path(experiment))
+    adata = ad.read_h5ad(io.adata_path(experiment))
+    expected = [cell for cell in _every_cell(experiment) if cell != ("B03", 2)]
+    assert _cells(table) == expected
+    assert _cells(adata.obs) == expected
+    assert [column for column in table.columns if column.endswith("_covered")] == []
+    assert [name for name in [*adata.obs.columns, *adata.var_names] if name.endswith("_covered")] == []
+
+
+def test_filters_are_judged_on_the_cells_left_after_the_masks(experiment: Experiment) -> None:
+    _measured_wells(experiment, covered=("C02", 4))
+    exp = with_filters(experiment, [MIDDLE_AREAS])
+    run.build_cell_table(exp, filters=["middle areas"])
+    left_out_after_the_masks = _left_out(pd.read_csv(io.fullest_df_path(exp)))
+
+    path = io.cell_data_path(exp, "C02")
+    cells = pd.read_csv(path)
+    cells[cells["label"] != 4].to_csv(path, index=False)
+    run.build_cell_table(exp, filters=["middle areas"])
+
+    assert left_out_after_the_masks == _left_out(pd.read_csv(io.fullest_df_path(exp)))
+
+
+def test_cell_data_without_cover_columns_counts_as_uncovered(experiment: Experiment) -> None:
+    _measured_wells(experiment, covered=("B03", 2))
+    path = io.cell_data_path(experiment, "B03")
+    cells = pd.read_csv(path)
+    cells.drop(columns=[column for column in cells.columns if column.endswith("_covered")]).to_csv(path, index=False)
+
+    run.build_cell_table(experiment)
+
+    assert _cells(pd.read_csv(io.fullest_df_path(experiment))) == _every_cell(experiment)
+    assert _cells(ad.read_h5ad(io.adata_path(experiment)).obs) == _every_cell(experiment)

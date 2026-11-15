@@ -95,9 +95,9 @@ the writing and the reading side, so change them together.
 | 03 | replaces one entry of `tmat_{well}.npy` per saved round with a hand alignment: matching cells clicked in the alignment viewer (`fouri.viewers.AlignmentViewer`); creates the file if 02 never ran | 06 |
 | 04 | removed: 06 moves the anchor's outlines into each round instead of measuring aligned copies of the images | — |
 | 05 | not used for now: it draws masks on 04's aligned images and its masks never removed cells (07 dropped `nuc_mask`/`ring_mask`). Masks return with the artifact U-Net, and will remove the cells they cover | — |
-| Find artifacts | `masks/{well}/masks_{well}_round_{NNN}.npz` (`fouri.artifacts.find_artifacts`; the step `artifacts` in `fouri.run`, Find artifacts on the Run page): `final_{signal}` (true or false per pixel) and `outlines_{signal}` (numbered objects, 0 for none) for every channel in the round's round table, in the shape of the round's images; `masks_{well}_round_{NNN}.json` beside the `.npz`: `edited` and, per signal, `spread` and `pad`. Until the artifact U-Net is retrained, the step is a stub: every mask empty, `spread` and `pad` 0, `edited` false; `fouri.artifacts.round_masks` is the one function the U-Net replaces | not read yet; the mask editor and Measure cells later |
+| Find artifacts | `masks/{well}/masks_{well}_round_{NNN}.npz` (`fouri.artifacts.find_artifacts`; the step `artifacts` in `fouri.run`, Find artifacts on the Run page): `final_{signal}` (true or false per pixel) and `outlines_{signal}` (numbered objects, 0 for none) for every channel in the round's round table, in the shape of the round's images; `masks_{well}_round_{NNN}.json` beside the `.npz`: `edited` and, per signal, `spread` and `pad`. Until the artifact U-Net is retrained, the step is a stub: every mask empty, `spread` and `pad` 0, `edited` false; `fouri.artifacts.round_masks` is the one function the U-Net replaces | Measure cells (`final_{signal}`); later the mask editor |
 | 06 | `cell_data/cell_data_{well}_df.csv` (no row-number column; older ones have `Unnamed: 0`) | 07 |
-| 07 | `fullest_df.csv`, `standard_adata.h5ad` in `base_dir`: every cell, with `included` (true or false: whether the filters named in Build cell table's `filters` setting kept it) and a column per label named in its `labels` setting; excluded cells stay in both | 08 |
+| 07 | `fullest_df.csv`, `standard_adata.h5ad` in `base_dir`: every cell no artifact mask covers, with `included` (true or false: whether the filters named in Build cell table's `filters` setting kept it) and a column per label named in its `labels` setting; excluded cells stay in both | 08 |
 | 08 | `standard_adata_sub.h5ad` in `base_dir`: the subsample with every measurement, each embedding in `.obsm` and the settings that made it in `.uns["embeddings"]`. Rerunning the subsample replaces the file and its embeddings | — |
 | Export | `exports/<name>.h5ad` or `exports/<name>.csv` in `base_dir` (`fouri.export.export_cells`, not listed on the Run page: the app's Export page, `fouri/app/pages/export.py`, starts the step and lists the exports made, with Load settings, which refills its form from the run record, and Delete): the included cells, or with embeddings the subsampled cells still included, each with its metadata, label columns and the features chosen, as measurements, z-scores (as built or from `layers["combat"]`) or both; an existing file is replaced only with `overwrite`, which the page sends after asking | nothing in the pipeline |
 
@@ -109,7 +109,7 @@ is the run's start time in ISO's compact form, `20261109T173005`, with `-2`, `-3
 of that id already exists.
 
 File names live in `fouri/io.py` (`round_table_path`, `tmat_path`, `cell_data_path`, `label_paths`,
-`label_path`, `original_label_path`, `mask_path`, `mask_record_path`, `fullest_df_path`, `adata_path`, `adata_sub_path`, `run_record_path`, `export_path`), with the functions that read and write those
+`label_path`, `original_label_path`, `mask_path`, `mask_paths`, `mask_record_path`, `fullest_df_path`, `adata_path`, `adata_sub_path`, `run_record_path`, `export_path`), with the functions that read and write those
 files.
 
 The round table is only read through `fouri.io.read_round_table`. Reading falls back to the `df_{well}.pkl`
@@ -151,9 +151,9 @@ Every step takes `wells=` (checked and put in plate order by `Experiment.pick_we
   channels, listed in round order by `fouri.io.alignment_paths`. `round_table` also refuses a round that
   names the same signal twice, since both channels would be written to the same TIFF.
 - Feature columns from 06 are `{prefix}_{suffix}` with the prefix from `metadata.feature_prefix(round_name,
-  signal)`, e.g. `R0_pRB_nuc_mean`, `_ring_mean`, `_total_nuc_protein`, `_nuc_cyto_ratio`; plus the anchor's
-  shape columns from skimage's `regionprops` (`axis_major_length`, … with `area` renamed `nuc_area` and
-  `ring_area`). `metadata.channel_names` builds its suggestions with the same `feature_prefix`.
+  signal)`, e.g. `R0_pRB_nuc_mean`, `_ring_mean`, `_total_nuc_protein`, `_nuc_cyto_ratio` and `_covered`;
+  plus the anchor's shape columns from skimage's `regionprops` (`axis_major_length`, … with `area` renamed
+  `nuc_area` and `ring_area`). `metadata.channel_names` builds its suggestions with the same `feature_prefix`.
 - Cells are outlined once, on the anchor round's segmentation (`exp.anchor_round`, so 02, 03 and 06
   cannot disagree). `fouri.measure.measure_well` moves those outlines and their rings into each other
   round with `align.move_to_round` (inverse of the round's transform, nearest pixel, cv2; `move_to_anchor`
@@ -164,6 +164,11 @@ Every step takes `wells=` (checked and put in plate order by `Experiment.pick_we
   are combined, and the result is eroded `edge_margin` times (3 × 3). `measure_wells` refuses a negative
   margin before measuring any well. `measure_well` returns the count with its path and `measure_wells` prints
   it per well. Cells with no ring are dropped by the inner joins.
+  Per channel of each round, `measure_well` writes `{prefix}_covered`: true when the channel's `final_{signal}`
+  mask, read by `fouri.artifacts.final_masks`, shares a pixel with the cell's nucleus or ring as moved into that
+  round's frame. A round with no `.npz` is uncovered: every cover column of the round is false. A well is
+  refused, naming the round, when a round's `.npz` lacks `final_{signal}` for a channel of the round table or
+  holds a mask of another shape than the round's images; the other wells are measured.
 - Cytoplasmic rings come from `fouri.rings.make_rings(labels, width, gap)` (06's `ring_width`/`ring_gap`
   settings, 6 and 1): a pixel joins a ring only if exactly one nucleus lies within `width`, so pixels two
   cells could claim are dropped. cv2 dilate/erode, identical to the original skimage version.
@@ -182,11 +187,13 @@ Every step takes `wells=` (checked and put in plate order by `Experiment.pick_we
   Build cell table. The app's Experiment page checks them the same way (`fouri.app.derived.check_formulas`) on
   `Cells.base`, the measured wells' cells as `build_fullest_df` joins them, and refuses to save a row that would
   stop Build cell table, a blank row, a name used twice, a measured column's name or a cell-page group's.
-- Build cell table (`run.build_cell_table(exp, filters=(), labels=())`) applies the saved filters named in its
-  `filters` setting after the derived features, so a filter may use one, and adds the result as the column
-  `included`, then applies the saved labels named in its `labels` setting to every cell, included or not, one
-  column per label. How each rule is computed and what Build cell table refuses are in
-  `.claude/rules/filters-labels.md`.
+- Build cell table (`run.build_cell_table(exp, filters=(), labels=())`) removes, after the derived features,
+  every cell covered in any channel (`fouri.artifacts.remove_covered`; an empty cover value, in cell data from
+  before cover columns, counts as uncovered), states the count, 0 included, and drops every `_covered` column.
+  The saved filters named in the `filters` setting are then applied to the cells left, so a filter may use a
+  derived feature, and the result is added as the column `included`; the saved labels named in the `labels`
+  setting are applied to every cell left, included or not, one column per label. How each rule is computed and
+  what Build cell table refuses are in `.claude/rules/filters-labels.md`.
 - 07's pRB thresholds are its own cells, unchanged until the app. `fouri.adata.build_adata(exp, fullest_df,
   labels=())` then builds the AnnData and saves `fullest_df.csv` and `standard_adata.h5ad`; what `.obs`, `.X`,
   `.var` and `.uns` hold, and which columns `.X` drops, are in `.claude/rules/adata.md`.

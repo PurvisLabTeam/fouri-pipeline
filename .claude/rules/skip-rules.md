@@ -15,7 +15,8 @@ notebooks"). Per step:
 - 00 skips a well whose `round_table_{well}.csv` (not the old `.pkl`) lists the same rounds. If the saved table
   lists only the first of them, `convert_well` writes just the new rounds' TIFFs and saves the full table. If a
   new round's images are smaller, the crop shrinks: every round is written again and the well's labels in
-  `segmented` are cut to the new size. The crop only trims the bottom and right edges, so outlines and saved
+  `segmented` and every array of its masks in `masks/{well}` (`io.mask_paths`; the `.json` unchanged) are cut
+  to the new size. The crop only trims the bottom and right edges, so outlines and saved
   transforms keep their positions (within 0.04 px on B02). 00 refuses a well whose rounds were inserted,
   removed, renamed or reordered, since later steps store their results by round number.
 - 01 skips a round whose labels exist, and never replaces a hand-edited round (one with a file in

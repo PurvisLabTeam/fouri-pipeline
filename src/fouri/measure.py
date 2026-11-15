@@ -14,6 +14,7 @@ from skimage.segmentation import clear_border
 from tifffile import imread
 
 from fouri.align import move_to_anchor, move_to_round
+from fouri.artifacts import final_masks
 from fouri.config import Experiment
 from fouri.io import cell_data_path, load_transforms, read_labels, read_round_table, require_raw_files, written_whole
 from fouri.metadata import feature_prefix
@@ -129,6 +130,7 @@ def measure_well(
     nuc_means = []
     ring_means = []
     col_prefixes = []
+    covers = []
     for (index, name), rows in round_table.groupby(["round_index", "round_name"]):
         index = cast(int, index)
         name = str(name)
@@ -145,7 +147,30 @@ def measure_well(
         round_nuclei = np.where(no_data, 0, round_nuclei)
         round_rings = np.where(no_data, 0, round_rings)
 
-        prefixes = [feature_prefix(name, signal) for signal in rows["signal"]]
+        signals = list(rows["signal"])
+        prefixes = [feature_prefix(name, signal) for signal in signals]
+        masks = final_masks(exp, well, index, signals)
+        cover = table["label"].copy().to_frame()
+        cover[[f"{prefix}_covered" for prefix in prefixes]] = False
+
+        if masks is not None:
+            # mark cells covered by a mask in any (round, channel)
+            for signal, prefix in zip(signals, prefixes, strict=True):
+                mask = masks[signal]
+                mask_shape = mask.shape
+                image_shape = images.shape[:2]
+                if mask_shape != image_shape:
+                    raise ValueError(
+                        f"Well {well}: the artifact masks of round {index} are {mask_shape[0]} x {mask_shape[1]}, "
+                        f"its images are {image_shape[0]} x {image_shape[1]}. Run Find artifacts on this well again "
+                        "with Overwrite on."
+                    )
+                under_artifact = set(np.unique(round_nuclei[mask & (round_nuclei != 0)]))
+                under_artifact |= set(np.unique(round_rings[mask & (round_rings != 0)]))
+                cover[f"{prefix}_covered"] = cover["label"].isin(under_artifact)
+
+        covers.append(cover)
+
         nuc_means.append(_mean_per_cell(round_nuclei, images, columns=[prfx + "_nuc_mean" for prfx in prefixes]))
         ring_means.append(_mean_per_cell(round_rings, images, columns=[prfx + "_ring_mean" for prfx in prefixes]))
         col_prefixes.extend(prefixes)
@@ -154,7 +179,7 @@ def measure_well(
         bool
     )
 
-    tables = [table, *nuc_means, rings_table, *ring_means]
+    tables = [table, *nuc_means, rings_table, *ring_means, *covers]
     cells = functools.reduce(lambda left, right: pd.merge(left, right, on="label", how="inner"), tables)
     total_nuc_protein = pd.DataFrame(
         {f"{prfx}_total_nuc_protein": cells[f"{prfx}_nuc_mean"] * cells["nuc_area"] for prfx in col_prefixes}
