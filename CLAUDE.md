@@ -9,6 +9,19 @@ microscope → per-cell feature tables → AnnData → PHATE plots. Lab members 
 (`00`–`08`, after `setup_experiment.ipynb`), mostly on Windows with experiments on a `Z:` network drive.
 Code shared between notebooks lives in the `fouri` package, `src/fouri/`.
 
+Further guidance is read on demand: a subdirectory's `CLAUDE.md` when a file under that directory is read, a
+file in `.claude/rules/` when a file matching its `paths` list is read.
+
+- `src/fouri/app/CLAUDE.md`: lab install, update, `fouri-shortcuts`, the icons, the shortcuts workflow in
+  `.github/workflows/`, the Experiment page
+- `src/fouri/viewers/CLAUDE.md`: the napari editors
+- `.claude/rules/skip-rules.md`: each step's skip and refuse rules, `fouri.status`
+- `.claude/rules/filters-labels.md`: the saved filter and label rules, Build cell table's filters and labels,
+  the threshold helpers
+- `.claude/rules/embeddings.md`: subsampling, feature ranking, PHATE and UMAP runs, embedding keys, the
+  `app.embedding` format
+- `.claude/rules/adata.md`: what `build_adata` writes to `.obs`, `.X`, `.var` and `.uns`
+
 ## Commands
 
 ```bash
@@ -43,55 +56,6 @@ Not every notebook runs headless: `01` needs a CUDA GPU (it raises if Cellpose c
 `05` is not used for now (see the file table); `07` has two alternative threshold
 cells (one cutoff or two) meant to be run one or the other, so a top-to-bottom run keeps the two-cutoff labels.
 
-Lab members install the app by the README's steps; there is no installer and no setup script. On Windows, Git for
-Windows must be installed first, by the user or IT; then, in PowerShell:
-
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"   # then a new PowerShell window
-git clone https://github.com/PurvisLabTeam/fouri-pipeline "$env:LOCALAPPDATA\fouri-pipeline"
-cd "$env:LOCALAPPDATA\fouri-pipeline"
-uv sync
-uv run fouri-shortcuts
-```
-
-On Linux and macOS, git must be installed first (on macOS: `xcode-select --install`):
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh   # then a new terminal
-git clone https://github.com/PurvisLabTeam/fouri-pipeline ~/.local/share/fouri-pipeline
-cd ~/.local/share/fouri-pipeline
-uv sync
-uv run fouri-shortcuts
-```
-
-To update: in the clone's directory (`$env:LOCALAPPDATA\fouri-pipeline` on Windows, `~/.local/share/fouri-pipeline`
-on Linux and macOS), `git pull`, then `uv sync`. The app never checks for or offers updates.
-
-`fouri-shortcuts` (`fouri.app.shortcuts`, a `[project.scripts]` console command) makes the 4i Pipeline shortcuts to
-the launcher of the clone the command runs from (`.venv\Scripts\fouri-pipeline.exe` on Windows,
-`.venv/bin/fouri-pipeline` on Linux and macOS), with the clone as working directory, replacing any already there:
-`4i Pipeline.lnk` in the Start menu's Programs and on the Desktop on Windows, both directories found through
-WScript.Shell (pywin32, a dependency on Windows only); `4i Pipeline.desktop` in `$XDG_DATA_HOME/applications` and in
-the directory `xdg-user-dir DESKTOP` gives on Linux, the Desktop copy executable and marked trusted with `gio`;
-`~/Applications/4i Pipeline.app` and a symbolic link to the bundle on the Desktop on macOS. The menu directory is
-created when missing, a Desktop directory never; with no Desktop directory on Linux only the menu entry is written.
-The command exits 1, writing no shortcut, on any other system or when the launcher is missing (`uv sync` writes it).
-
-The lab's icon is in `src/fouri/app/icons/`, made once and committed: `fouri-pipeline.ico` (7 images, 16 to 256 px)
-is the `.lnk`'s icon on Windows; `fouri-pipeline.png` (256 px) is the desktop entry's `Icon=` on Linux and any other
-system, the app's favicon in both modes (`ui.run(favicon=…)` in `fouri.app.main`) and, in the native window on Linux,
-pywebview's window icon (`app.native.start_args["icon"]`); `fouri-pipeline.icns` (made from the `.ico` with Pillow)
-is copied into the bundle's `Contents/Resources/` and named in `CFBundleIconFile` on macOS.
-`fouri.app.shortcuts.icon_file` gives this system's file, found from `fouri/app/`'s own directory.
-
-`.github/workflows/shortcuts.yml` runs the install steps, `fouri-shortcuts` and the update steps on GitHub's
-`windows-latest` and `macos-latest` runners, one job each, and opens the app from the Desktop shortcut. A push to any
-branch that changes `src/fouri/app/shortcuts.py`, `pyproject.toml`, `uv.lock` or the workflow file starts the
-workflow, as does Run workflow in the repository's Actions tab (`workflow_dispatch`, offered once the workflow is on
-`main`); each job clones the pushed branch from GitHub. The workflow's runs are read in the Actions tab or with
-`gh run list --workflow shortcuts.yml` and `gh run view <run id>`; each job's screenshot of the open app is the run's
-artifact `screenshot-windows` or `screenshot-macos`, downloaded from the run's page or with `gh run download <run id>`.
-
 ## experiment.json drives every notebook
 
 Each notebook's first code cell is `CONFIG = r'...experiment.json'` followed by
@@ -101,63 +65,20 @@ starts an experiment and saves, each with its own Save, its paths and anchor rou
 with their metadata and condition columns, and the derived features; both write the file through
 `save_config`, which keeps the previous version as `experiment.json.bak`, and each of the page's Saves
 writes only its own keys, every other key as it was.
-
-- New experiment (`fouri.app.wells.new_config`) writes experiment.json in a results folder, which it creates
-  when missing: every well with ND2 files, no metadata, `DEFAULT_CONDITION_COLUMNS`, `anchor_round` 0, the
-  folder's name as `experiment_key` and the paths written as the page writes them (below). It refuses a
-  folder that already has an experiment.json, an ND2 folder with no well's files, or an info_exp.csv that
-  can't be read.
-- The details card (`wells.save_details`) writes `experiment_key`, `experiment_name`, `cell_type`, `passage`,
-  `date_completed` and `notes`, as the setup form does. The wells card (`wells.save_wells`) writes
-  `well_list`, `well_metadata` (`metadata.table_to_config`) and `condition_columns`, and is refused while
-  `check_metadata` finds an error. The standard three keep their Condition ticks whatever their values; an
-  added column with no value in any well is saved in neither. With no ND2 files found, wells can be removed
-  but not added, and the two ND2 checks are skipped. Import CSV replaces only the CSV's own columns for
-  the wells it lists.
-- The page never changes a sample ID already set, only one typed in its table or imported (a whole number
-  above 0; a cleared one counts as none). On Save, `wells.fill_sample_ids` gives a well with none the ID of
-  the first well in plate order with the same values in the condition columns, else one more than the
-  largest ID, in plate order; it does not call `assign_sample_ids`, which numbers every well again.
+The page's rules are in `src/fouri/app/CLAUDE.md`.
 
 - `base_dir` is `mac_base_dir` on non-Windows if set, else `base_dir`, else the folder holding the config.
 - Folder names are `DEFAULT_PATHS` in `config.py`; each can be overridden in the config's `paths`
   (relative to `base_dir` or absolute). A new folder needs an entry there and a property on `Experiment`.
-- The app's Experiment page (`config_to_save` in `fouri/app/pages/experiment.py`, with `path_entry` in
-  `fouri/app/wells.py`) writes the results folder
-  to the key it is read from on that PC (`mac_base_dir` on non-Windows if set, else `base_dir`), left out
-  only when the same folder would be read without it (the folder holding the config, with no other key to
-  take over: on non-Windows `mac_base_dir` stays while `base_dir` is set), and the ND2 folder and info_exp.csv as
-  `paths.data`/`paths.info_file`, each left out when its box is empty or it is base_dir's own `data` or
-  `info_exp.csv`, relative to `base_dir` when inside it, in full otherwise. A path typed without a drive or
-  root is read as relative to the results folder.
 - The format stays readable as the older `project_config` files (`experiment_key`, `base_dir`,
   `mac_base_dir`, `well_list`, `well_metadata`); `Experiment.__getitem__`/`.get` exist for code written
   against that dict. New fields must be optional.
 - Optional `anchor_round`: the round every other round is aligned onto, counted from 0 like `round_index`;
   default 0, the first round in `info_exp.csv`. The app's Experiment page sets it and always writes it, 0
   included. It is not in the setup form, which keeps any key it does not manage when it saves.
-- Optional `app`: what the app's pages save, through `save_config`. `app.filters` is a list of filter rules,
-  each with `name`, `use` (the page's switch), `rule` and `feature` (a column name such as
-  `R0_DNA_total_nuc_protein`): `middle_percentiles` takes `low`/`high` as percentiles from 0 to 100,
-  `robust_sd` takes `sds`, `between` takes `low`/`high` in the feature's own values, and `per_sample`
-  (optional, false when left out) judges each `sample_ID` on its own cells. `fouri.filters.saved_filters`
-  reads them, an empty list when either key is missing, and refuses two rules with one name. `app.labels` is a
-  list of label rules, each with `column` (the label's name, and the column it becomes), `use` and `rule`: a
-  `threshold` takes `feature`, one or two `cutoffs` and `classes`, one name more than the cut-offs
-  (`set_on_samples` and `sds` are the page's record of how the cut-offs were chosen; Build cell table ignores
-  them); a `gates` rule takes `x`, `y` and `gates`, each gate a `class`, a `shape` and `points`, [x, y] pairs in
-  the features' own values: two opposite corners for a `rectangle`, the outline (three or more) for a `freehand`
-  (`x_log10` and `y_log10` are the page's record of whether each axis was drawn on log10, a value on such an axis
-  saved as 10 to the value drawn; Build cell table ignores them).
-  `fouri.labels.saved_labels` reads them the same way and refuses two labels with one column. `app.embedding`
-  is the experiment's one embedding set-up, saved by the Embedding page's set-up tab: `picked` (column names),
-  `samples` (sample IDs), `ranking_k`, `top_n` (a list), `methods` (always both `PHATE` and `UMAP`, each with
-  `dims`, empty when the method makes no run, and `settings`, a list of values per setting as
-  `fouri.embedding` passes them: `knn`, `t`, `gamma`, `decay`, `n_pca`; `n_neighbors`, `min_dist`, `metric`),
-  `skipped` (the `run_key` of each run unticked), `seed` and `values` (`original` until batch correction).
-  `fouri.app.embeddings.saved_setup` reads it, None when missing, and refuses one with a key missing or of the
-  wrong type; `embedding_settings` turns it into what the Run page's Embedding card sends `make_embeddings`:
-  every run of the set-up not skipped, `picked`, `samples`, `ranking_k` and `seed`.
+- Optional `app`: what the app's pages save, through `save_config`. `app.filters` and `app.labels` hold the
+  filter and label rules, in the format given in `.claude/rules/filters-labels.md`; `app.embedding` holds the
+  Embedding page's set-up, in the format given in `.claude/rules/embeddings.md`.
 - Wells are always zero-padded (`B02`), normalized by `metadata.normalize_well`, sorted by `plate_sort_key`.
 - Committed notebooks keep the placeholder `CONFIG = r'Z:\PATH\TO\EXPERIMENT\experiment.json'`; do not
   commit a local path.
@@ -205,43 +126,19 @@ stored as a 3 × 3 matrix of NaN (the identity at the anchor): `align.save_manua
 that way when a round is aligned by hand before 02 has run, and `measure_well` refuses a well with any NaN
 round, naming the rounds.
 
-00, 01, 02, Find artifacts and 06 only create outputs that are missing, unless their `overwrite` argument (a setting in each
-notebook, default `False`) is `True`. Done means done for the rounds `info_exp.csv` lists now, so rounds added
-at the end of `info_exp.csv` are processed without redoing the earlier ones:
-
-- 00 skips a well whose `round_table_{well}.csv` (not the old `.pkl`) lists the same rounds. If the saved table
-  lists only the first of them, `convert_well` writes just the new rounds' TIFFs and saves the full table. If a
-  new round's images are smaller, the crop shrinks: every round is written again and the well's labels in
-  `segmented` are cut to the new size. The crop only trims the bottom and right edges, so outlines and saved
-  transforms keep their positions (within 0.04 px on B02). 00 refuses a well whose rounds were inserted,
-  removed, renamed or reordered, since later steps store their results by round number.
-- 01 skips a round whose labels exist, and never replaces a hand-edited round (one with a file in
-  `cellpose_original/`), even with `overwrite=True`; it names those rounds apart from the ones skipped as done.
-  The Run page's count of images to segment (`fouri.app.gpu.images_to_segment`) leaves them out too.
-- 02 skips a round whose matrix isn't NaN, so rounds fixed in 03 are kept; a saved file with fewer rounds keeps
-  them and aligns only the new ones. It refuses a well whose label images don't match its rounds, that has no
-  label image for `anchor_round`, or whose saved file has more rounds than the well or a non-identity matrix at
-  `anchor_round` (the anchor changed); the checks run in that order and a well gets the first one's message.
-- Find artifacts skips a round whose `.npz` exists, and never replaces a round whose `.json` has `edited` true
-  (masks painted by hand), even with `overwrite=True`; the step names those rounds apart from the ones skipped as
-  done. The `.json` is written before the `.npz`, so a round with an `.npz` always has its `.json`. Find artifacts
-  refuses a well whose round table is missing or predates `raw_file_name`, or whose round has a `.json` without
-  an `edited` of true or false.
-- A refused well is a failed well: it is left out of the work and passed to `check_results` with the others, so
-  the other wells still run and the step ends failed naming it.
-- 06 skips a well whose CSV has a `{prefix}_nuc_mean` column for every channel in its round table; a well
-  missing some measures all its rounds again.
+00, 01, 02, Find artifacts and 06 only create outputs that are missing, unless their `overwrite` argument (a
+setting in each notebook, default `False`) is `True`. Done means done for the rounds `info_exp.csv` lists now,
+so rounds added at the end of `info_exp.csv` are processed without redoing the earlier ones. Each step's skip
+and refuse rules, and `fouri.status`, which applies them for the Status page, are in
+`.claude/rules/skip-rules.md`.
 
 Nothing tracks what an output was made from, so after a fix in 03 or a new 01 run, 06 needs `overwrite=True`.
-The checks run in the main process before work is handed out; `report.say_skipped` prints what was skipped.
 Every output a step writes goes through `io.written_whole`: it is written to its own name plus `.partial`
 (`cell_data_B02_df.csv.partial`), renamed over the output when the write ends cleanly, and removed when it doesn't
 (an error or Ctrl+C), so a stopped run never leaves a half-written file that would count as done and an earlier
 file stays as it was. Readers match exact names or the `.tif` suffix, so a `.partial` left by a killed process is
 never read. `save_transforms` hands `numpy.save` an open file, since it adds `.npy` to any other name.
-`fouri.status` (`step_status` per well, `experiment_status` for 07 and 08) applies the same
-rules, read from disk, for the app's Status page; change it with a step's skip rule. Every step takes
-`wells=` (checked and put in plate order by `Experiment.pick_wells`); `None` means every well.
+Every step takes `wells=` (checked and put in plate order by `Experiment.pick_wells`); `None` means every well.
 
 ## Inputs, naming and couplings
 
@@ -276,7 +173,7 @@ rules, read from disk, for the app's Status page; change it with a step's skip r
 
 - `sample_ID` is filled by `metadata.assign_sample_ids` (the setup form) unless every well already has one:
   wells with the same values in `condition_columns` share an ID, numbered in plate order. The app's
-  Experiment page fills only the wells with none (`wells.fill_sample_ids`, above).
+  Experiment page fills only the wells with none (`wells.fill_sample_ids`, in `src/fouri/app/CLAUDE.md`).
 - `features.build_fullest_df` joins each well's CSV (via `io.cell_data_path`, dropping an old `Unnamed: 0`
   column if present) with its `well_metadata`; `treatment_time` is renamed
   `treatment time` in `fullest_df` and `adata.obs` (`_OBS_NAMES`), the name 07 has always used.
@@ -288,80 +185,18 @@ rules, read from disk, for the app's Status page; change it with a step's skip r
   stop Build cell table, a blank row, a name used twice, a measured column's name or a cell-page group's.
 - Build cell table (`run.build_cell_table(exp, filters=(), labels=())`) applies the saved filters named in its
   `filters` setting after the derived features, so a filter may use one, and adds the result as the column
-  `included`.
-  `fouri.filters.keep` works out one rule on every cell of the table by itself: the percentiles (numpy's
-  linear ones) and `robust_sd`'s median and median absolute deviation (times 1.4826) come from the cells with a
-  value, per `sample_ID` when `per_sample` is set (it changes nothing for `between`), both bounds are kept, and
-  an empty or infinite value is never kept. `apply_filters` checks every rule before working any out, then
-  returns `included` (true where every rule keeps the cell) and each rule's count of the cells it leaves out on
-  its own, whatever the others do. Build cell table refuses, before writing anything, a name no saved filter
-  has, a feature the table lacks, or a rule that can't be applied (unknown kind, missing field, bad bounds,
-  `per_sample` without `sample_ID`); it says each rule's count and the total kept. With no names every cell is
-  included and nothing is said about filters.
-- Then Build cell table applies the saved labels named in its `labels` setting (`fouri.labels`) to every cell,
-  included or not, each as a column named as the label's `column`: a category with the classes in saved order,
-  every one listed even with no cell in it, and no value for a cell in no class. `label_cells` splits a
-  threshold as `features.threshold_labels` does: with one cut-off, below it the first class and at or above it
-  the second; with two, below the lower the first, from the lower to the upper both kept the second, above the
-  upper the third. Gates are tried in saved order and a cell takes the first that holds it: a rectangle holds
-  the cells between its corners on both axes, both bounds kept, a freehand gate those inside its outline as
-  matplotlib's `Path` finds them; gates with one class name form one class. An empty or infinite value gives
-  no class. `apply_labels` checks every rule before working any out; Build cell table refuses, before writing
-  anything, a name no saved label has, a feature the table lacks, a label named as a column the table already
-  has, or a rule that can't be applied (unknown kind, missing field, no cut-off or more than two, classes not
-  one more than the cut-offs, no gate, an unknown shape, a rectangle without two corners, a freehand gate with
-  fewer than three points, a point that isn't two finite numbers); it says each label's cells per class and in
-  no class. Given no names, `named_filters` and `named_labels` return no rules without reading the saved ones,
-  so a mistake in saved rules stops only a run that names some. The run record's settings name the filters and
-  labels applied.
-- 07's pRB thresholds are its own cells, unchanged until the app.
-  `fouri.adata.build_adata(exp, fullest_df, labels=())` then builds the AnnData: `.obs` = label, well,
-  `included`, the label columns Build cell table hands it (kept as categories), metadata, centroid, bbox and
-  orientation; 07's own `pRB_label` stays in `fullest_df.csv` but no longer reaches `.obs`, since the notebooks
-  are not kept working; `.X` = every other number column z-scored with the mean and sample SD of the
-  included cells, applied to every cell. A column is dropped from `.X` and named when an included cell has no
-  usable value (missing or infinite) or when its included cells all hold one value, judged by the values
-  themselves, not by the SD coming out 0, which values not stored exactly in binary miss (old 07 dropped such
-  columns silently, judged over every cell: an earlier experiment lost all 22 `_nuc_cyto_ratio` features to a
-  few cells with a ring mean of 0). An excluded cell may hold an empty value in `.X`; a table with no
-  `included` column counts every cell as included. `.var` = kind (channel, shape,
-  derived), round, signal, measure and acquisition from the round tables (a value differing between wells
-  left empty and named); `.uns` = setup-form details, condition columns, derived formulas, plate, microscope,
-  round tables. It saves `fullest_df.csv` (no row-number column) and `standard_adata.h5ad`.
-- For the app: `features.suggest_cutoffs` (Otsu, two-cut Otsu, the valley of the smoothed curve, on cells
-  within `sds` SD of the mean, 3 by default; `middle_values`, `curve_range` and `plot_threshold_histogram`
-  take the same `sds`), `features.threshold_labels(values, cutoffs, classes)` (the classes are the label's
-  names; `fouri.labels` uses it) and `plots.plot_threshold_histogram` (plotly; the cut-off lines are its only
-  shapes, so a page can make every shape draggable, and the Otsu–valley band is a trace). 07 doesn't use them.
+  `included`, then applies the saved labels named in its `labels` setting to every cell, included or not, one
+  column per label. How each rule is computed and what Build cell table refuses are in
+  `.claude/rules/filters-labels.md`.
+- 07's pRB thresholds are its own cells, unchanged until the app. `fouri.adata.build_adata(exp, fullest_df,
+  labels=())` then builds the AnnData and saves `fullest_df.csv` and `standard_adata.h5ad`; what `.obs`, `.X`,
+  `.var` and `.uns` hold, and which columns `.X` drops, are in `.claude/rules/adata.md`.
 
 ## Embeddings (08)
 
-`fouri/embedding.py`, one call per step, all on `standard_adata_sub.h5ad` (`io.adata_sub_path`):
-
-- `subsample(exp, cells_per_sample=2000, seed=42)`: sketchKH kernel herding grouped by `sample_ID`, on the
-  included cells of `standard_adata.h5ad` (every cell when it has no `included` column); a sample the filters
-  left with no included cell is refused, by name, before anything is sketched or written; lowered to the
-  smallest sample's count of included cells (sketch would do it silently), recorded in `.uns["subsample"]`. Every feature stays in `.X`, so an embedding can be colored by any measurement.
-- `rank_features(adata, features, samples=None, k=100)`: the picked features decide which cells are
-  neighbors (k of them), and delve's `feature_select` scores every feature by how smoothly it changes
-  between neighbors, lower is better. For the picked features this is exactly old 08's Laplacian ranking.
-  delve's own `delve_fs` is not used: its test only finds changing features when most features don't change,
-  and on a 4i panel nearly every column follows the cell cycle (nothing found in 21 of 22 settings tried).
-- `embed(path, method, features, *, samples, dims, settings, seed=42)`: one PHATE or UMAP run (`Method`),
-  2D or 3D, returning a row per cell of the file (NaN for samples left out). Seeded, and fitted on one maths
-  thread (`threadpoolctl`): PHATE's coordinates otherwise shift with the thread count, mainly on its third
-  axis, and a seeded UMAP runs on one core anyway. `phate` and `umap` are imported inside it.
-- `make_runs(method, dims, top_n, settings)` builds a `Run` (method, dims, top_n, settings) per combination;
-  `embed_grid(exp, runs, picked, *, samples, ranking_k, seed, n_workers)` ranks once, runs every `Run` side by
-  side with `parallel_map` on its top-ranked picked features, and saves each under
-  `X_{method}_{dims}d_top{n}_{setting}{value}…` (settings sorted), the name `run_key(run)` gives, which the
-  app's set-up tab also uses, so the set-up, the Run page and `embed_grid` agree. The same run with the same picked
-  features, samples, ranking k and seed replaces its embedding (the result is identical); other inputs get
-  `_2`, `_3`. `.uns["embeddings"][key]` records method, dims, top_n, settings, picked, the samples actually
-  used, ranking_k, seed, and the features used with their scores.
-- `plots.plot_embedding(adata, key, color_by)`: plotly, 2D (WebGL) or 3D; a measurement or a number column
-  on a Viridis scale from the 1st to the 99th percentile, a text or category column one trace and color per
-  group (`GROUP_COLORS`, the app's).
+`fouri/embedding.py`, one call per step, all on `standard_adata_sub.h5ad` (`io.adata_sub_path`): `subsample`,
+`rank_features`, `embed`, `make_runs` and `embed_grid`, with `plots.plot_embedding` for the figures. What each
+does, the embedding keys (`run_key`) and the `app.embedding` format are in `.claude/rules/embeddings.md`.
 
 ## Dependencies
 
@@ -371,10 +206,26 @@ rules, read from disk, for the app's Status page; change it with a step's skip r
 - OpenCV is `opencv-python-headless`, the build Cellpose also uses; the plain `opencv-python` bundles its
   own Qt, which can clash with napari's.
 
+## Register of app text, messages and slides
+
+- **UI strings (labels, tooltips, errors, logs):** Target audience is wet-lab scientists. State only what is
+  shown, what was computed, or what a control does using standard scientific terms ("Segment nuclei",
+  "Variance explained by batch", "Computed for N of M cells"). A message printed by `fouri` that stops a
+  step says what to do next.
+- **UI bans:**
+  - Never explain internal software mechanics in UI text unless the user must take action on it.
+  - No promotional/chatty phrases ("whenever you want", "never hold up a run", "Tip:").
+  - Dropdowns name the option only ("Condition only", not "Only this condition"). "(default)" is the only
+    allowed note.
+- **Spelling:** American, in UI text and in code names (`color`, `colored`, `canceled`); names defined by
+  Python or a library (`asyncio.CancelledError`) stay as defined.
+- **Slides & presentations (if generated here):** Data presentation for wet-lab biologists. No "we", no
+  progress timelines, no internal code/dataset nicknames (`Daugrid`, `H1`), no cute titles. Define every
+  computational metric and dataset on first appearance.
+
 ## Writing for this repo
 
-- The readers are lab members, not programmers. Messages printed by `fouri` say in plain words what to
-  do next. During the refactor (the `fouri-refactor` branch) the step-by-step browser guide
+- During the refactor (the `fouri-refactor` branch) the step-by-step browser guide
   (`docs/pipeline_guide.html`, still on main) is removed and `README.md` is not updated per change: both
   are rewritten once at the end, before the merge into main.
 - Logic used by more than one notebook goes in `fouri`, not copied between notebooks. Notebooks are
@@ -383,38 +234,6 @@ rules, read from disk, for the app's Status page; change it with a step's skip r
   `adata.py`, and 08 into `embedding.py`; figures go in `plots.py` (plotly). Torch, Cellpose, PHATE and UMAP
   are imported inside the functions that use them, so importing `fouri` stays fast; napari is imported at the
   top of `fouri/viewers/` only, which nothing else in `fouri` imports.
-- Hand-work viewers live in `fouri/viewers/`. `base.BaseViewer` (abstract) opens napari with a docked panel:
-  well and round dropdowns, a ▲▼◀▶ pad, the viewer's own tools, Undo and Save, and a shortcut list; it binds
-  the keys in `KeyboardShortcuts` (Up/Down round, Left/Right well, Shift for first/last, Ctrl+Z, Shift+S;
-  napari 0.9 already uses Ctrl+S and most bare letters) and shows prompts in the canvas text overlay.
-  Subclasses fill hooks (`_build_layers`, `_tool_widgets`, `_round_choices`, `_load_well`, `_load_round`,
-  `save`, `undo`, `_extra_keys`), and may fill `_extra_shortcuts` (lines added to the shortcut list),
-  `_start_round` (the round to open on when none is asked for; the first round offered by default) and
-  `_unsaved_rounds` (the rounds with unsaved edits; none by default). Before a well switch (arrows, pad or
-  dropdown) and before its window closes, the base frame asks Save, Discard or Cancel when `_unsaved_rounds`
-  names any, naming them; a round switch asks nothing. After Save or Discard on closing, the editor closes the
-  window itself, so napari's own close question doesn't follow (napari's Ctrl+W and Ctrl+Q still ask theirs
-  first). `alignment.AlignmentViewer` is 02's optional check and 03: it starts each
-  round from its saved transform or from none, clicks snap to cell centers, Fit (Shift+F) needs 3 pairs with
-  two clicks a third of the image apart. A failed well or round switch leaves the old one on screen and puts
-  the reason in the prompt; a round the viewer doesn't offer (the anchor, or one the well lacks) opens its first
-  round instead, with the reason in the prompt. `segmentation.SegmentationViewer` checks and corrects the
-  segmentation masks of every round, opening on the anchor: each of the round's channels is an image layer in
-  magma (`R2 DNA`), DNA shown to start and the signals shown kept across round and well switches, under the
-  round's masks drawn as cyan and green outlines (`R2 masks`, one Labels layer per round, each with its own Undo,
-  emptied when a well opens), each channel's contrast opening at its 1st and 99.5th percentiles. In the pan tool
-  (the default) or the pick tool a click selects a cell and Shift+click adds or takes one out, drawn white in the
-  `selected cells` layer; a drag pans, and Escape or a click on the background clears the selection (in the
-  paint, fill and polygon tools Escape stays napari's own). Delete deletes the selected cells, Shift+M merges them into the first one's
-  number when they form one group touching at a side or a corner, Shift+N paints a new cell with the next free
-  number, and the brush and eraser widen and trim cells. Save writes every round edited through `io.write_tiff`,
-  first keeping each one's Cellpose original. The panel is docked as its Qt widget (`panel.native`): napari
-  resets a docked magicgui panel's dropdowns whenever a layer is added, removed or renamed, which would empty
-  the round list. 03 no longer uses Affinder, whose 0.5.0 calls `viewer._canvas_size`, removed in napari 0.9.
-- `python -m fouri.viewers alignment --config <experiment.json> --well B02 [--round R2]` opens one viewer as
-  its own program (the names are `EDITORS` in `viewers/__main__.py`: `alignment` and `segmentation`) and waits until its window closes, as the
-  app's Review page will start it: exit code 0 when the window is closed, 2 for an unknown editor or a well not
-  in the experiment, 1 when the viewer can't be opened (no experiment.json, a well whose files won't load).
 - Work run side by side: `fouri.parallel.parallel_map(function, items, …)` runs a top-level function (or a
   `functools.partial` of one) over items in spawned processes with a progress bar. It returns, in item order,
   each item's result, a `Failed` (its name and the error) when its job raised, or a `Dropped` when a stop left
@@ -435,8 +254,9 @@ rules, read from disk, for the app's Status page; change it with a step's skip r
 - Messages and bars go through `fouri.report` (`say`, `say_skipped`, `progress`), never `print` or tqdm directly:
   after `report.report_to(path)` (the app, when it starts a step) they are written to that file as JSON lines
   (message; bar open, move, close with its parent bar; `report.finished` at the end) instead of printed.
-- `.gitignore` ignores every dotfile except `.gitignore`, `.gitattributes`, `.python-version` and `.github/`, so a new
-  dot-folder (e.g. `.claude/`) is not committed unless that rule changes.
+- `.gitignore` ignores every dotfile except `.gitignore`, `.gitattributes`, `.python-version`, `.github/` and
+  `.claude/rules/` (the rest of `.claude/` stays ignored), so a new dot-folder (e.g. `.vscode/`) is not committed
+  unless that rule changes.
 
 ## Checking a change
 

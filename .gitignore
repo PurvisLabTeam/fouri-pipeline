@@ -4,3 +4,6 @@
 !.gitattributes
 !.python-version
 !.github/
+!/.claude/
+/.claude/*
+!/.claude/rules/
