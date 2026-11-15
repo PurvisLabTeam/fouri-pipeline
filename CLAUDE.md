@@ -84,6 +84,14 @@ pywebview's window icon (`app.native.start_args["icon"]`); `fouri-pipeline.icns`
 is copied into the bundle's `Contents/Resources/` and named in `CFBundleIconFile` on macOS.
 `fouri.app.shortcuts.icon_file` gives this system's file, found from `fouri/app/`'s own directory.
 
+`.github/workflows/shortcuts.yml` runs the install steps, `fouri-shortcuts` and the update steps on GitHub's
+`windows-latest` and `macos-latest` runners, one job each, and opens the app from the Desktop shortcut. A push to any
+branch that changes `src/fouri/app/shortcuts.py`, `pyproject.toml`, `uv.lock` or the workflow file starts the
+workflow, as does Run workflow in the repository's Actions tab (`workflow_dispatch`, offered once the workflow is on
+`main`); each job clones the pushed branch from GitHub. The workflow's runs are read in the Actions tab or with
+`gh run list --workflow shortcuts.yml` and `gh run view <run id>`; each job's screenshot of the open app is the run's
+artifact `screenshot-windows` or `screenshot-macos`, downloaded from the run's page or with `gh run download <run id>`.
+
 ## experiment.json drives every notebook
 
 Each notebook's first code cell is `CONFIG = r'...experiment.json'` followed by
@@ -427,7 +435,7 @@ rules, read from disk, for the app's Status page; change it with a step's skip r
 - Messages and bars go through `fouri.report` (`say`, `say_skipped`, `progress`), never `print` or tqdm directly:
   after `report.report_to(path)` (the app, when it starts a step) they are written to that file as JSON lines
   (message; bar open, move, close with its parent bar; `report.finished` at the end) instead of printed.
-- `.gitignore` ignores every dotfile except `.gitignore`, `.gitattributes` and `.python-version`, so a new
+- `.gitignore` ignores every dotfile except `.gitignore`, `.gitattributes`, `.python-version` and `.github/`, so a new
   dot-folder (e.g. `.claude/`) is not committed unless that rule changes.
 
 ## Checking a change

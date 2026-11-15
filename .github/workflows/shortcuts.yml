@@ -1,0 +1,365 @@
+name: Shortcuts
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - src/fouri/app/shortcuts.py
+      - pyproject.toml
+      - uv.lock
+      - .github/workflows/shortcuts.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      BRANCH: ${{ github.ref_name }}
+    steps:
+      - name: Install uv
+        run: |
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value "$env:USERPROFILE\.local\bin"
+          irm https://astral.sh/uv/install.ps1 | iex
+
+      - name: Clone the branch
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $clone = "$env:LOCALAPPDATA\fouri-pipeline"
+          git clone -b $env:BRANCH https://github.com/PurvisLabTeam/fouri-pipeline $clone
+          $tip = git -C $clone rev-parse HEAD
+          "Clone: $clone"
+          "Tip: $tip"
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "CLONE=$clone", "TIP=$tip"
+
+      - name: Sync the environment
+        working-directory: ${{ env.CLONE }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          uv sync
+
+      - name: Make the shortcuts
+        working-directory: ${{ env.CLONE }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          uv run fouri-shortcuts
+
+      - name: Check the shortcuts
+        run: |
+          $shell = New-Object -ComObject WScript.Shell
+          $launcher = Join-Path $env:CLONE '.venv\Scripts\fouri-pipeline.exe'
+          $icon = Join-Path $env:CLONE 'src\fouri\app\icons\fouri-pipeline.ico'
+          $failed = $false
+          foreach ($folder in 'Programs', 'Desktop') {
+            $path = Join-Path $shell.SpecialFolders($folder) '4i Pipeline.lnk'
+            if (-not (Test-Path -LiteralPath $path)) {
+              "::error::$path does not exist."
+              $failed = $true
+              continue
+            }
+            $lnk = $shell.CreateShortcut($path)
+            $comma = $lnk.IconLocation.LastIndexOf(',')
+            $iconPath = if ($comma -ge 0) { $lnk.IconLocation.Substring(0, $comma) } else { $lnk.IconLocation }
+            $fields = [ordered]@{
+              TargetPath       = @($lnk.TargetPath, $launcher)
+              WorkingDirectory = @($lnk.WorkingDirectory, $env:CLONE)
+              IconLocation     = @($iconPath, $icon)
+            }
+            foreach ($name in $fields.Keys) {
+              $actual, $expected = $fields[$name]
+              "${path} ${name}: $actual"
+              if ($actual -ne $expected) {
+                "::error::$path ${name} is $actual, expected $expected."
+                $failed = $true
+              }
+            }
+          }
+          if ($failed) { exit 1 }
+
+      - name: Make the shortcuts a second time
+        working-directory: ${{ env.CLONE }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          uv run fouri-shortcuts
+
+      - name: Count the shortcuts
+        run: |
+          $shell = New-Object -ComObject WScript.Shell
+          $failed = $false
+          foreach ($folder in 'Programs', 'Desktop') {
+            $directory = $shell.SpecialFolders($folder)
+            $found = @(Get-ChildItem -LiteralPath $directory -Filter '4i Pipeline*' -Force)
+            "${directory}: $($found.Name -join ', ')"
+            if ($found.Count -ne 1) {
+              "::error::$directory holds $($found.Count) entries named 4i Pipeline*, expected 1."
+              $failed = $true
+            }
+          }
+          if ($failed) { exit 1 }
+
+      - name: Open the Desktop shortcut
+        id: open
+        run: |
+          $shell = New-Object -ComObject WScript.Shell
+          Invoke-Item -LiteralPath (Join-Path $shell.SpecialFolders('Desktop') '4i Pipeline.lnk')
+          Start-Sleep -Seconds 60
+
+      - name: Take a screenshot
+        run: |
+          try {
+            Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+            $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+            $bitmap = [System.Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
+            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+            $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+            $bitmap.Save("$env:RUNNER_TEMP\screenshot-windows.png", [System.Drawing.Imaging.ImageFormat]::Png)
+            "Screenshot saved: $($bounds.Width) x $($bounds.Height) px."
+          } catch {
+            "::warning::The screenshot failed: $($_.Exception.Message)"
+          }
+
+      - name: Upload the screenshot
+        uses: actions/upload-artifact@v7
+        with:
+          name: screenshot-windows
+          path: ${{ runner.temp }}/screenshot-windows.png
+          if-no-files-found: warn
+
+      - name: Check the launcher is running
+        run: |
+          $launcher = Join-Path $env:CLONE '.venv\Scripts\fouri-pipeline.exe'
+          $running = @(Get-Process -Name fouri-pipeline -ErrorAction SilentlyContinue | Where-Object Path -eq $launcher)
+          if ($running.Count -eq 0) {
+            "::error::$launcher is not running 60 seconds after the Desktop shortcut was opened."
+            Get-Process -Name fouri-pipeline -ErrorAction SilentlyContinue | Format-Table Id, Path -AutoSize
+            exit 1
+          }
+          "$launcher is running: process $($running.Id -join ', ')."
+
+      - name: Stop the app
+        if: ${{ always() && steps.open.outcome != 'skipped' }}
+        run: |
+          $running = @(Get-Process -Name fouri-pipeline -ErrorAction SilentlyContinue)
+          foreach ($process in $running) {
+            taskkill /PID $process.Id /T /F
+          }
+          $running | Wait-Process -Timeout 30 -ErrorAction SilentlyContinue
+          if (Get-Process -Name fouri-pipeline -ErrorAction SilentlyContinue) {
+            "::error::fouri-pipeline is still running after taskkill."
+            exit 1
+          }
+          exit 0
+
+      - name: Check the clone for changes
+        run: |
+          $status = @(git -C $env:CLONE status --porcelain)
+          $status
+          $others = @($status | Where-Object { $_ -notmatch '^.. uv\.lock$' })
+          if ($others.Count -gt 0) {
+            "::error::The clone holds changes other than uv.lock: $($others -join '; ')"
+            exit 1
+          }
+
+      - name: Reset the clone to the commit before the tip
+        working-directory: ${{ env.CLONE }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          git reset --hard HEAD~1
+          uv sync
+
+      - name: Update the clone
+        working-directory: ${{ env.CLONE }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          git pull
+          uv sync
+
+      - name: Check the clone is at the tip
+        run: |
+          $head = git -C $env:CLONE rev-parse HEAD
+          "HEAD: $head"
+          "Tip: $env:TIP"
+          if ($head -ne $env:TIP) {
+            "::error::After git pull the clone is at $head, expected $env:TIP."
+            exit 1
+          }
+
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      BRANCH: ${{ github.ref_name }}
+    steps:
+      - name: Move ~/Applications aside
+        run: |
+          if [ -e "$HOME/Applications" ] || [ -L "$HOME/Applications" ]; then
+            mv "$HOME/Applications" "$HOME/Applications.runner"
+            echo "Moved $HOME/Applications to $HOME/Applications.runner."
+          else
+            echo "$HOME/Applications does not exist."
+          fi
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Clone the branch
+        run: |
+          clone="$HOME/.local/share/fouri-pipeline"
+          git clone -b "$BRANCH" https://github.com/PurvisLabTeam/fouri-pipeline "$clone"
+          tip=$(git -C "$clone" rev-parse HEAD)
+          echo "Clone: $clone"
+          echo "Tip: $tip"
+          echo "CLONE=$clone" >> "$GITHUB_ENV"
+          echo "TIP=$tip" >> "$GITHUB_ENV"
+
+      - name: Sync the environment
+        working-directory: ${{ env.CLONE }}
+        run: uv sync
+
+      - name: Make the shortcuts
+        working-directory: ${{ env.CLONE }}
+        run: uv run fouri-shortcuts
+
+      - name: Check the shortcuts
+        run: |
+          failed=0
+          fail() { echo "::error::$1"; failed=1; }
+          bundle="$HOME/Applications/4i Pipeline.app"
+          plist="$bundle/Contents/Info.plist"
+          script="$bundle/Contents/MacOS/fouri-pipeline"
+          icns="$bundle/Contents/Resources/fouri-pipeline.icns"
+          link="$HOME/Desktop/4i Pipeline.app"
+          launcher="$CLONE/.venv/bin/fouri-pipeline"
+          [ -d "$HOME/Applications" ] || fail "$HOME/Applications does not exist."
+          [ -d "$bundle" ] || fail "$bundle does not exist."
+          plutil -lint "$plist" || fail "plutil -lint rejects $plist."
+          if [ -f "$script" ]; then
+            cat "$script"
+            [ -x "$script" ] || fail "$script is not executable."
+            grep -qF "\"$launcher\"" "$script" || fail "$script does not name $launcher."
+          else
+            fail "$script does not exist."
+          fi
+          [ -f "$icns" ] || fail "$icns does not exist."
+          icon=$(plutil -extract CFBundleIconFile raw "$plist" || true)
+          echo "CFBundleIconFile: $icon"
+          [ "$icon" = "fouri-pipeline.icns" ] || fail "CFBundleIconFile is '$icon', expected fouri-pipeline.icns."
+          if [ -L "$link" ]; then
+            resolved=$(cd "$link" && pwd -P || true)
+            expected=$(cd "$bundle" && pwd -P || true)
+            echo "$link resolves to $resolved"
+            [ -n "$resolved" ] && [ "$resolved" = "$expected" ] || fail "$link resolves to '$resolved', expected $expected."
+          else
+            fail "$link is not a symbolic link."
+          fi
+          exit "$failed"
+
+      - name: Make the shortcuts a second time
+        working-directory: ${{ env.CLONE }}
+        run: uv run fouri-shortcuts
+
+      - name: Count the shortcuts
+        run: |
+          failed=0
+          for directory in "$HOME/Applications" "$HOME/Desktop"; do
+            found=$(find "$directory" -mindepth 1 -maxdepth 1 -name '4i Pipeline*')
+            count=$(printf '%s' "$found" | grep -c . || true)
+            echo "$directory: $found"
+            if [ "$count" -ne 1 ]; then
+              echo "::error::$directory holds $count entries named 4i Pipeline*, expected 1."
+              failed=1
+            fi
+          done
+          exit "$failed"
+
+      - name: Open the Desktop shortcut
+        id: open
+        run: |
+          open "$HOME/Desktop/4i Pipeline.app"
+          sleep 60
+
+      - name: Take a screenshot
+        run: |
+          if screencapture -x "$RUNNER_TEMP/screenshot-macos.png" && [ -s "$RUNNER_TEMP/screenshot-macos.png" ]; then
+            echo "Screenshot saved."
+          else
+            echo "::warning::The screenshot failed."
+          fi
+
+      - name: Upload the screenshot
+        uses: actions/upload-artifact@v7
+        with:
+          name: screenshot-macos
+          path: ${{ runner.temp }}/screenshot-macos.png
+          if-no-files-found: warn
+
+      - name: Check the launcher is running
+        run: |
+          launcher="$CLONE/.venv/bin/fouri-pipeline"
+          if pgrep -f -- "$launcher" > /dev/null; then
+            echo "$launcher is running:"
+            pgrep -lf -- "$launcher"
+          else
+            echo "::error::$launcher is not running 60 seconds after the Desktop shortcut was opened."
+            exit 1
+          fi
+
+      - name: Stop the app
+        if: ${{ always() && steps.open.outcome != 'skipped' }}
+        run: |
+          launcher="$CLONE/.venv/bin/fouri-pipeline"
+          for pid in $(pgrep -f -- "$launcher" || true); do
+            pkill -TERM -P "$pid" || true
+            kill -TERM "$pid" || true
+          done
+          for _ in $(seq 30); do
+            pgrep -f -- "$launcher" > /dev/null || exit 0
+            sleep 1
+          done
+          echo "::warning::$launcher is still running 30 seconds after SIGTERM; sending SIGKILL."
+          pkill -KILL -f -- "$launcher" || true
+
+      - name: Check the clone for changes
+        run: |
+          status=$(git -C "$CLONE" status --porcelain)
+          echo "$status"
+          others=$(printf '%s\n' "$status" | grep -vE '^.. uv\.lock$' || true)
+          if [ -n "$others" ]; then
+            echo "::error::The clone holds changes other than uv.lock: $(echo "$others" | paste -sd ';' -)"
+            exit 1
+          fi
+
+      - name: Reset the clone to the commit before the tip
+        working-directory: ${{ env.CLONE }}
+        run: |
+          git reset --hard HEAD~1
+          uv sync
+
+      - name: Update the clone
+        working-directory: ${{ env.CLONE }}
+        run: |
+          git pull
+          uv sync
+
+      - name: Check the clone is at the tip
+        run: |
+          head=$(git -C "$CLONE" rev-parse HEAD)
+          echo "HEAD: $head"
+          echo "Tip: $TIP"
+          if [ "$head" != "$TIP" ]; then
+            echo "::error::After git pull the clone is at $head, expected $TIP."
+            exit 1
+          fi
