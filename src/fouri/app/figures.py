@@ -102,6 +102,7 @@ def cells_line(
     drawn: int,
     total: int,
     *,
+    covered: int = 0,
     filtered: int = 0,
     not_picked: int = 0,
     sampled: bool = False,
@@ -121,7 +122,9 @@ def cells_line(
         hidden.append(_plural(outliers, "outlier"))
     if beyond_sds:
         hidden.append(f"{beyond_sds:,} beyond {sds:g} {'SD' if sds == 1 else 'SDs'}")
-    reasons = [f"{filtered:,} filtered"] if filtered else []
+    reasons = [f"{covered:,} under artifact masks"] if covered else []
+    if filtered:
+        reasons.append(f"{filtered:,} filtered")
     if not_picked:
         reasons.append(f"{not_picked:,} in samples not picked")
     if sampled:
@@ -137,10 +140,11 @@ def explore_figure(cells: Cells, choices: Choices, kept: pd.Series | None = None
     if kind is Kind.WELL_MAP:
         table = table[table[WELL].astype(str) == str(choices.well)]
     total = len(table)
-    filtered = 0
+    covered = filtered = 0
     if kept is not None:
         inside = kept.loc[table.index].to_numpy(dtype=bool)
-        filtered = total - int(inside.sum())
+        covered = int((cells.covered.loc[table.index].to_numpy(dtype=bool) & ~inside).sum())
+        filtered = total - int(inside.sum()) - covered
         table = table[inside]
     count = len(table)
 
@@ -269,6 +273,7 @@ def explore_figure(cells: Cells, choices: Choices, kept: pd.Series | None = None
     line = cells_line(
         len(frame),
         total,
+        covered=covered,
         filtered=filtered,
         sampled=sampled,
         no_value=no_value,

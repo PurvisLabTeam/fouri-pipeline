@@ -29,6 +29,7 @@ CONDITION_JOIN = " · "  # between the condition columns' values: Palbo · 24h
 BLANK = "(blank)"
 
 ROW_NUMBER = "Unnamed: 0"  # the row-number column older cell data files have
+COVER = "_covered"
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,7 @@ class Cells:
     groups: list[str]
     measured: list[str]
     missing: list[str]
+    covered: pd.Series
 
 
 # the last cells read, and what they were read from
@@ -116,13 +118,18 @@ def _as_built(base: pd.DataFrame, exp: Experiment) -> pd.DataFrame:
     return base.copy()
 
 
+def _covered(table: pd.DataFrame) -> pd.Series:
+    columns = [column for column in table.columns if str(column).endswith(COVER)]
+    return table[columns].eq(True).any(axis=1)
+
+
 def _load(exp: Experiment) -> Cells:
     status = step_status(exp, Step.MEASURE)
     wells = sorted(status, key=plate_sort_key)
     measured = [well for well in wells if status[well].state == State.COMPLETE]
     missing = [well for well in wells if well not in measured]
     if not measured:
-        return Cells(pd.DataFrame(), pd.DataFrame(), {}, [], measured, missing)
+        return Cells(pd.DataFrame(), pd.DataFrame(), {}, [], measured, missing, pd.Series(dtype=bool))
 
     obs_names = dict(zip(exp.metadata_columns, metadata_obs_columns(exp), strict=True))
     metadata = exp.well_metadata
@@ -143,8 +150,9 @@ def _load(exp: Experiment) -> Cells:
     table = add_derived_features(table, exp.derived_features)
     groups = add_groups(table, exp)
 
-    features = describe(table.select_dtypes("number").columns.tolist(), read_info_file(exp))
-    return Cells(table, base, features, groups, measured, missing)
+    numbers = [column for column in table.select_dtypes("number").columns if not str(column).endswith(COVER)]
+    features = describe(numbers, read_info_file(exp))
+    return Cells(table, base, features, groups, measured, missing, _covered(table))
 
 
 def load_cells(exp: Experiment) -> Cells:

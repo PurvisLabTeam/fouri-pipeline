@@ -249,6 +249,7 @@ def gate_figure(
     classes: pd.Categorical,
     titles: tuple[str, str],
     guides: tuple[float, float] | None,
+    covered: int,
     filtered: int,
 ) -> tuple[go.Figure, str]:
     log_x, log_y = bool(rule.get("x_log10")), bool(rule.get("y_log10"))
@@ -305,7 +306,8 @@ def gate_figure(
     )
     line = cells_line(
         int(rows.size),
-        len(table) + filtered,
+        len(table) + covered + filtered,
+        covered=covered,
         filtered=filtered,
         sampled=sampled,
         no_value=no_value,

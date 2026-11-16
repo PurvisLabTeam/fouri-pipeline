@@ -338,6 +338,7 @@ class _LabelsPage:
         self.filter_problem = problem
         self.every_cell = False
         self.table = cells.table
+        self.covered = 0
         self.filtered = 0
         self.samples = sample_names(cells.table, exp)
         self.sample_ids = (
@@ -368,8 +369,13 @@ class _LabelsPage:
 
     def set_shown(self) -> None:
         table = self.cells.table
-        self.table = table if self.every_cell or self.kept is None else table[self.kept.to_numpy(dtype=bool)]
-        self.filtered = len(table) - len(self.table)
+        if self.every_cell or self.kept is None:
+            self.table, self.covered, self.filtered = table, 0, 0
+            return
+        inside = self.kept.to_numpy(dtype=bool)
+        self.table = table[inside]
+        self.covered = int((self.cells.covered.to_numpy(dtype=bool) & ~inside).sum())
+        self.filtered = len(table) - len(self.table) - self.covered
 
     def read_saved(self) -> None:
         self.saved = _saved_list(self.exp)
@@ -846,6 +852,7 @@ class _LabelsPage:
         line = cells_line(
             int(values.size) - beyond,
             len(self.cells.table),
+            covered=self.covered,
             filtered=self.filtered,
             not_picked=not_picked,
             no_value=no_value,
@@ -866,7 +873,14 @@ class _LabelsPage:
             classes = pd.Categorical([None] * len(self.table), categories=[])
         titles = (self.axis_title(gates.x, gates.log_x), self.axis_title(gates.y, gates.log_y))
         fig, line = await run.io_bound(
-            gate_figure, self.table, self.plot_rule(gates), classes, titles, self.guide_lines, self.filtered
+            gate_figure,
+            self.table,
+            self.plot_rule(gates),
+            classes,
+            titles,
+            self.guide_lines,
+            self.covered,
+            self.filtered,
         )
         fig.update_layout(dragmode=self.dragmode)
         return fig, line, "", GATES_CONFIG

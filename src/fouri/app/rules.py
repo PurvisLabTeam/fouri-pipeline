@@ -12,8 +12,8 @@ from fouri.config import Experiment, save_config
 from fouri.filters import apply_filters, keep, saved_filters
 from fouri.labels import saved_labels
 
-CANT_READ = "Showing all cells: the saved filters can't be read."
-CANT_APPLY = 'Showing all cells: the filter "{name}" can\'t be applied. {reason}'
+CANT_READ = "Filters not applied: the saved filters can't be read."
+CANT_APPLY = 'Filters not applied: the filter "{name}" can\'t be applied. {reason}'
 
 
 def switched_on_filters(exp: Experiment) -> list[str]:
@@ -21,23 +21,27 @@ def switched_on_filters(exp: Experiment) -> list[str]:
 
 
 def kept_cells(cells: Cells, exp: Experiment) -> tuple[pd.Series | None, str | None]:
+    covered = cells.covered
+    any_covered = bool(covered.any())
+    uncovered_only = ~covered if any_covered else None
     try:
         names = set(switched_on_filters(exp))
     except ValueError:
-        return None, CANT_READ
+        return uncovered_only, CANT_READ
     if not names:
-        return None, None
+        return uncovered_only, None
     rules = [rule for rule in saved_filters(exp) if str(rule.get("name")) in names]
+    table = cells.table[~covered] if any_covered else cells.table
     try:
-        included, _ = apply_filters(cells.table, rules)
+        included, _ = apply_filters(table, rules)
     except (ValueError, TypeError):
         for rule in rules:
             try:
-                keep(cells.table, rule)
+                keep(table, rule)
             except (ValueError, TypeError) as error:
-                return None, CANT_APPLY.format(name=rule.get("name"), reason=error)
+                return uncovered_only, CANT_APPLY.format(name=rule.get("name"), reason=error)
         raise
-    return included, None
+    return included.reindex(cells.table.index, fill_value=False), None
 
 
 def _save_app_key(exp: Experiment, key: str, rules: Sequence[Mapping[str, Any]]) -> Experiment:

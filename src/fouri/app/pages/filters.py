@@ -105,6 +105,11 @@ def _cells(count: int) -> str:
     return f"{count:,} cell" if count == 1 else f"{count:,} cells"
 
 
+def _covered_line(count: int) -> str:
+    verb = "is" if count == 1 else "are"
+    return f"{_cells(count)} under artifact masks {verb} left out of these counts."
+
+
 @dataclass(eq=False)
 class _Rule:
     name: str | None
@@ -173,6 +178,8 @@ class _FiltersPage:
         self.exp = exp
         self.cells = cells
         self.menu = menu
+        self.covered = int(cells.covered.sum())
+        self.table = cells.table[~cells.covered] if self.covered else cells.table
         try:
             saved = [dict(rule) for rule in saved_filters(exp)]
             self.unreadable = ""
@@ -196,6 +203,8 @@ class _FiltersPage:
                     ui.button("Add a filter", icon="add", on_click=self.add).props("outline")
                     ui.button("Save filters", icon="save", on_click=self.save)
                 self.total = ui.label().classes("text-sm font-medium mt-2")
+                covered_line = ui.label(_covered_line(self.covered)).classes("text-sm muted")
+                covered_line.set_visibility(self.covered > 0)
                 self.unreadable_line = ui.label(
                     f"The saved filters can't be read: {self.unreadable} Rename one and save."
                 ).classes("text-sm text-negative")
@@ -281,7 +290,7 @@ class _FiltersPage:
             return {}
         if known is not FilterRule.BETWEEN:
             return dict(STARTS[known])
-        numbers = _numbers(self.cells.table, feature)
+        numbers = _numbers(self.table, feature)
         numbers = numbers[np.isfinite(numbers)]
         if numbers.size == 0:
             return {"low": None, "high": None}
@@ -393,7 +402,7 @@ class _FiltersPage:
         ui.notify(f"Saved {count} {noun} to experiment.json.", type="positive")
 
     def update(self) -> None:
-        table = self.cells.table
+        table = self.table
         for rule in self.rules:
             try:
                 rule.kept, rule.problem = keep(table, rule.saved()), ""
@@ -435,7 +444,7 @@ class _FiltersPage:
         self.show()
 
     def histogram(self, rule: _Rule, kept: pd.Series) -> go.Figure:
-        numbers = _numbers(self.cells.table, rule.feature)
+        numbers = _numbers(self.table, rule.feature)
         finite = np.isfinite(numbers)
         marked = kept.to_numpy(dtype=bool)
         fig = go.Figure()
