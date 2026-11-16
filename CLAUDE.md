@@ -12,8 +12,7 @@ Code shared between notebooks lives in the `fouri` package, `src/fouri/`.
 Further guidance is read on demand: a subdirectory's `CLAUDE.md` when a file under that directory is read, a
 file in `.claude/rules/` when a file matching its `paths` list is read.
 
-- `src/fouri/app/CLAUDE.md`: lab install, update, `fouri-shortcuts`, the icons, the shortcuts workflow in
-  `.github/workflows/`, the Experiment page
+- `src/fouri/app/CLAUDE.md`: lab install, update, `fouri-shortcuts`, the icons, the Experiment page
 - `src/fouri/viewers/CLAUDE.md`: the napari editors
 - `.claude/rules/skip-rules.md`: each step's skip and refuse rules, `fouri.status`
 - `.claude/rules/filters-labels.md`: the saved filter and label rules, Build cell table's filters and labels,
@@ -254,7 +253,7 @@ does, the embedding keys (`run_key`) and the `app.embedding` format are in `.cla
 - Messages and bars go through `fouri.report` (`say`, `say_skipped`, `progress`), never `print` or tqdm directly:
   after `report.report_to(path)` (the app, when it starts a step) they are written to that file as JSON lines
   (message; bar open, move, close with its parent bar; `report.finished` at the end) instead of printed.
-- `.gitignore` ignores every dotfile except `.gitignore`, `.gitattributes`, `.python-version`, `.github/` and
+- `.gitignore` ignores every dotfile except `.gitignore`, `.gitattributes`, `.python-version` and
   `.claude/rules/` (the rest of `.claude/` stays ignored), so a new dot-folder (e.g. `.vscode/`) is not committed
   unless that rule changes.
 

@@ -47,15 +47,6 @@ the `.ico` with Pillow) is copied into the bundle's `Contents/Resources/` and na
 and is the Dock icon of the app opened from the bundle; `fouri.app.main` sets no icon on macOS.
 `fouri.app.shortcuts.icon_file` gives this system's file, found from `fouri/app/`'s own directory.
 
-`.github/workflows/shortcuts.yml` runs the install steps, `fouri-shortcuts` and the update steps on GitHub's
-`windows-latest` and `macos-latest` runners, one job each, and opens the app from the Desktop shortcut. A push to any
-branch that changes `src/fouri/app/shortcuts.py`, `src/fouri/app/__init__.py`, `pyproject.toml`, `uv.lock` or the
-workflow file starts the workflow, as does Run workflow in the repository's Actions tab (`workflow_dispatch`, offered
-once the workflow is on `main`); each job clones the pushed branch from GitHub. The workflow's runs are read in the Actions tab or with
-`gh run list --workflow shortcuts.yml` and `gh run view <run id>`; each job's screenshots, of the Desktop before the app
-opens and of the open app, are the run's artifact `screenshot-windows` or `screenshot-macos`, downloaded from the run's
-page or with `gh run download <run id>`.
-
 ## Experiment page
 
 - New experiment (`fouri.app.wells.new_config`) writes experiment.json in a results folder, which it creates
