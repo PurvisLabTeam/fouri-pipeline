@@ -41,9 +41,9 @@ def build_fullest_df(exp):
             index=df.index,
         )
         frames.append(pd.concat([df, meta_df], axis=1))
-        say(f"Well {well}: {len(frames[-1])} cells")
+        say(f"Well {well}: {len(frames[-1]):,} cells")
     fullest_df = pd.concat(frames, ignore_index=True)
-    say(f"{len(fullest_df)} cells in {len(frames)} wells")
+    say(f"{len(fullest_df):,} cells in {len(frames)} wells")
     fullest_df = fullest_df.drop(columns="Unnamed: 0", errors="ignore")
     fullest_df = fullest_df.astype({col: str for col in metadata_obs_columns(exp) if col != "sample_ID"})
     fullest_df["sample_ID"] = fullest_df["sample_ID"].astype("category")
