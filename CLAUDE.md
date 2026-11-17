@@ -219,8 +219,7 @@ does, the embedding keys (`run_key`) and the `app.embedding` format are in `.cla
 
 - **UI strings (labels, tooltips, errors, logs):** Target audience is wet-lab scientists. State only what is
   shown, what was computed, or what a control does using standard scientific terms ("Segment nuclei",
-  "Variance explained by batch", "Computed for N of M cells"). A message printed by `fouri` that stops a
-  step says what to do next.
+  "Variance explained by batch", "Computed for N of M cells").
 - **UI bans:**
   - Never explain internal software mechanics in UI text unless the user must take action on it.
   - No promotional/chatty phrases ("whenever you want", "never hold up a run", "Tip:").
