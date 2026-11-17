@@ -97,6 +97,7 @@ def make_embeddings(
     samples: Sequence[int] | None = None,
     ranking_k: int = 100,
     seed: int = 42,
+    values: str = "original",
     cells_per_sample: int = 2000,
     subsample_seed: int = 42,
     overwrite: bool = False,
@@ -116,7 +117,9 @@ def make_embeddings(
     grid = [
         Run(Method(run["method"]), int(run["dims"]), int(run["top_n"]), dict(run.get("settings", {}))) for run in runs
     ]
-    return embed_grid(exp, grid, picked, samples=samples, ranking_k=ranking_k, seed=seed, n_workers=n_workers)
+    return embed_grid(
+        exp, grid, picked, samples=samples, ranking_k=ranking_k, seed=seed, n_workers=n_workers, values=values
+    )
 
 
 def step_function(step: Step) -> Callable[..., Any]:

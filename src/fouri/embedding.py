@@ -16,7 +16,7 @@ from delve import feature_select
 from sketchKH import sketch
 
 from fouri.config import Experiment
-from fouri.io import adata_path, adata_sub_path, written_whole
+from fouri.io import COMBAT_LAYER, adata_path, adata_sub_path, written_whole
 from fouri.parallel import Dropped, Failed, check_results, parallel_map
 from fouri.report import say
 
@@ -58,15 +58,21 @@ def subsample(exp: Experiment, cells_per_sample: int = 2000, seed: int = 42) -> 
 
 
 def rank_features(
-    adata: ad.AnnData, features: Sequence[str], samples: Sequence[int] | None = None, k: int = 100
+    adata: ad.AnnData,
+    features: Sequence[str],
+    samples: Sequence[int] | None = None,
+    k: int = 100,
+    values: str = "original",
 ) -> pd.Series:
     """@TODO."""
     _check_features(adata, features)
-    cells = adata
-    if samples is not None:
-        cells = adata[_sample_mask(adata, samples)]
+    if values == "combat":
+        _check_corrected(adata, samples)
+    matrix = _values(adata, values)[_sample_mask(adata, samples)]
+    if values == "combat":
+        matrix = matrix[_has_values(matrix)]
     selected_features = feature_select(
-        cells.X, feature_names=adata.var_names.to_numpy(), dyn_feats=features, k=k, n_jobs=-1
+        matrix, feature_names=adata.var_names.to_numpy(), dyn_feats=features, k=k, n_jobs=-1
     )
     return pd.Series(selected_features["DELVE"], name="score")
 
@@ -80,6 +86,7 @@ def embed(
     dims: int = 3,
     settings: Mapping[str, typing.Any] | None = None,
     seed: int = 42,
+    values: str = "original",
 ) -> npt.NDArray[np.float64]:
     if dims not in (2, 3):
         raise ValueError(f"Invalid number of dimensions: {dims}. Pick either 2 or 3.")
@@ -87,8 +94,15 @@ def embed(
     path = Path(path)
     adata = ad.read_h5ad(path)
     _check_features(adata, features)
+    if values == "combat":
+        _check_corrected(adata, samples)
     mask = _sample_mask(adata, samples)
-    selected = np.asarray(adata[mask, features].X)
+    columns = adata.var_names.get_indexer(pd.Index(features))
+    selected = _values(adata, values)[np.ix_(mask, columns)]
+    rows = np.flatnonzero(mask)
+    if values == "combat":
+        kept = _has_values(selected)
+        selected, rows = selected[kept], rows[kept]
 
     settings = settings if settings is not None else {}
     match method:
@@ -115,7 +129,7 @@ def embed(
         results = model.fit_transform(selected)
 
     final = np.full((adata.n_obs, dims), np.nan)
-    final[mask] = results
+    final[rows] = results
     return final
 
 
@@ -136,6 +150,40 @@ def _sample_mask(adata: ad.AnnData, samples: Sequence[int] | None) -> npt.NDArra
     if not np.any(cells):
         raise ValueError(f"Selecting on the following samples gave 0 cells: {', '.join(map(str, samples))}")
     return cells
+
+
+def _values(adata: ad.AnnData, values: str) -> npt.NDArray[np.float64]:
+    if values == "original":
+        return np.asarray(adata.X, dtype=np.float64)
+    elif values == "combat":
+        if COMBAT_LAYER not in adata.layers:
+            raise ValueError(
+                "The subsample has no ComBat-corrected values. Run Batch effects or embed the original values."
+            )
+        return np.asarray(adata.layers[COMBAT_LAYER], dtype=np.float64)
+    else:
+        raise ValueError(f"Unrecognized value type: {values}. Must be one of 'original' or 'combat'.")
+
+
+def _check_corrected(adata: ad.AnnData, samples: Sequence[int] | None) -> None:
+    has_values = _has_values(_values(adata, "combat"))
+    chosen = _sample_mask(adata, samples)
+    if has_values[chosen].any():
+        return
+    sample_ids = adata.obs["sample_ID"].to_numpy()
+    with_values = sorted({int(sample) for sample in sample_ids[has_values]})
+    if not with_values:
+        raise ValueError("No cell of the subsample has ComBat-corrected values. Embed the original values.")
+    empty = sorted({int(sample) for sample in sample_ids[chosen]})
+    raise ValueError(
+        f"No cell of sample{'s' if len(empty) > 1 else ''} {', '.join(map(str, empty))} has ComBat-corrected "
+        f"values. Samples with corrected values: {', '.join(map(str, with_values))}. Choose among them, or embed "
+        "the original values."
+    )
+
+
+def _has_values(matrix: npt.NDArray[np.float64]) -> npt.NDArray[np.bool]:
+    return ~np.isnan(matrix).any(axis=1)
 
 
 @dataclass(frozen=True)
@@ -170,11 +218,16 @@ def embed_grid(
     ranking_k: int = 100,
     seed: int = 42,
     n_workers: int | None = None,
+    values: str = "original",
 ) -> list[str]:
     """@TODO."""
     path = adata_sub_path(exp)
     adata = ad.read_h5ad(path)
-    ranking = rank_features(adata, picked, samples=samples, k=ranking_k)
+    ranking = rank_features(adata, picked, samples=samples, k=ranking_k, values=values)
+    if values == "combat":
+        left_out = int((~_has_values(_values(adata, values)[_sample_mask(adata, samples)])).sum())
+        if left_out:
+            say(f"Left out, with no corrected values: {left_out:,} cells.")
     picked_set = set(picked)
     order = [feature for feature in ranking.index if feature in picked_set]
 
@@ -187,7 +240,7 @@ def embed_grid(
         )
 
     coordinates = parallel_map(
-        function=functools.partial(_embed_job, path=path, samples=samples, seed=seed),
+        function=functools.partial(_embed_job, path=path, samples=samples, seed=seed, values=values),
         items=[(run, order[: run.top_n]) for run in runs],
         desc="Embedding",
         unit="run",
@@ -212,6 +265,7 @@ def embed_grid(
             "samples": used_samples,
             "ranking_k": ranking_k,
             "seed": seed,
+            "values": values,
             "features": features,
             "scores": ranking[features].to_numpy(),
         }
@@ -239,10 +293,12 @@ def run_key(run: Run) -> str:
 
 
 def _embed_job(
-    job: tuple[Run, list[str]], path: Path, samples: Sequence[int] | None, seed: int
+    job: tuple[Run, list[str]], path: Path, samples: Sequence[int] | None, seed: int, values: str
 ) -> npt.NDArray[np.float64]:
     run, features = job
-    return embed(path, run.method, features, samples=samples, dims=run.dims, settings=run.settings, seed=seed)
+    return embed(
+        path, run.method, features, samples=samples, dims=run.dims, settings=run.settings, seed=seed, values=values
+    )
 
 
 def _free_key(adata: ad.AnnData, key: str, record: Mapping[str, typing.Any]) -> str:
@@ -260,4 +316,5 @@ def _same_inputs(stored: Mapping[str, typing.Any], record: Mapping[str, typing.A
         and [int(sample) for sample in stored["samples"]] == list(record["samples"])
         and int(stored["ranking_k"]) == record["ranking_k"]
         and int(stored["seed"]) == record["seed"]
+        and str(stored.get("values", "original")) == record["values"]
     )
