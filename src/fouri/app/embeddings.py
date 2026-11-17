@@ -23,6 +23,8 @@ from fouri.parallel import worker_count
 
 RECORDS = "embeddings"
 SUBSAMPLE = "subsample"
+ORIGINAL, COMBAT = "original", "combat"
+VALUES_NAMES = {ORIGINAL: "Original", COMBAT: "ComBat-corrected"}
 SHORTEST, LONGEST = 0.2, 3.0
 
 OLD_08 = [
@@ -289,6 +291,7 @@ def embedding_settings(exp: Experiment) -> dict[str, Any] | None:
         "samples": list(setup["samples"]),
         "ranking_k": setup["ranking_k"],
         "seed": setup["seed"],
+        "values": setup["values"],
     }
 
 
@@ -361,6 +364,7 @@ def record_rows(adata: ad.AnnData, key: str) -> list[tuple[str, str]]:
     rows += [
         ("Picked features", _joined(record["picked"])),
         ("Samples", _joined(int(sample) for sample in record["samples"])),
+        ("Values", VALUES_NAMES.get(str(record.get("values", ORIGINAL)), str(record.get("values")))),
         ("Ranking k", str(int(record["ranking_k"]))),
         ("Seed", str(int(record["seed"]))),
         ("Subsample seed", str(int(adata.uns[SUBSAMPLE]["seed"]))),

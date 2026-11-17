@@ -43,6 +43,7 @@ STEP_NAMES = {
     Step.ARTIFACTS: "Find artifacts",
     Step.MEASURE: "Measure cells",
     Step.TABLE: "Build cell table",
+    Step.BATCH: "Batch effects",
     Step.EMBEDDING: "Embedding",
     Step.EXPORT: "Export",
 }
@@ -144,6 +145,10 @@ def step_function(step: Step) -> Callable[..., Any]:
         from fouri.measure import measure_wells
 
         return measure_wells
+    if step is Step.BATCH:
+        from fouri.batch import correct_batches
+
+        return correct_batches
     if step is Step.EXPORT:
         from fouri.export import export_cells
 

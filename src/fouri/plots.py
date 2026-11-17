@@ -24,6 +24,7 @@ BAND_COLOR = "rgba(29, 27, 44, 0.07)"  # between Otsu and the valley, a faint ti
 # one color per group (treatment, sample, label ...) in an embedding, in turn: the app's colors
 GROUP_COLORS = ["#7C3AED", "#0F9E8E", "#DB2777", "#2563EB", "#D97706", "#059669", "#9333EA", "#0891B2"]
 VALUE_SCALE = "Viridis"  # cells colored by a number
+NO_VALUE_COLOR = "#C9C6D6"
 
 
 def plot_threshold_histogram(
@@ -143,7 +144,9 @@ def plot_threshold_histogram(
     return fig
 
 
-def plot_embedding(adata: ad.AnnData, key: str, color_by: str, *, title: str | None = None) -> go.Figure:
+def plot_embedding(
+    adata: ad.AnnData, key: str, color_by: str, *, title: str | None = None, layer: str | None = None
+) -> go.Figure:
     """One embedding's cells in 2D or 3D, colored by a measurement or a column describing them.
 
     Cells without coordinates (samples the embedding left out) are not drawn. A measurement, or
@@ -179,6 +182,8 @@ def plot_embedding(adata: ad.AnnData, key: str, color_by: str, *, title: str | N
         raise ValueError(
             f"Cells can't be colored by {color_by}: it is neither a measurement nor a column describing the cells."
         )
+    if layer is not None and not is_measurement:
+        raise ValueError(f"Only a measurement has corrected values; {color_by} is a column describing the cells.")
 
     coords = np.asarray(adata.obsm[key], dtype=np.float64)
     drawn = ~np.isnan(coords).any(axis=1)
@@ -197,29 +202,48 @@ def plot_embedding(adata: ad.AnnData, key: str, color_by: str, *, title: str | N
     fig = go.Figure()
     column = None if is_measurement else adata.obs[color_by][drawn]
     if column is None or (pd.api.types.is_numeric_dtype(column) and not isinstance(column.dtype, pd.CategoricalDtype)):
-        if column is None:
+        rows: npt.NDArray[np.bool_] | slice = slice(None)
+        if column is None and layer is not None:
+            values = np.asarray(adata[drawn, color_by].layers[layer], dtype=np.float64).ravel()
+            scale_title = "corrected z-score"
+            has_value = ~np.isnan(values)
+            if not has_value.all():
+                fig.add_trace(
+                    points(
+                        ~has_value,
+                        name="No corrected value",
+                        marker={"size": marker_size, "color": NO_VALUE_COLOR, "opacity": 0.8},
+                        hovertemplate=f"{color_by}: no corrected value<extra></extra>",
+                    )
+                )
+                fig.update_layout(
+                    legend={"orientation": "h", "y": 1.02, "yanchor": "bottom", "x": 1, "xanchor": "right"}
+                )
+                rows, values = has_value, values[has_value]
+        elif column is None:
             values = np.asarray(adata[drawn, color_by].X, dtype=np.float64).ravel()
             scale_title = "z-score"  # measurements are standardised in the file
         else:
             values = column.to_numpy(dtype=np.float64)
             scale_title = color_by
-        low, high = np.nanpercentile(values, [1, 99])
-        fig.add_trace(
-            points(
-                slice(None),
-                name=color_by,
-                marker={
-                    "size": marker_size,
-                    "color": values,
-                    "colorscale": VALUE_SCALE,
-                    "cmin": float(low),
-                    "cmax": float(high),
-                    "colorbar": {"title": {"text": scale_title}},
-                    "opacity": 0.8,
-                },
-                hovertemplate=f"{color_by}: %{{marker.color:.2f}}<extra></extra>",
+        if layer is None or values.size:
+            low, high = np.nanpercentile(values, [1, 99])
+            fig.add_trace(
+                points(
+                    rows,
+                    name=color_by,
+                    marker={
+                        "size": marker_size,
+                        "color": values,
+                        "colorscale": VALUE_SCALE,
+                        "cmin": float(low),
+                        "cmax": float(high),
+                        "colorbar": {"title": {"text": scale_title}},
+                        "opacity": 0.8,
+                    },
+                    hovertemplate=f"{color_by}: %{{marker.color:.2f}}<extra></extra>",
+                )
             )
-        )
     else:
         labels = column.astype(str).to_numpy()
         if isinstance(column.dtype, pd.CategoricalDtype):  # keep the column's own order, e.g. sample 2 before 10

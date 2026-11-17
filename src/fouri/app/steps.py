@@ -42,6 +42,7 @@ SETTINGS: dict[Step, list[Setting]] = {
         Setting("edge_margin", "Edge margin (px)", "number"),
     ],
     Step.TABLE: [],
+    Step.BATCH: [],
     Step.EMBEDDING: [
         Setting("cells_per_sample", "Cells per sample", "number"),
         Setting("subsample_seed", "Subsample seed", "number"),
@@ -55,6 +56,7 @@ DESCRIPTIONS = {
     Step.ARTIFACTS: "Mask artifacts in every channel; for now every mask is empty",
     Step.MEASURE: "Measure every cell in every channel; exclude cells touching an image edge or a blank area",
     Step.TABLE: "Combine the wells, add derived features, filters and labels, save the AnnData",
+    Step.BATCH: "Measure batch effects within conditions and correct them with ComBat",
     Step.EMBEDDING: "Subsample each sample and compute the embeddings set up on the Embedding page",
 }
 

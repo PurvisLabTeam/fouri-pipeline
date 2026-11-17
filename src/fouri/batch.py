@@ -308,7 +308,7 @@ def correct_batches(
     )
     obs = cast(pd.DataFrame, cells.obs)
     included_obs = obs[included]
-    keep = list(keep) if keep is not None else _default_keep(exp)
+    keep = list(keep) if keep is not None else default_keep(exp)
 
     batches = batch_labels(included_obs, batch)
     conditions = condition_labels(included_obs, keep)
@@ -550,7 +550,7 @@ def _shuffled_batches(conditions: pd.Series, batches: pd.Series) -> pd.Series:
     return shuffled
 
 
-def _default_keep(exp: Experiment) -> list[str]:
+def default_keep(exp: Experiment) -> list[str]:
     return [
         col_obs
         for col, col_obs in zip(exp.metadata_columns, metadata_obs_columns(exp), strict=True)

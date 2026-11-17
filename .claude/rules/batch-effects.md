@@ -1,6 +1,8 @@
 ---
 paths:
   - "src/fouri/batch.py"
+  - "src/fouri/app/batches.py"
+  - "src/fouri/app/pages/batch.py"
 ---
 
 # Batch effects
@@ -12,7 +14,7 @@ on the included cells (every cell when the table has no `included` column).
 
 - Batches and conditions: `batch_labels` gives each cell's batch, `well`, `plate row` or `plate column` (from
   `well`), or any `.obs` column. `condition_labels` joins the `keep` columns' values with ` · `; `keep=None` means
-  the condition columns with a value in at least one well, and an empty `keep` puts every cell in one condition,
+  `default_keep(exp)`, the condition columns with a value in at least one well, and an empty `keep` puts every cell in one condition,
   `all cells`. A batch or keep column `.obs` lacks is refused.
 - Used conditions: a condition with cells in two or more batches is used (`used_conditions`); the others are
   excluded from the metrics and the correction and named with their cell counts. Batches linked through used
@@ -60,3 +62,40 @@ on the included cells (every cell when the table has no `included` column).
   feature; the done message states "on log intensities" when `log_transformed` is not empty. Build cell table
   writes `standard_adata.h5ad` again without either and removes the layer from `standard_adata_sub.h5ad`; Batch
   effects then runs again.
+
+## Set-up, step and page
+
+- `app.batch_effects` in experiment.json: `batch` (text: `well`, `plate row`, `plate column` or an `.obs` metadata
+  column), `keep` (a list of `.obs` metadata column names) and `log_intensities` (true or false). The Batch effects
+  page saves the set-up through `fouri.app.batches.save_batch_setup`, every other key unchanged;
+  `saved_batch_setup` reads the set-up, None when missing, and raises `ValueError` for a value that is not a
+  mapping, lacks a key or holds a key of the wrong type.
+- The step: `Step.BATCH`, `batch` in `python -m fouri.run`, Batch effects on the Run page (card 7, between Build
+  cell table and Embedding). The card has no settings rows: the card states the saved set-up in one line
+  (`batch_setup_line`), cannot be ticked without a readable set-up, and sends `batch`, `keep` and `log_intensities`,
+  read from experiment.json when Run is clicked, as the step's settings. `fouri.status.experiment_status` gives
+  Batch effects as complete, with the note `by {batch}` from `.uns["batch_effects"]["batch"]`, when
+  `standard_adata.h5ad` holds `layers["combat"]`, and as not started otherwise.
+- Choices: Batch offers `well`, `plate row`, `plate column`, then the metadata columns that are not condition
+  columns, under their `.obs` names, except `sample_ID` (`batch_choices`); Biology to keep offers the condition
+  columns among the metadata columns, under their `.obs` names, except the chosen batch (`keep_choices`). With no saved set-up the page starts at `well`, `default_keep(exp)` and
+  Log-transform intensities on; a saved batch no longer offered starts at `well`, and a saved keep column no longer
+  offered is dropped, the page's set-up then differing from the saved one.
+- Live numbers (`live_numbers`, run off the page's thread; a result for an earlier choice is discarded): the cells
+  of `fouri.app.cells.load_cells` kept by `fouri.app.rules.kept_cells`, and the columns of `Cells.features`
+  z-scored with the mean and sample SD of those cells, a column with an empty or infinite value in a kept cell or a
+  single value among them excluded, as `build_adata` makes `.X`; then `batch_labels`, `condition_labels`,
+  `conditions_in_batches`, `why_not_combat`, `condition_shares`, `uneven_conditions`, `batch_groups` and
+  `batch_metrics`. With the filters unchanged since Build cell table, and `well_list` in plate order, the live
+  numbers equal the step's saved `before` numbers. With `why_not_combat` set the page shows only the refusal.
+- Saved result (`saved_correction`: `.uns["batch_effects"]` read with h5py and `read_elem` without `.X`, every
+  text array as a list of `str`): the After card, the after bars, the after and shuffled-reference classifier
+  bars, the violins and the adjustment heatmap are shown only when the saved `batch` and `keep` equal the page's
+  set-up and `log_transformed` is not empty exactly when Log-transform intensities is on (`matches`); otherwise
+  the After card names the saved correction's set-up, or, with no record, states that the step has not run.
+- Figures (plotly, features named by their `Cells.features` titles): variance explained by batch for the live
+  `top` 15, before and after; balanced accuracy per condition, before, after and ComBat on shuffled batches, with
+  each condition's chance; violins of the five features with the largest saved `before` share, per batch, before
+  (`.X`) and after (`layers["combat"]`), for one saved condition, at most 2,000 cells per batch (`default_rng(0)`);
+  a heatmap of the mean adjustment per batch for the 15 features with the largest mean absolute adjustment over
+  batches, on a diverging scale centered at 0.

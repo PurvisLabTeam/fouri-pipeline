@@ -17,6 +17,7 @@ from typing import Any
 from nicegui import ui
 from tqdm import tqdm
 
+from fouri.app.batches import batch_setup_line, saved_batch_setup
 from fouri.app.embeddings import embedding_settings
 from fouri.app.gpu import images_to_segment
 from fouri.app.plate import plate
@@ -69,6 +70,8 @@ LABELS_UNREADABLE = "The saved labels can't be read. Fix them on the Labels & ga
 NO_EMBEDDING_SETUP = "Set up the embeddings on the Embedding page first."
 EMBEDDING_UNREADABLE = "The embedding set-up can't be read. Save it again on the Embedding page."
 ALL_SKIPPED = "Every embedding set up is skipped. Tick some on the Embedding page."
+NO_BATCH_SETUP = "Set up batch correction on the Batch effects page first."
+BATCH_UNREADABLE = "The Batch effects set-up can't be read. Save it again on the Batch effects page."
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")  # not %a, which follows the PC's language
 
 
@@ -312,8 +315,21 @@ def _embedding_line(exp: Experiment) -> bool:
     return True
 
 
+def _batch_line(exp: Experiment) -> bool:
+    try:
+        setup = saved_batch_setup(exp)
+    except ValueError:
+        ui.label(BATCH_UNREADABLE).classes("text-xs text-negative mt-1")
+        return False
+    if setup is None:
+        ui.label(NO_BATCH_SETUP).classes("text-xs mt-1")
+        return False
+    ui.label(batch_setup_line(setup)).classes("text-xs mt-1")
+    return True
+
+
 def _tickable(step: Step) -> bool:
-    return step == Step.EMBEDDING or can_tick(step)
+    return step in (Step.BATCH, Step.EMBEDDING) or can_tick(step)
 
 
 async def _ask_cpu(images: int) -> bool:
@@ -358,6 +374,9 @@ def _step_card(
                     if not (filters_read and labels_read):
                         ticked[step] = False
                         box.disable()
+                if step == Step.BATCH and not _batch_line(exp):
+                    ticked[step] = False
+                    box.disable()
                 if step == Step.EMBEDDING and not _embedding_line(exp):
                     ticked[step] = False
                     box.disable()
@@ -492,6 +511,16 @@ def _content(exp: Experiment) -> None:
                 if not await _ask_cpu(images) or run_going():
                     return
                 on_cpu = True
+        batch_setup: dict[str, Any] | None = None
+        if Step.BATCH in chosen:
+            try:
+                batch_setup = saved_batch_setup(load_config(exp.config_path, announce=False))
+            except (OSError, ValueError) as error:
+                ui.notify(f"The run could not start: {error}", type="negative")
+                return
+            if batch_setup is None:
+                ui.notify(NO_BATCH_SETUP, type="negative")
+                return
         embedding: dict[str, Any] | None = None
         if Step.EMBEDDING in chosen:
             try:
@@ -527,6 +556,12 @@ def _content(exp: Experiment) -> None:
             table_settings = next(request for request in requests if request.step == Step.TABLE).settings
             table_settings["filters"] = filters
             table_settings["labels"] = labels
+        if batch_setup is not None:
+            next(request for request in requests if request.step == Step.BATCH).settings.update(
+                batch=batch_setup["batch"],
+                keep=list(batch_setup["keep"]),
+                log_intensities=batch_setup["log_intensities"],
+            )
         if embedding is not None:
             next(request for request in requests if request.step == Step.EMBEDDING).settings.update(embedding)
         try:

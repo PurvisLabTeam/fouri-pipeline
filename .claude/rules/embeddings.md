@@ -16,10 +16,18 @@ Loaded with the root `CLAUDE.md` when a file matching `paths` is read.
 (column names), `samples` (sample IDs), `ranking_k`, `top_n` (a list), `methods` (always both `PHATE` and
 `UMAP`, each with `dims`, empty when the method makes no run, and `settings`, a list of values per setting as
 `fouri.embedding` passes them: `knn`, `t`, `gamma`, `decay`, `n_pca`; `n_neighbors`, `min_dist`, `metric`),
-`skipped` (the `run_key` of each run unticked), `seed` and `values` (`original` until batch correction).
+`skipped` (the `run_key` of each run unticked), `seed` and `values` (`original` or `combat`). The set-up tab
+offers Values, Original or ComBat-corrected, only when `standard_adata_sub.h5ad` holds `layers["combat"]`, ranks
+the features with the choice and saves the choice; without the layer the tab saves `original`, and states so under
+Save when the saved set-up said `combat`.
 `fouri.app.embeddings.saved_setup` reads it, None when missing, and refuses one with a key missing or of the
 wrong type; `embedding_settings` turns it into what the Run page's Embedding card sends `make_embeddings`: every
-run of the set-up not skipped, `picked`, `samples`, `ranking_k` and `seed`.
+run of the set-up not skipped, `picked`, `samples`, `ranking_k`, `seed` and `values`.
+
+The view tab shows a Corrected values switch with Color by marker when the subsample holds `layers["combat"]`;
+choosing an embedding sets the switch to whether the record's `values` is `combat`, and with the switch on the
+markers are colored by their ComBat-corrected z-score (`plot_embedding`'s `layer`). The record lists Values,
+Original or ComBat-corrected (Original for a record without `values`).
 
 ## fouri.embedding
 
@@ -54,6 +62,10 @@ run of the set-up not skipped, `picked`, `samples`, `ranking_k` and `seed`.
   `values` counts as `original`); other inputs get `_2`, `_3`. `.uns["embeddings"][key]` records method, dims,
   top_n, settings, picked, the samples actually used, ranking_k, seed, values, and the features used with their
   scores.
-- `plots.plot_embedding(adata, key, color_by)`: plotly, 2D (WebGL) or 3D; a measurement or a number column
-  on a Viridis scale from the 1st to the 99th percentile, a text or category column one trace and color per
-  group (`GROUP_COLORS`, the app's).
+- `plots.plot_embedding(adata, key, color_by, *, title=None, layer=None)`: plotly, 2D (WebGL) or 3D; a
+  measurement or a number column on a Viridis scale from the 1st to the 99th percentile, a text or category column
+  one trace and color per group (`GROUP_COLORS`, the app's). With `layer`, `color_by` must be a measurement and is
+  read from that layer (a column describing the cells is refused): the cells with a value on the scale, the
+  colorbar titled `corrected z-score` and the percentiles over the cells with a value; the cells with no value, when
+  any, a trace of their own drawn first in `NO_VALUE_COLOR` (light gray), named `No corrected value`, with no
+  colorbar.

@@ -37,5 +37,5 @@ notebooks"). Per step:
   missing some measures all its rounds again.
 
 The checks run in the main process before work is handed out; `report.say_skipped` prints what was skipped.
-`fouri.status` (`step_status` per well, `experiment_status` for 07 and 08) applies the same
+`fouri.status` (`step_status` per well, `experiment_status` for 07, Batch effects and 08) applies the same
 rules, read from disk, for the app's Status page; change it with a step's skip rule.

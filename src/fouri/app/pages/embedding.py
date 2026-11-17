@@ -15,8 +15,10 @@ from nicegui.events import ValueChangeEventArguments
 
 from fouri.app.cells import CONDITION, Cells, add_groups, load_cells
 from fouri.app.embeddings import (
+    COMBAT,
     DEFAULT_SETUP,
     LONGEST,
+    ORIGINAL,
     RECORDS,
     SETTING_LABELS,
     SHORTEST,
@@ -44,7 +46,7 @@ from fouri.app.steps import default
 from fouri.app.theme import on_white_panel, restyle
 from fouri.config import Experiment
 from fouri.embedding import Method, Run, rank_features, run_key
-from fouri.io import adata_sub_path, read_info_file
+from fouri.io import COMBAT_LAYER, adata_sub_path, read_info_file
 from fouri.parallel import error_in_words
 from fouri.plots import plot_embedding
 from fouri.status import Step
@@ -59,6 +61,15 @@ PLOT_MARGIN = {"l": 40, "r": 20, "t": 50, "b": 40}
 WHITE_PANEL = "background: #FFFFFF; border-radius: 12px"
 NO_PANEL = "background: transparent"
 SCALE_NOTE = "Markers are colored by their z-score; the color scale runs from the 1st to the 99th percentile."
+CORRECTED_NOTE = (
+    "Markers are colored by their ComBat-corrected z-score; the color scale runs from the 1st to the 99th "
+    "percentile. Cells with no corrected value are gray."
+)
+VALUES_CHOICES = {ORIGINAL: "Original", COMBAT: "ComBat-corrected"}
+VALUES_GONE = (
+    "The saved set-up uses ComBat-corrected values, which the subsample no longer has. Saving uses the original "
+    "values."
+)
 
 VIEW_TAB = "View embeddings"
 SETUP_TAB = "Set up an embedding"
@@ -116,6 +127,7 @@ class _View:
     figure: go.Figure | None = None
     dark: bool = False
     quiet: bool = False
+    corrected: bool = False
 
 
 def _empty_state() -> None:
@@ -131,8 +143,13 @@ def _plot_config(key: str) -> dict[str, Any]:
     return {"displaylogo": False, "toImageButtonOptions": {"format": "png", "filename": key, "scale": 2}}
 
 
+def _made_on_combat(adata: ad.AnnData, key: str) -> bool:
+    return str(adata.uns[RECORDS][key].get("values", ORIGINAL)) == COMBAT
+
+
 def _view_tab(adata: ad.AnnData, exp: Experiment) -> None:
     keys = embedding_keys(adata)
+    has_combat = COMBAT_LAYER in adata.layers
     obs = cast(pd.DataFrame, adata.obs).copy()
     groups = add_groups(obs, exp)
     adata.obs = obs
@@ -146,6 +163,7 @@ def _view_tab(adata: ad.AnnData, exp: Experiment) -> None:
         measure=next(iter(menu[first_marker])),
         group=CONDITION if CONDITION in groups else groups[0],
     )
+    view.corrected = has_combat and _made_on_combat(adata, view.key)
 
     with ui.row().classes("w-full no-wrap items-start gap-6"):
         with ui.column().classes("w-80 shrink-0 gap-2"):
@@ -160,6 +178,8 @@ def _view_tab(adata: ad.AnnData, exp: Experiment) -> None:
                     "w-7/12"
                 )
                 measure_box = ui.select(list(menu[view.marker]), value=view.measure, label="measure").classes("w-5/12")
+            corrected_box = ui.switch("Corrected values", value=view.corrected, on_change=lambda e: correct(e.value))
+            corrected_box.set_visibility(has_combat)
             group_box = ui.select(groups, value=view.group, label="Group").classes("w-full")
             note = ui.label(SCALE_NOTE).classes("text-xs muted")
 
@@ -192,6 +212,7 @@ def _view_tab(adata: ad.AnnData, exp: Experiment) -> None:
 
     def show_controls() -> None:
         marker_row.set_visibility(view.mode == MARKER)
+        corrected_box.set_visibility(has_combat and view.mode == MARKER)
         note.set_visibility(view.mode == MARKER)
         group_box.set_visibility(view.mode == GROUP)
         shape_box.set_visibility(_dims(adata, view.key) == 3)
@@ -206,7 +227,9 @@ def _view_tab(adata: ad.AnnData, exp: Experiment) -> None:
 
     def draw() -> None:
         color = menu[view.marker][view.measure] if view.mode == MARKER else view.group
-        fig = plot_embedding(adata, view.key, color)
+        layer = COMBAT_LAYER if has_combat and view.mode == MARKER and view.corrected else None
+        note.text = CORRECTED_NOTE if layer is not None else SCALE_NOTE
+        fig = plot_embedding(adata, view.key, color, layer=layer)
         fig.update_layout(margin=PLOT_MARGIN)
         if _dims(adata, view.key) == 3:
             box_shape(fig, *view.shape)
@@ -248,9 +271,17 @@ def _view_tab(adata: ad.AnnData, exp: Experiment) -> None:
         if not key or key == view.key:
             return
         view.key = key
+        view.corrected = has_combat and _made_on_combat(adata, key)
+        corrected_box.value = view.corrected
         set_sliders(CUBE)
         show_controls()
         show_record()
+        draw()
+
+    def correct(on: bool | None) -> None:
+        if on is None or bool(on) == view.corrected:
+            return
+        view.corrected = bool(on)
         draw()
 
     def color_by(mode: str | None) -> None:
@@ -366,6 +397,10 @@ class _SetupTab:
             if missing_features or missing_samples:
                 self.left_out = _left_out(missing_features, missing_samples, self.where)
         self.setup = setup
+        self.has_combat = adata is not None and COMBAT_LAYER in adata.layers
+        saved_values = str(setup.get("values", ORIGINAL))
+        self.values = saved_values if self.has_combat and saved_values in VALUES_CHOICES else ORIGINAL
+        self.values_gone = saved is not None and saved_values == COMBAT and not self.has_combat
         self.unticked: set[str] = set(setup["skipped"])
         self.dims = {method: set(setup["methods"][method.value]["dims"]) for method in Method}
         self.k: int | None = setup["ranking_k"]
@@ -438,11 +473,16 @@ class _SetupTab:
                 self.seed_box.without_auto_validation().classes("w-28")
                 self.count_line = ui.label().classes("text-sm")
                 ui.button("Save set-up", icon="save", on_click=self.save)
+                self.values_gone_line = ui.label(VALUES_GONE).classes("text-sm text-warning")
+                self.values_gone_line.set_visibility(self.values_gone)
 
             with ui.column().classes("grow min-w-0 gap-2"):
                 if self.adata is None:
                     ui.label(NO_SUBSAMPLE).classes("text-sm muted")
                 else:
+                    if self.has_combat:
+                        ui.label("Values").classes(SECTION_TITLE)
+                        ui.toggle(VALUES_CHOICES, value=self.values, on_change=self.new_values)
                     ui.label(RANKING_TITLE).classes(SECTION_TITLE)
                     with ui.row().classes("items-center gap-2"):
                         self.spinner = ui.spinner(size="sm")
@@ -522,6 +562,12 @@ class _SetupTab:
 
     async def new_k(self) -> None:
         self.check_k()
+        await self.rank()
+
+    async def new_values(self, e: ValueChangeEventArguments[Any]) -> None:
+        if e.value is None or e.value == self.values:
+            return
+        self.values = str(e.value)
         await self.rank()
 
     def new_seed(self) -> None:
@@ -646,7 +692,7 @@ class _SetupTab:
                 self.spinner.visible = True
                 try:
                     scores = await run.io_bound(
-                        rank_features, self.adata, list(self.picked), list(self.picked_samples), k
+                        rank_features, self.adata, list(self.picked), list(self.picked_samples), k, self.values
                     )
                 except Exception as error:
                     if asked == self.wanted:
@@ -712,7 +758,7 @@ class _SetupTab:
             "methods": self.chosen_methods(),
             "skipped": [key for key in self.keys if key in self.unticked],
             "seed": self.seed,
-            "values": "original",
+            "values": self.values if self.has_combat else ORIGINAL,
         }
         try:
             self.exp = save_setup(self.exp, setup)
@@ -721,6 +767,7 @@ class _SetupTab:
             return
         self.unreadable_line.set_visibility(False)
         self.left_out_line.set_visibility(False)
+        self.values_gone_line.set_visibility(False)
         ticked = len(self.ticked())
         made = _count(ticked, "embedding")
         ui.notify(f"Saved the embedding set-up: {made}, {len(self.keys) - ticked} skipped.", type="positive")

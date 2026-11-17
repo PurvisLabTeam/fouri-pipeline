@@ -14,11 +14,13 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+import h5py
 import numpy as np
 import pandas as pd
 
 from fouri.config import Experiment
 from fouri.io import (
+    COMBAT_LAYER,
     adata_path,
     adata_sub_path,
     cell_data_path,
@@ -42,6 +44,7 @@ class Step(StrEnum):
     ARTIFACTS = "artifacts"
     MEASURE = "measure"
     TABLE = "table"
+    BATCH = "batch"
     EMBEDDING = "embedding"
     EXPORT = "export"
 
@@ -90,7 +93,7 @@ def step_status(exp: Experiment, step: Step | str, wells: Sequence[str] | None =
 
 def experiment_status(exp: Experiment) -> dict[Step, OutputStatus]:
     """Return the state of the experiment-wide steps: the cell table and the embeddings."""
-    return {Step.TABLE: _table(exp), Step.EMBEDDING: _embedding(exp)}
+    return {Step.TABLE: _table(exp), Step.BATCH: _batch(exp), Step.EMBEDDING: _embedding(exp)}
 
 
 def _state(done: int, total: int) -> State:
@@ -205,6 +208,29 @@ def _table(exp: Experiment) -> OutputStatus:
     if not path.exists():
         return OutputStatus(State.NOT_STARTED, path, None)
     return OutputStatus(State.COMPLETE, path, _updated(path))
+
+
+def _saved_batch(file: h5py.File) -> str | None:
+    try:
+        entry = file["uns/batch_effects/batch"]
+        if not isinstance(entry, h5py.Dataset):
+            return None
+        batch = entry.asstr()[()]
+    except (KeyError, TypeError, ValueError, OSError):
+        return None
+    return batch if isinstance(batch, str) and batch else None
+
+
+def _batch(exp: Experiment) -> OutputStatus:
+    path = adata_path(exp)
+    if not path.exists():
+        return OutputStatus(State.NOT_STARTED, path, None)
+    with h5py.File(path, "r") as file:
+        layers = file.get("layers")
+        if not isinstance(layers, h5py.Group) or COMBAT_LAYER not in layers:
+            return OutputStatus(State.NOT_STARTED, path, None)
+        batch = _saved_batch(file)
+    return OutputStatus(State.COMPLETE, path, _updated(path), f"by {batch}" if batch else "")
 
 
 def _embedding(exp: Experiment) -> OutputStatus:
