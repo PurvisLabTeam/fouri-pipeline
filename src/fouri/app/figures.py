@@ -11,6 +11,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 from fouri.app.cells import WELL, Cells
+from fouri.features import DEFAULT_SDS
 from fouri.metadata import natural_key
 from fouri.plots import FONT, GROUP_COLORS, VALUE_SCALE
 
@@ -110,7 +111,7 @@ def cells_line(
     at_or_below: int = 0,
     outliers: int = 0,
     beyond_sds: int = 0,
-    sds: float = 3,
+    sds: float = DEFAULT_SDS,
 ) -> str:
     count = f"{drawn:,} of {total:,} cells" if drawn < total else _plural(total, "cell")
     hidden = []

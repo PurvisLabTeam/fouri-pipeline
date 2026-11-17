@@ -41,7 +41,7 @@ from fouri.app.shell import empty_state, page_frame
 from fouri.app.state import STATE
 from fouri.app.theme import restyle
 from fouri.config import Experiment
-from fouri.features import Threshold, middle_values, suggest_cutoffs
+from fouri.features import DEFAULT_SDS, Threshold, middle_values, suggest_cutoffs
 from fouri.io import read_info_file
 from fouri.labels import LabelRule, label_cells, saved_labels
 from fouri.plots import plot_threshold_histogram
@@ -78,7 +78,6 @@ NEW_FEATURE = "nuc_area"
 NEW_CLASSES = ("low", "high")
 THREE_CLASSES = ("low", "mid", "high")
 MIDDLE_CLASS = "mid"
-NEW_SDS = 3.0
 NEW_GATE = "gate {number}"
 OPENING_MEASURE = MEASURES["nuc_mean"]
 SIGNIFICANT_DIGITS = 3
@@ -314,7 +313,7 @@ def _histogram(
 
 
 def _otsu(values: npt.NDArray[np.float64]) -> float | None:
-    suggestions = _suggest(values, NEW_SDS)
+    suggestions = _suggest(values, DEFAULT_SDS)
     return suggestions[Threshold.OTSU][0] if Threshold.OTSU in suggestions else None
 
 
@@ -533,7 +532,7 @@ class _LabelsPage:
             if "set_on_samples" in saved
             else list(self.samples)
         )
-        sds = _number(saved.get("sds")) if "sds" in saved else NEW_SDS
+        sds = _number(saved.get("sds")) if "sds" in saved else DEFAULT_SDS
         classes = saved.get("classes")
         threshold = _Threshold(
             feature=_text(saved.get("feature")) or None,
@@ -548,7 +547,7 @@ class _LabelsPage:
         feature = self.ratio or (
             NEW_FEATURE if NEW_FEATURE in self.cells.features else next(iter(self.cells.features), None)
         )
-        threshold = _Threshold(feature, list(self.samples), [], list(NEW_CLASSES), NEW_SDS)
+        threshold = _Threshold(feature, list(self.samples), [], list(NEW_CLASSES), DEFAULT_SDS)
         suggestions = await self.suggestions_for(threshold)
         if Threshold.OTSU in suggestions:
             threshold.cutoffs = [_rounded(suggestions[Threshold.OTSU][0])]

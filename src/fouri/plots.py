@@ -9,7 +9,7 @@ import numpy.typing as npt
 import pandas as pd
 import plotly.graph_objects as go
 
-from fouri.features import Threshold, curve_range, middle_values, suggest_cutoffs
+from fouri.features import DEFAULT_SDS, Threshold, curve_range, middle_values, suggest_cutoffs
 
 FONT = "Calibri, Carlito, sans-serif"  # Calibri on the lab PCs, its stand-in Carlito elsewhere
 BAR_COLOR = "#0F9E8E"  # teal
@@ -34,7 +34,7 @@ def plot_threshold_histogram(
     bins: int = 256,
     title: str | None = None,
     x_title: str = "pRB / RB",
-    sds: float = 3,
+    sds: float = DEFAULT_SDS,
 ) -> go.Figure:
     """Histogram of one feature with the suggested cut-offs and the chosen ones.
 

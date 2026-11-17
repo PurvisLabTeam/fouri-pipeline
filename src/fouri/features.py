@@ -5,6 +5,7 @@ from __future__ import annotations
 import warnings
 from collections.abc import Sequence
 from enum import StrEnum
+from typing import Final
 
 import numpy as np
 import numpy.typing as npt
@@ -16,6 +17,8 @@ from skimage.filters import threshold_multiotsu, threshold_otsu
 
 from fouri.io import cell_data_path
 from fouri.report import say
+
+DEFAULT_SDS: Final[float] = 3.0
 
 # column names notebook 07 has always used in fullest_df / adata.obs
 _OBS_NAMES = {"treatment_time": "treatment time"}
@@ -79,7 +82,7 @@ def threshold_labels(values: pd.Series, cutoffs: Sequence[float], classes: Seque
     raise ValueError(f"Invalid number of cutoffs: {n_cutoffs}. Use 1 or 2 values only.")
 
 
-def middle_values(values: npt.NDArray[np.float64], sds: float = 3) -> npt.NDArray[np.float64]:
+def middle_values(values: npt.NDArray[np.float64], sds: float = DEFAULT_SDS) -> npt.NDArray[np.float64]:
     z_scores = zscore(values, nan_policy="omit")
     mask = np.abs(z_scores) <= sds
     return values[mask]
@@ -92,7 +95,7 @@ def _smoothed_curve(values: npt.NDArray[np.float64]) -> tuple[npt.NDArray[np.flo
     return positions, heights
 
 
-def curve_range(values: npt.NDArray[np.float64], sds: float = 3) -> tuple[float, float]:
+def curve_range(values: npt.NDArray[np.float64], sds: float = DEFAULT_SDS) -> tuple[float, float]:
     trimmed = middle_values(values, sds)
     positions, heights = _smoothed_curve(trimmed)
     tallest = np.max(heights)
@@ -100,7 +103,7 @@ def curve_range(values: npt.NDArray[np.float64], sds: float = 3) -> tuple[float,
     return float(positions[0]), float(positions[-1])
 
 
-def suggest_cutoffs(values: npt.NDArray[np.float64], sds: float = 3) -> dict[Threshold, list[float]]:
+def suggest_cutoffs(values: npt.NDArray[np.float64], sds: float = DEFAULT_SDS) -> dict[Threshold, list[float]]:
     values = middle_values(values, sds)
 
     cutoffs = {}
