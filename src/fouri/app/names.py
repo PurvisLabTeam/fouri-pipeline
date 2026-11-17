@@ -5,10 +5,8 @@ The cell pages offer features by these names, and the plots use them as axis tit
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
 
 import pandas as pd
 
@@ -26,8 +24,6 @@ VALUE = "value"  # the one measure of a shape or derived feature
 
 # columns that number or place a cell rather than measure it
 NOT_FEATURES = frozenset({"label", *POSITION_COLUMNS})
-
-_DIGITS = re.compile(r"(\d+)")
 
 
 @dataclass(frozen=True)
@@ -120,14 +116,3 @@ def menu_order(features: dict[str, Feature], info: pd.DataFrame) -> dict[str, st
     columns = [column for measures in menu.values() for column in measures.values()]
     columns += [column for column in features if column not in columns]
     return {column: features[column].title for column in columns}
-
-
-def natural_key(value: object) -> tuple[Any, ...]:
-    """Return a sort key that puts 24h before 96h before 120h.
-
-    Runs of digits compare as numbers, coming before text at the same place, and text compares
-    without regard to case, so B9 sorts before B10 and 2 before 10.
-    """
-    parts = _DIGITS.split(str(value).casefold())
-    # split puts the digit runs at the odd places
-    return tuple((0, int(part), "") if place % 2 else (1, 0, part) for place, part in enumerate(parts) if part)

@@ -11,7 +11,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 from fouri.app.cells import WELL, Cells
-from fouri.app.names import natural_key
+from fouri.metadata import natural_key
 from fouri.plots import FONT, GROUP_COLORS, VALUE_SCALE
 
 

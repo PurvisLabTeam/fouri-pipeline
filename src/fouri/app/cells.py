@@ -13,11 +13,11 @@ from pathlib import Path
 
 import pandas as pd
 
-from fouri.app.names import Feature, describe, natural_key
+from fouri.app.names import Feature, describe
 from fouri.config import Experiment
 from fouri.features import add_derived_features, metadata_obs_columns
 from fouri.io import cell_data_path, read_info_file
-from fouri.metadata import normalize_well, plate_sort_key
+from fouri.metadata import natural_key, normalize_well, plate_sort_key
 from fouri.status import State, Step, step_status
 
 # the groups added besides the wells' metadata

@@ -14,6 +14,7 @@ Standard metadata CSV (one row per well; only ``well`` is required)::
 
 import os
 import re
+from typing import Any
 
 import pandas as pd
 
@@ -32,6 +33,7 @@ _COLUMN_ALIASES = {
 
 _WELL_RE = re.compile(r"^([A-Pa-p])0*([1-9]|1[0-9]|2[0-4])$")
 _ND2_WELL_RE = re.compile(r"Well([A-P]\d{1,2})_Channel")
+_DIGITS_RE = re.compile(r"(\d+)")
 
 
 def normalize_well(well):
@@ -239,3 +241,14 @@ def default_derived_features(info_file):
             break
     # no total DNA: 06 writes every channel's total, e.g. R0_DNA_total_nuc_protein (mean x area)
     return features
+
+
+def natural_key(value: object) -> tuple[Any, ...]:
+    """Return a sort key that puts 24h before 96h before 120h.
+
+    Runs of digits compare as numbers, coming before text at the same place, and text compares
+    without regard to case, so B9 sorts before B10 and 2 before 10.
+    """
+    parts = _DIGITS_RE.split(str(value).casefold())
+    # split puts the digit runs at the odd places
+    return tuple((0, int(part), "") if place % 2 else (1, 0, part) for place, part in enumerate(parts) if part)

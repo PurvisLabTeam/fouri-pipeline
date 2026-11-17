@@ -15,11 +15,10 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from fouri.app.cells import CONDITION_JOIN
-from fouri.app.names import natural_key
 from fouri.app.state import open_experiment
 from fouri.config import Experiment, save_config
 from fouri.embedding import EMBED_MEM_PER_WORKER, Method, Run, make_runs, run_key
-from fouri.metadata import plate_sort_key
+from fouri.metadata import natural_key, plate_sort_key
 from fouri.parallel import worker_count
 
 RECORDS = "embeddings"
