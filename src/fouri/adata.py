@@ -8,7 +8,7 @@ import pandas as pd
 
 from fouri.config import Experiment
 from fouri.features import metadata_obs_columns, standardize_columns
-from fouri.io import adata_path, fullest_df_path, read_round_table, written_whole
+from fouri.io import COMBAT_LAYER, adata_path, adata_sub_path, fullest_df_path, read_round_table, written_whole
 from fouri.metadata import config_to_table, feature_prefix
 from fouri.report import say
 
@@ -63,6 +63,14 @@ def build_adata(exp: Experiment, fullest_df: pd.DataFrame, labels: Sequence[str]
         fullest_df.to_csv(partial, index=False)
     with written_whole(ad_path) as partial:
         adata.write_h5ad(partial)
+
+    adata_sub = adata_sub_path(exp)
+    if adata_sub.exists():
+        sub = ad.read_h5ad(adata_sub)
+        if COMBAT_LAYER in sub.layers:
+            del sub.layers[COMBAT_LAYER]
+            with written_whole(adata_sub) as partial:
+                sub.write_h5ad(partial)
     say(f"Saved {adata.n_obs:,} cells and {adata.n_vars} features to {adata_path(exp)}")
     return adata
 

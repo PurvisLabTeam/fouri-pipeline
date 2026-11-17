@@ -21,4 +21,6 @@ Loaded with the root `CLAUDE.md` when a file matching `paths` is read.
   `included` column counts every cell as included. `.var` = kind (channel, shape,
   derived), round, signal, measure and acquisition from the round tables (a value differing between wells
   left empty and named); `.uns` = setup-form details, condition columns, derived formulas, plate, microscope,
-  round tables. It saves `fullest_df.csv` (no row-number column) and `standard_adata.h5ad`.
+  round tables. It saves `fullest_df.csv` (no row-number column) and `standard_adata.h5ad`, then removes
+  `layers["combat"]` from `standard_adata_sub.h5ad` when that file holds one, through `io.written_whole`, every
+  other part of the file unchanged.

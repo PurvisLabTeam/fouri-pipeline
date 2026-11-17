@@ -5,7 +5,7 @@ from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import nd2
 import numpy as np
@@ -15,12 +15,13 @@ from tifffile import imread, imwrite
 
 from fouri.config import Experiment
 
-EXPOSURE_UNIT_VALUE: dict[str, float] = {
+EXPOSURE_UNIT_VALUE: Final[dict[str, float]] = {
     "s": 1e3,
     "ms": 1,
     "µs": 1e-3,
     "ns": 1e-6,
 }
+COMBAT_LAYER: Final[str] = "combat"
 
 
 @dataclass(frozen=True)

@@ -49,7 +49,7 @@ def export_cells(
     cells_pd = _cell_keys(table_pd)
     cells_ad = _cell_keys(table_ad)
 
-    if corrected and "combat" not in table_ad.layers:
+    if corrected and io.COMBAT_LAYER not in table_ad.layers:
         raise ValueError(
             "There is no batch-corrected copy yet. Run Batch effects first or export the z-scores as built."
         )
@@ -237,7 +237,7 @@ def _zscores(
             "because the cell table does not have z-scores for them:"
             f"\n{'\n'.join(left_out)}\n"
         )
-    by_cell = _values_by_cell(adata, adata_cells, layer="combat" if corrected else None)
+    by_cell = _values_by_cell(adata, adata_cells, layer=io.COMBAT_LAYER if corrected else None)
     return by_cell.loc[chosen_cells, chosen_features], left_out
 
 
@@ -271,7 +271,7 @@ def _chosen_cells(
             say(f"Excluded {filtered:,} subsampled cells that the current filters exclude.")
 
     if corrected:
-        layer = _values_by_cell(adata, adata_cells, layer="combat")
+        layer = _values_by_cell(adata, adata_cells, layer=io.COMBAT_LAYER)
         layer = layer.loc[cells]
         uncorrected_cells = layer.isna().all(axis=1)
         cells = cells[~uncorrected_cells]

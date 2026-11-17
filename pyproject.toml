@@ -105,7 +105,8 @@ mypy_path = "src"
 module = [
     "pystackreg", "pystackreg.*", "cellpose", "cellpose.*", "ipywidgets", "ipywidgets.*", "napari", "napari.*",
     "plotly", "plotly.*", "sketchKH", "sketchKH.*", "delve", "delve.*", "phate", "phate.*", "umap", "umap.*",
-    "threadpoolctl", "threadpoolctl.*", "h5py", "h5py.*", "win32com", "win32com.*",
+    "threadpoolctl", "threadpoolctl.*", "h5py", "h5py.*", "win32com", "win32com.*", "sklearn", "sklearn.*",
+    "scanpy", "scanpy.*",
 ]
 ignore_missing_imports = true
 

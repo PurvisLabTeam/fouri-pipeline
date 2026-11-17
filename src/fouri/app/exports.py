@@ -14,12 +14,11 @@ from anndata.io import read_elem
 from fouri.app.records import done_settings
 from fouri.config import Experiment
 from fouri.export import REFUSED_NAME_CHARACTERS, FileFormat
-from fouri.io import adata_path, adata_sub_path, fullest_df_path
+from fouri.io import COMBAT_LAYER, adata_path, adata_sub_path, fullest_df_path
 from fouri.status import Step
 
 KEY_COLUMNS = ("well", "label")
 INCLUDED = "included"
-COMBAT = "combat"
 BLANK_NAME = "Name the export."
 REFUSED_CHARACTER = f"A name can't hold {' '.join(REFUSED_NAME_CHARACTERS)}"
 BAD_ENDING = "A name can't end with a dot or a space."
@@ -60,7 +59,7 @@ def name_problem(name: str) -> str | None:
 def has_corrected(exp: Experiment) -> bool:
     with h5py.File(adata_path(exp), "r") as file:
         layers = file.get("layers")
-        return isinstance(layers, h5py.Group) and COMBAT in layers
+        return isinstance(layers, h5py.Group) and COMBAT_LAYER in layers
 
 
 def _keys(wells: Any, labels: Any) -> pd.MultiIndex:
@@ -82,10 +81,10 @@ def _included(exp: Experiment) -> pd.Series:
 def _uncorrected(exp: Experiment) -> pd.Series:
     with h5py.File(adata_path(exp), "r") as file:
         layers = file.get("layers")
-        if not isinstance(layers, h5py.Group) or COMBAT not in layers:
+        if not isinstance(layers, h5py.Group) or COMBAT_LAYER not in layers:
             raise ValueError(NO_COMBAT)
         keys = _obs_keys(file)
-        values: Any = read_elem(layers[COMBAT])
+        values: Any = read_elem(layers[COMBAT_LAYER])
     if hasattr(values, "toarray"):
         values = values.toarray()
     return pd.Series(np.isnan(np.asarray(values, dtype=np.float64)).all(axis=1), index=keys)

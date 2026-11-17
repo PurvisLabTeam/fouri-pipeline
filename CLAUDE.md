@@ -20,6 +20,9 @@ file in `.claude/rules/` when a file matching its `paths` list is read.
 - `.claude/rules/embeddings.md`: subsampling, feature ranking, PHATE and UMAP runs, embedding keys, the
   `app.embedding` format
 - `.claude/rules/adata.md`: what `build_adata` writes to `.obs`, `.X`, `.var` and `.uns`
+- `.claude/rules/batch-effects.md`: Batch effects (`fouri.batch`): the batch metrics, the ComBat correction, the
+  log transform, the recomputed derived features, the warnings and refusals, `layers["combat"]` and
+  `.uns["batch_effects"]`
 
 ## Commands
 
@@ -97,7 +100,7 @@ the writing and the reading side, so change them together.
 | 05 | not used for now: it draws masks on 04's aligned images and its masks never removed cells (07 dropped `nuc_mask`/`ring_mask`). Masks return with the artifact U-Net, and will remove the cells they cover | — |
 | Find artifacts | `masks/{well}/masks_{well}_round_{NNN}.npz` (`fouri.artifacts.find_artifacts`; the step `artifacts` in `fouri.run`, Find artifacts on the Run page): `final_{signal}` (true or false per pixel) and `outlines_{signal}` (numbered objects, 0 for none) for every channel in the round's round table, in the shape of the round's images; `masks_{well}_round_{NNN}.json` beside the `.npz`: `edited` and, per signal, `spread` and `pad`. Until the artifact U-Net is retrained, the step is a stub: every mask empty, `spread` and `pad` 0, `edited` false; `fouri.artifacts.round_masks` is the one function the U-Net replaces | Measure cells (`final_{signal}`); later the mask editor |
 | 06 | `cell_data/cell_data_{well}_df.csv` (no row-number column; older ones have `Unnamed: 0`) | 07 |
-| 07 | `fullest_df.csv`, `standard_adata.h5ad` in `base_dir`: every cell no artifact mask covers, with `included` (true or false: whether the filters named in Build cell table's `filters` setting kept it) and a column per label named in its `labels` setting; excluded cells stay in both | 08 |
+| 07 | `fullest_df.csv`, `standard_adata.h5ad` in `base_dir`: every cell no artifact mask covers, with `included` (true or false: whether the filters named in Build cell table's `filters` setting kept it) and a column per label named in its `labels` setting; excluded cells stay in both. Batch effects (`fouri.batch.correct_batches`) adds `layers["combat"]` (the ComBat-corrected z-scores, empty where not corrected) and `.uns["batch_effects"]` to `standard_adata.h5ad`, and the same layer to `standard_adata_sub.h5ad` when that file exists; Build cell table writes `standard_adata.h5ad` again without either and removes the layer from `standard_adata_sub.h5ad` | 08, Batch effects |
 | 08 | `standard_adata_sub.h5ad` in `base_dir`: the subsample with every measurement, each embedding in `.obsm` and the settings that made it in `.uns["embeddings"]`. Rerunning the subsample replaces the file and its embeddings | — |
 | Export | `exports/<name>.h5ad` or `exports/<name>.csv` in `base_dir` (`fouri.export.export_cells`, not listed on the Run page: the app's Export page, `fouri/app/pages/export.py`, starts the step and lists the exports made, with Load settings, which refills its form from the run record, and Delete): the included cells, or with embeddings the subsampled cells still included, each with its metadata, label columns and the features chosen, as measurements, z-scores (as built or from `layers["combat"]`) or both; an existing file is replaced only with `overwrite`, which the page sends after asking | nothing in the pipeline |
 
