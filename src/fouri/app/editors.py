@@ -17,7 +17,7 @@ EDITORS: dict[str, tuple[str, str]] = {
     "artifacts": ("Artifacts", "Paint and grow masks over artifacts, channel by channel."),
 }
 
-READY: tuple[str, ...] = ("segmentation", "alignment")
+READY: tuple[str, ...] = ("segmentation", "alignment", "artifacts")
 
 OUTPUT_FOLDER = "editors"
 POLL_SECONDS = 0.5

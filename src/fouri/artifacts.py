@@ -4,11 +4,13 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Any, Final, cast
 
+import cv2
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
+import scipy.ndimage as ndi
 from tifffile import TiffFile
 
 from fouri import io
@@ -16,6 +18,9 @@ from fouri.config import Experiment
 from fouri.io import write_npz
 from fouri.parallel import Failed, check_results, error_in_words
 from fouri.report import Stopped, progress, say, say_skipped
+from fouri.stats import robust_location_scale
+
+BLOCK_SIZE: Final[int] = 64
 
 
 @dataclass(frozen=True)
@@ -26,6 +31,117 @@ class _Plan:
     skipped: list[str]
     painted: list[str]
     refused: list[Failed]
+
+
+def excess_over_background(image: npt.NDArray[Any]) -> tuple[npt.NDArray[np.float32], float]:
+    """@TODO."""
+    scaled = image.astype(np.float32)
+    percentiles = np.percentile(scaled, (1, 99))
+    low, high = map(float, percentiles)
+    value_range = max(high - low, 1e-6)
+    scaled = (scaled - low) / value_range
+    scaled = np.clip(scaled, 0, 1)
+
+    block_rows = scaled.shape[0] // BLOCK_SIZE
+    block_cols = scaled.shape[1] // BLOCK_SIZE
+
+    rows_trimmed = block_rows * BLOCK_SIZE
+    cols_trimmed = block_cols * BLOCK_SIZE
+
+    row_pad = image.shape[0] - rows_trimmed
+    col_pad = image.shape[1] - cols_trimmed
+
+    trimmed = scaled[:rows_trimmed, :cols_trimmed]
+    trimmed = trimmed.reshape((block_rows, BLOCK_SIZE, block_cols, BLOCK_SIZE))
+    trimmed = np.transpose(trimmed, axes=(0, 2, 1, 3))
+    trimmed = trimmed.reshape((block_rows, block_cols, -1))
+
+    perc_25 = np.percentile(trimmed, 25, axis=-1)
+    filtered = ndi.median_filter(perc_25, size=(5, 5))
+    background = np.repeat(filtered, repeats=BLOCK_SIZE, axis=0)
+    background = np.repeat(background, repeats=BLOCK_SIZE, axis=1)
+    background = np.pad(background, pad_width=((0, row_pad), (0, col_pad)), mode="edge")
+    background = background.astype(np.float32)
+
+    excess = np.asarray(scaled - background, dtype=np.float32)
+    _, excess_robust_sd = robust_location_scale(excess)
+    excess_robust_sd = max(excess_robust_sd, 1e-6)
+
+    return excess, excess_robust_sd
+
+
+def grow_artifacts(
+    outlines: npt.NDArray[np.uint16],
+    excess: npt.NDArray[np.float32],
+    noise: float,
+    values: Mapping[int, tuple[int, int]],
+    *,
+    min_size: int = 25,
+) -> npt.NDArray[np.bool]:
+    """@TODO."""
+    output = np.zeros(outlines.shape, dtype=np.bool)
+    boxes = ndi.find_objects(outlines)
+    artifacts = {
+        s: (box, *values[s])
+        for s, box in enumerate(boxes, start=1)
+        if box is not None and (outlines[box] == s).sum() >= min_size
+    }
+    spreads = {spread for _, spread, _ in artifacts.values() if spread > 0}
+
+    regions_by_spread = {}
+    for spread in spreads:
+        bright = excess > (7 - spread) * noise
+        _, regions, stats, _ = cv2.connectedComponentsWithStats(
+            bright.view(np.uint8), ltype=cv2.CV_32S, connectivity=4
+        )
+        regions_by_spread[spread] = (regions, stats)
+
+    for number, (box, spread, pad) in artifacts.items():
+        grown = box
+        regions_reached = np.empty(0, dtype=np.int32)
+        if spread > 0:
+            widened_box = _widen(box, 1, outlines.shape)
+            artifact_pixels = outlines[widened_box] == number
+            dilated = ndi.binary_dilation(artifact_pixels)
+            regions, stats = regions_by_spread[spread]
+            region_crop = regions[widened_box]
+            numbers = np.unique(region_crop[dilated])
+            regions_reached = cast(npt.NDArray[np.int32], numbers[numbers != 0])
+            if regions_reached.size != 0:
+                region_stats = stats[regions_reached]
+                row_start = min(box[0].start, int(region_stats[:, cv2.CC_STAT_TOP].min()))
+                row_stop = max(
+                    box[0].stop,
+                    int((region_stats[:, cv2.CC_STAT_TOP] + region_stats[:, cv2.CC_STAT_HEIGHT]).max()),
+                )
+                col_start = min(box[1].start, int(region_stats[:, cv2.CC_STAT_LEFT].min()))
+                col_stop = max(
+                    box[1].stop,
+                    int((region_stats[:, cv2.CC_STAT_LEFT] + region_stats[:, cv2.CC_STAT_WIDTH]).max()),
+                )
+                grown = (slice(row_start, row_stop), slice(col_start, col_stop))
+
+        final_box = _widen(grown, margin=pad, shape=outlines.shape)
+        cropped_final = outlines[final_box]
+        shape = cropped_final == number
+        if regions_reached.size != 0:
+            shape = shape | np.isin(regions[final_box], regions_reached)
+
+        if pad > 0:
+            shape = ndi.binary_dilation(shape, iterations=pad)
+        output[final_box] |= shape
+
+    return output
+
+
+def _widen(box: tuple[slice, ...], margin: int, shape: tuple[int, ...]) -> tuple[slice, slice]:
+    row_start = max(box[0].start - margin, 0)
+    row_stop = min(box[0].stop + margin, shape[0])
+
+    col_start = max(box[1].start - margin, 0)
+    col_stop = min(box[1].stop + margin, shape[1])
+
+    return (slice(row_start, row_stop), slice(col_start, col_stop))
 
 
 def final_masks(
