@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from fouri.config import Experiment
+from fouri.stats import robust_location_scale
 
 
 class FilterRule(StrEnum):
@@ -82,9 +83,7 @@ def _keep_group(values: pd.Series, rule: Mapping[str, Any], kind: FilterRule) ->
 
         case FilterRule.ROBUST_SD:
             sds = cast(float, rule["sds"])
-            median = np.median(values_finite)
-            mad = np.median(np.abs(values_finite - median))
-            robust_sd = 1.4826 * mad
+            median, robust_sd = robust_location_scale(values_finite.to_numpy())
             bound = sds * robust_sd
 
             low = median - bound
