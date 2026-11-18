@@ -30,6 +30,9 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal
 
+import yaml
+from omegaconf import DictConfig, OmegaConf
+
 from fouri import report
 from fouri.config import Experiment, load_config
 from fouri.io import adata_sub_path, run_record_path
@@ -181,6 +184,7 @@ def command(
     *,
     wells: Sequence[str] | None = None,
     settings: Mapping[str, Any] | None = None,
+    settings_file: str | Path | None = None,
     progress: str | Path | None = None,
     run: str | None = None,
 ) -> list[str]:
@@ -188,7 +192,10 @@ def command(
     argv = [sys.executable, "-m", "fouri.run", Step(step).value, "--config", str(config)]
     if wells is not None:
         argv += ["--wells", *wells]
-    if settings:
+    if settings_file:
+        settings_file = str(Path(settings_file))
+        argv += ["--settings-file", settings_file]
+    elif settings:
         argv += ["--settings", json.dumps(settings)]
     if progress is not None:
         argv += ["--progress", str(progress)]
@@ -242,6 +249,24 @@ def run_step(
     started = time.monotonic()
     try:
         exp = load_config(config, announce=False)
+        if step == Step.EMBEDDING and "runs" not in settings:
+            from fouri.embedding_setup import embedding_settings
+
+            embed_settings = embedding_settings(exp)
+            if embed_settings is None:
+                raise ValueError(
+                    "No embedding setup is saved. Save one on the Embedding page's setup tab or supply "
+                    "'runs' and 'picked' in the run settings."
+                )
+            if embed_settings["runs"] == []:
+                raise ValueError(
+                    "No embedding is selected in the saved setup. Select embedding parameters in the Embedding page's "
+                    "setup tab, or supply 'runs' and 'picked' in the run settings."
+                )
+
+            settings = embed_settings | settings
+            entry["settings"] = settings
+
         if step in WELL_STEPS:
             settings["wells"] = exp.pick_wells(wells)
         elif wells is not None:
@@ -273,15 +298,67 @@ def run_step(
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m fouri.run", description="Run one 4i pipeline step.")
     parser.add_argument("step", choices=[s.value for s in Step])
+    parser.add_argument(
+        "overrides",
+        nargs="*",
+        help="settings as key=value, which replace those from --settings or --settings-file",
+    )
     parser.add_argument("--config", required=True, help="the experiment's experiment.json")
     parser.add_argument("--wells", nargs="*", help="wells to work on (per-well steps); every well if left out")
-    parser.add_argument("--settings", default="{}", help="the step's settings as a JSON object")
+    parser.add_argument("--settings", default=None, help="the step's settings as a JSON object")
+    parser.add_argument("--settings-file", default=None, help="the step's settings in a YAML or JSON file")
     parser.add_argument("--progress", help="write messages and bars to this file as JSON lines")
     parser.add_argument("--run", help="the run this step belongs to, written to the run record")
-    args = parser.parse_args(argv)
-    settings = json.loads(args.settings)
+    args = parser.parse_intermixed_args(argv)
+
+    if args.wells is not None:
+        args.overrides.extend(well for well in args.wells if "=" in well)
+        args.wells = [well for well in args.wells if "=" not in well]
+
+    if args.overrides:
+        invalid = [over for over in args.overrides if "=" not in over or over.startswith("=")]
+        if invalid:
+            raise parser.error(
+                "\n".join(
+                    f"Unrecognized override argument: {arg}. Write overrides as key=value, e.g., ring_width=8."
+                    for arg in invalid
+                )
+            )
+
+    settings: Any = {}
+    if args.settings is not None and args.settings_file is not None:
+        raise parser.error("Use either --settings or --settings-file, not both.")
+
+    if args.settings is not None:
+        settings = json.loads(args.settings)
+
+    if args.settings_file is not None:
+        settings_file = Path(args.settings_file)
+        if not settings_file.exists():
+            raise parser.error(f"No settings file found at {settings_file}")
+        try:
+            settings_loaded = OmegaConf.load(settings_file)
+        except (yaml.YAMLError, OSError) as e:
+            raise parser.error(f"Cannot read settings file at {settings_file} as YAML or JSON.") from e
+        if not isinstance(settings_loaded, DictConfig):
+            raise parser.error("--settings-file must hold settings by name, e.g. overwrite: true.")
+
+        settings = OmegaConf.to_container(settings_loaded)
+
     if not isinstance(settings, dict):
         parser.error("--settings must be a JSON object, e.g. '{\"overwrite\": true}'")
+
+    overrides = []
+    for over in args.overrides:
+        try:
+            override = OmegaConf.from_dotlist([over])
+        except yaml.YAMLError as e:
+            raise parser.error(
+                f"Unrecognized override argument: {over}. Write overrides as key=value, e.g., ring_width=8."
+            ) from e
+        overrides.append(override)
+
+    settings = OmegaConf.to_container(OmegaConf.merge(settings, *overrides))
     report.report_to(args.progress)
     outcome = run_step(args.step, args.config, wells=args.wells, settings=settings, run=args.run)
     return EXIT_CODES[outcome]

@@ -17,6 +17,7 @@ dependencies = [
     "nd2>=0.12.0",
     "nicegui[native]>=4.0,<5",
     "numpy>=2.5.4",
+    "omegaconf>=2.4.0",
     "opencv-python-headless>=5.0.0.93",
     "pandas>=2.3.3",
     "phate>=2.0.0",
@@ -53,6 +54,7 @@ dev = [
     "ruff>=0.17.3",
     "scipy-stubs>=1.18.1.1",
     "types-psutil>=7.2.2.20260906",
+    "types-pyyaml>=6.0.12.20261113",
     "types-tqdm>=4.70.0.20261102",
 ]
 

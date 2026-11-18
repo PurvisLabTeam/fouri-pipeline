@@ -230,10 +230,17 @@ class Run:
     def _log_file(self, index: int) -> Path:
         return self.folder / f"{self.requests[index].step.value}.log"
 
+    def _settings_file(self, index: int) -> Path:
+        return self.folder / f"{self.requests[index].step.value}.settings.json"
+
     def _start_step(self, index: int) -> None:
         request = self.requests[index]
-        progress_file, log_file = self._progress_file(index), self._log_file(index)
-        for leftover in (progress_file, report.stop_path(progress_file), log_file):
+        progress_file, log_file, settings_file = (
+            self._progress_file(index),
+            self._log_file(index),
+            self._settings_file(index),
+        )
+        for leftover in (progress_file, report.stop_path(progress_file), log_file, settings_file):
             leftover.unlink(missing_ok=True)
         self._current, self._offset, self._finished_line = index, 0, None
         argv = self._command(
@@ -243,10 +250,14 @@ class Run:
             settings=request.settings,
             progress=progress_file,
             run=self.run_id,
+            settings_file=settings_file,
         )
         # the log reads the same on every PC
         environment = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
         try:
+            with open(settings_file, "w", encoding="utf-8") as fh:
+                json.dump(request.settings, fh, indent=2)
+
             self._log = open(log_file, "wb")  # noqa: SIM115 (closed when the step ends)
             self._process = subprocess.Popen(
                 argv, stdin=subprocess.DEVNULL, stdout=self._log, stderr=subprocess.STDOUT, env=environment, **_quiet()
