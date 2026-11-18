@@ -6,8 +6,9 @@ browser tab.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from nicegui import app
 
@@ -28,6 +29,7 @@ class AppState:
     run: Run | None = None  # the run going, or the last one that ended
     gpu: str | None = None  # the GPU's name; None when none was found
     checking_gpu: bool = True  # the check made when the app opens has not answered yet
+    kept: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 STATE = AppState()
@@ -69,9 +71,15 @@ def stop_run() -> None:
 def open_experiment(path: str | Path) -> Experiment:
     """Load an experiment.json or its folder as the open experiment, and record the path as last."""
     experiment = load_config(path, announce=False)
+    if STATE.experiment is None or STATE.experiment.config_path != experiment.config_path:
+        STATE.kept.clear()
     STATE.experiment = experiment
     app.storage.general[LAST_EXPERIMENT] = experiment.config_path
     return experiment
+
+
+def kept_choices(page: str) -> dict[str, Any]:
+    return STATE.kept.setdefault(page, {})
 
 
 def reopen_last() -> Experiment | None:

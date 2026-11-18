@@ -9,7 +9,7 @@ from fouri.app.finetuning import Regions, corrected_regions, delete_model
 from fouri.app.plate import wells_card
 from fouri.app.runner import Run, StepRequest
 from fouri.app.shell import page_frame
-from fouri.app.state import POLL_SECONDS, STATE, run_going
+from fouri.app.state import POLL_SECONDS, STATE, kept_choices, run_going
 from fouri.app.steps import BUILT_IN_MODEL, default, models_left_out
 from fouri.config import Experiment
 from fouri.metadata import normalize_well, plate_sort_key
@@ -53,7 +53,11 @@ class _ModelsPage:
     def __init__(self, exp: Experiment) -> None:
         self.exp = exp
         wells = sorted({normalize_well(well) for well in exp.well_list}, key=plate_sort_key)
-        self.picked = dict.fromkeys(wells, True)
+        self.kept = kept_choices("models")
+        was_picked = self.kept.get("picked", {})
+        self.picked = {well: was_picked.get(well, True) for well in wells}
+        self.kept["picked"] = self.picked
+        self.kept.setdefault("epochs", default(Step.FINETUNE, "n_epochs"))
         self.delete_buttons: list[ui.button] = []
 
     def build(self) -> None:
@@ -71,9 +75,9 @@ class _ModelsPage:
             self.epochs = (
                 ui.number(
                     "Epochs",
-                    value=default(Step.FINETUNE, "n_epochs"),
+                    value=self.kept["epochs"],
                     validation={EPOCHS_ERROR: lambda value: epochs(value) is not None},
-                    on_change=self.follow,
+                    on_change=self.new_epochs,
                 )
                 .props("step=1")
                 .classes("w-56")
@@ -122,6 +126,10 @@ class _ModelsPage:
         button = ui.button("Delete", on_click=lambda: self.delete(model))
         button.props("flat dense no-caps color=negative")
         self.delete_buttons.append(button)
+
+    def new_epochs(self) -> None:
+        self.kept["epochs"] = self.epochs.value
+        self.follow()
 
     def follow(self) -> None:
         going = run_going()

@@ -25,7 +25,7 @@ from fouri.app.records import clock_text
 from fouri.app.rules import switched_on_filters
 from fouri.app.runner import Run, StepRequest
 from fouri.app.shell import page_frame
-from fouri.app.state import POLL_SECONDS, STATE, run_going
+from fouri.app.state import POLL_SECONDS, STATE, kept_choices, run_going
 from fouri.app.steps import default
 from fouri.config import Experiment
 from fouri.export import FileFormat, Values
@@ -114,6 +114,8 @@ class _ExportPage:
         self.counting = False
         self.count_problem: str | None = None
         self.blank_tried = False
+        self.kept = kept_choices("export")
+        self.returned = dict(self.kept)
 
     def build(self) -> None:
         ui.label("Export").classes("page-title")
@@ -124,11 +126,12 @@ class _ExportPage:
             self.left_out.set_visibility(False)
             self.name_box = ui.input("Name", on_change=self.new_name).classes("w-full")
             self.name_box.without_auto_validation()
-            self.kind = ui.toggle(FORMATS, value=str(default(Step.EXPORT, "file_format"))).props("no-caps")
+            self.kind = ui.toggle(FORMATS, value=str(default(Step.EXPORT, "file_format")), on_change=self.keep)
+            self.kind.props("no-caps")
             ui.label("Values").classes("text-sm font-medium mt-2")
             self.values = ui.toggle(VALUES, value=str(default(Step.EXPORT, "values")), on_change=self.new_values)
             self.values.props("no-caps")
-            self.corrected = ui.switch(CORRECTED, value=False, on_change=self.count)
+            self.corrected = ui.switch(CORRECTED, value=False, on_change=self.new_corrected)
             self.corrected.set_visibility(self.combat)
             self.all_features = ui.switch(ALL_FEATURES, value=True, on_change=self.new_features).classes("mt-2")
             self.picked = (
@@ -165,6 +168,8 @@ class _ExportPage:
         with ui.card().classes("w-full p-5 gap-2"):
             ui.label("Exports").classes(SECTION_TITLE)
             self.exports = ui.column().classes("w-full gap-0")
+        if self.returned:
+            self.load(self.returned)
         self.new_name()
         self.follow_values()
         self.new_features()
@@ -210,6 +215,22 @@ class _ExportPage:
             return PICK_FEATURE
         return self.count_problem
 
+    def settings(self) -> dict[str, Any]:
+        name = self.name_box.value or ""
+        file_format = str(self.kind.value)
+        return {
+            "name": name,
+            "file_format": file_format,
+            "values": str(self.values.value),
+            "corrected": self.is_corrected(),
+            "features": None if self.all_features.value else self.chosen_features(),
+            "embeddings": self.chosen_embeddings(),
+            "overwrite": export_path(self.exp, name, file_format).exists(),
+        }
+
+    def keep(self) -> None:
+        self.kept.update(self.settings())
+
     def follow_run(self) -> None:
         allowed = not run_going() and self.refusal() is None
         if self.button.enabled != allowed:
@@ -219,6 +240,7 @@ class _ExportPage:
         if (self.name_box.value or "").strip():
             self.blank_tried = False
         self.name_box.error = self.name_shown()
+        self.keep()
         self.follow_run()
 
     def follow_values(self) -> None:
@@ -230,6 +252,11 @@ class _ExportPage:
 
     async def new_values(self) -> None:
         self.follow_values()
+        self.keep()
+        await self.count()
+
+    async def new_corrected(self) -> None:
+        self.keep()
         await self.count()
 
     def new_picked(self) -> None:
@@ -239,6 +266,7 @@ class _ExportPage:
     def new_features(self) -> None:
         self.picked.set_visibility(not self.all_features.value)
         self.feature_problem.set_visibility(not self.all_features.value and not self.chosen_features())
+        self.keep()
         self.follow_run()
 
     def follow_embeddings(self) -> None:
@@ -246,6 +274,7 @@ class _ExportPage:
 
     async def new_embeddings(self) -> None:
         self.follow_embeddings()
+        self.keep()
         await self.count()
 
     async def count(self) -> None:
@@ -358,23 +387,12 @@ class _ExportPage:
             return
         if run_going() or self.refusal() is not None:
             return
-        name = self.name_box.value
-        file_format = str(self.kind.value)
-        path = export_path(self.exp, name, file_format)
-        overwrite = path.exists()
-        if overwrite and not await ask(REPLACE.format(file=path.name), "Replace"):
+        settings = self.settings()
+        path = export_path(self.exp, settings["name"], settings["file_format"])
+        if settings["overwrite"] and not await ask(REPLACE.format(file=path.name), "Replace"):
             return
         if run_going():
             return
-        settings = {
-            "name": name,
-            "file_format": file_format,
-            "values": str(self.values.value),
-            "corrected": self.is_corrected(),
-            "features": None if self.all_features.value else self.chosen_features(),
-            "embeddings": self.chosen_embeddings(),
-            "overwrite": overwrite,
-        }
         try:
             started = Run(self.exp.config_path, [StepRequest(Step.EXPORT, None, settings)])
             started.start()

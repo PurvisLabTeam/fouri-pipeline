@@ -9,8 +9,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from nicegui import app, ui
-from nicegui.native import WindowProxy
+from nicegui import ui
 
 
 def _start_folder(start: str | Path) -> Path:
@@ -22,21 +21,21 @@ def _start_folder(start: str | Path) -> Path:
     return Path.home()
 
 
-async def _system_dialog(window: WindowProxy, start: Path, *, suffix: str | None) -> Path | None:
-    import webview
+def _named_file(folder: Path, name: str | None) -> Path | None:
+    if name is None:
+        return None
+    try:
+        files = sorted((entry for entry in folder.iterdir() if entry.is_file()), key=lambda p: p.name)
+    except OSError:
+        return None
+    matches = [entry for entry in files if entry.name.lower() == name.lower()]
+    for entry in matches:
+        if entry.name == name:
+            return entry
+    return matches[0] if matches else None
 
-    if suffix is None:
-        chosen = await window.create_file_dialog(webview.FileDialog.FOLDER, directory=str(start))
-    else:
-        # the filter's description may hold only letters, digits and spaces
-        file_type = f"{suffix.lstrip('.').upper()} files (*{suffix})"
-        chosen = await window.create_file_dialog(
-            webview.FileDialog.OPEN, directory=str(start), file_types=(file_type,)
-        )
-    return Path(chosen[0]) if chosen else None
 
-
-async def _listing_dialog(start: Path, *, suffix: str | None) -> Path | None:
+async def _listing_dialog(start: Path, *, suffix: str | None, name: str | None = None) -> Path | None:
     """List folders, and ``suffix`` files when picking a file; return the pick or None.
 
     The box at the top shows the folder listed. Enter on a path typed there goes to that folder,
@@ -78,6 +77,10 @@ async def _listing_dialog(start: Path, *, suffix: str | None) -> Path | None:
             # normpath, not resolve: resolve would turn a mapped drive (Z:) into its network name
             path = Path(os.path.normpath(here / Path(where.value.strip()).expanduser()))
             if path.is_dir():
+                sought = _named_file(path, name)
+                if sought is not None:
+                    dialog.submit(sought)
+                    return
                 go(path)
             elif path.is_file():
                 if suffix is not None and path.name.lower().endswith(suffix.lower()):
@@ -101,17 +104,13 @@ async def _listing_dialog(start: Path, *, suffix: str | None) -> Path | None:
     return chosen if isinstance(chosen, Path) else None
 
 
-async def _pick(start: str | Path, *, suffix: str | None) -> Path | None:
-    folder = _start_folder(start)
-    window = app.native.main_window  # set only in the app's own window
-    if window is not None:
-        return await _system_dialog(window, folder, suffix=suffix)
-    return await _listing_dialog(folder, suffix=suffix)
+async def _pick(start: str | Path, *, suffix: str | None, name: str | None = None) -> Path | None:
+    return await _listing_dialog(_start_folder(start), suffix=suffix, name=name)
 
 
-async def pick_file(start: str | Path, *, suffix: str) -> Path | None:
+async def pick_file(start: str | Path, *, suffix: str, name: str | None = None) -> Path | None:
     """Return a ``suffix`` file picked in a dialog opened at ``start``, or None if canceled."""
-    return await _pick(start, suffix=suffix)
+    return await _pick(start, suffix=suffix, name=name)
 
 
 async def pick_folder(start: str | Path) -> Path | None:

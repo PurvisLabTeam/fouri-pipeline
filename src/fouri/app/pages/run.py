@@ -22,7 +22,7 @@ from fouri.app.plate import wells_card
 from fouri.app.rules import switched_on_filters, switched_on_labels
 from fouri.app.runner import Bar, Run, StepProgress, StepRequest, time_left
 from fouri.app.shell import page_frame, running_line
-from fouri.app.state import POLL_SECONDS, STATE, run_going, stop_run
+from fouri.app.state import POLL_SECONDS, STATE, kept_choices, run_going, stop_run
 from fouri.app.steps import (
     DESCRIPTIONS,
     RUN_PAGE_STEPS,
@@ -406,13 +406,29 @@ def _progress_card(start: Callable[[], Awaitable[None]]) -> None:
         ui.timer(POLL_SECONDS, refresh)
 
 
+def _shown_values(step: Step, kept: dict[str, Any]) -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    for setting in shown_settings(step):
+        value = kept.get(setting.name, default(step, setting.name))
+        if setting.control == "choice" and setting.choices is not None and value not in setting.choices():
+            value = default(step, setting.name)
+        values[setting.name] = value
+    return values
+
+
 def _content(exp: Experiment) -> None:
     wells = sorted({normalize_well(well) for well in exp.well_list}, key=plate_sort_key)
-    picked = dict.fromkeys(wells, True)
-    ticked = dict.fromkeys(RUN_PAGE_STEPS, False)
-    overwrite = dict.fromkeys(RUN_PAGE_STEPS, False)
-    values = {step: {s.name: default(step, s.name) for s in shown_settings(step)} for step in RUN_PAGE_STEPS}
-    workers = {"count": 0}
+    kept = kept_choices("run")
+    was_picked = kept.get("picked", {})
+    was_ticked = kept.get("ticked", {})
+    was_overwritten = kept.get("overwrite", {})
+    was_set = kept.get("values", {})
+    picked = {well: was_picked.get(well, True) for well in wells}
+    ticked = {step: was_ticked.get(step, False) for step in RUN_PAGE_STEPS}
+    overwrite = {step: was_overwritten.get(step, False) for step in RUN_PAGE_STEPS}
+    values = {step: _shown_values(step, was_set.get(step, {})) for step in RUN_PAGE_STEPS}
+    workers = kept.get("workers", {"count": 0})
+    kept.update(picked=picked, ticked=ticked, overwrite=overwrite, values=values, workers=workers)
 
     async def start() -> None:
         if run_going():

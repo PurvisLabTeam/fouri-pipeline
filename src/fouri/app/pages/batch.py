@@ -29,7 +29,7 @@ from fouri.app.batches import (
 )
 from fouri.app.cells import Cells, load_cells
 from fouri.app.shell import empty_state, page_frame
-from fouri.app.state import STATE
+from fouri.app.state import STATE, kept_choices
 from fouri.app.theme import restyle
 from fouri.batch import NEAR_CHANCE, SHARE_OVER, default_keep
 from fouri.config import Experiment
@@ -145,11 +145,12 @@ class _BatchPage:
         except ValueError:
             self.saved_setup, self.unreadable = None, True
         choices = batch_choices(exp)
-        if self.saved_setup is not None:
-            saved_batch = self.saved_setup["batch"]
-            self.batch = saved_batch if saved_batch in choices else DEFAULT_BATCH
-            wanted = set(self.saved_setup["keep"])
-            self.log_intensities = bool(self.saved_setup["log_intensities"])
+        self.kept = kept_choices("batch")
+        start = self.kept or self.saved_setup
+        if start is not None:
+            self.batch = start["batch"] if start["batch"] in choices else DEFAULT_BATCH
+            wanted = set(start["keep"])
+            self.log_intensities = bool(start["log_intensities"])
         else:
             self.batch = DEFAULT_BATCH
             wanted = set(default_keep(exp))
@@ -167,6 +168,9 @@ class _BatchPage:
 
     def setup(self) -> dict[str, Any]:
         return {"batch": self.batch, "keep": list(self.keep), "log_intensities": self.log_intensities}
+
+    def keep_setup(self) -> None:
+        self.kept.update(self.setup())
 
     def build(self) -> None:
         with ui.row().classes("w-full no-wrap items-start gap-6"):
@@ -226,6 +230,7 @@ class _BatchPage:
         self.batch = e.value
         offered = keep_choices(self.exp, self.batch)
         self.keep = [column for column in offered if column in set(self.keep)]
+        self.keep_setup()
         self.quiet = True
         try:
             self.keep_box.set_options(offered, value=list(self.keep))
@@ -248,11 +253,13 @@ class _BatchPage:
         if keep == self.keep:
             return
         self.keep = keep
+        self.keep_setup()
         self.show_saved_line()
         await self.work_out()
 
     def new_log(self, e: ValueChangeEventArguments[Any]) -> None:
         self.log_intensities = bool(e.value)
+        self.keep_setup()
         self.show_saved_line()
         self.show()
 

@@ -240,7 +240,7 @@ def _open_typed(box: ui.input) -> None:
 
 
 async def _open_other(box: ui.input) -> None:
-    chosen = await pick_file(box.value, suffix=".json")
+    chosen = await pick_file(box.value, suffix=".json", name=CONFIG_NAME)
     if chosen is not None:
         _open(chosen, box)
 
@@ -252,7 +252,7 @@ async def _browse_folder(box: ui.input, start: str = "") -> None:
 
 
 async def _browse_csv(box: ui.input, start: str = "") -> None:
-    chosen = await pick_file(box.value or start, suffix=".csv")
+    chosen = await pick_file(box.value or start, suffix=".csv", name="info_exp.csv")
     if chosen is not None:
         box.value = str(chosen)
 

@@ -73,3 +73,28 @@ and is the Dock icon of the app opened from the bundle; `fouri.app.main` sets no
   `paths.data`/`paths.info_file`, each left out when its box is empty or it is base_dir's own `data` or
   `info_exp.csv`, relative to `base_dir` when inside it, in full otherwise. A path typed without a drive or
   root is read as relative to the results folder.
+- Every Browse opens the app's own picker (`fouri.app.dialogs`), in the app's window and in a browser tab: a
+  listing of directories and, for a file, of the files with the suffix sought. Enter on a typed or pasted
+  directory holding the file sought (`pick_file`'s `name`: experiment.json beside experiment.json, info_exp.csv
+  beside each info_exp.csv box, matched without regard to case, the exact spelling first) selects that file; any
+  other directory, typed or clicked, is listed. Import CSV seeks no name.
+
+## Choices kept between pages
+
+The Run, Export, Models and Batch effects pages keep the choices made on them, saved or not, in `STATE.kept`
+(`fouri.app.state.kept_choices(page)`, keyed `run`, `export`, `models` and `batch`), in memory only and never
+written to disk. `open_experiment` empties `STATE.kept` when the file opened is not the open experiment's (another
+`config_path`: the same file under another spelling, a mapped drive against its network path or other capitals on
+Windows, counts as another) and keeps the choices when the same file is opened again, as after a Save. A new start
+of the app begins with none.
+
+- Run: the wells chosen, the steps ticked, each step's Overwrite and shown settings, and the wells processed in
+  parallel. On return a well no longer in the experiment is dropped, a new well is chosen, a setting no longer
+  shown is dropped, a new setting is at its default, and a value no longer among a choice setting's options (a
+  fine-tuned model deleted since) is at its default.
+- Export: the settings Export would send, written on every change; on return the form is refilled through the
+  path of Load settings (`_ExportPage.load`), which names the features and embeddings no longer present.
+- Models: the wells chosen, reconciled as on the Run page, and Epochs as shown.
+- Batch effects: Batch, Biology to keep and Log-transform intensities, written on every change; on return the page
+  starts from the kept values before the saved set-up, a batch no longer offered falling back to `well` and a Biology to keep
+  column no longer offered dropped.
