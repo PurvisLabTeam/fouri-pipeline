@@ -152,13 +152,3 @@ def standardize_columns(df: pd.DataFrame, include: pd.Series[bool] | None = None
         warnings.filterwarnings("ignore", category=RuntimeWarning, message="Precision loss")
         standardized = stats.zmap(df, selected, ddof=1)
     return pd.DataFrame(data=standardized, columns=df.columns, index=df.index)
-
-
-def default_threshold_sample(exp):
-    """sample_ID to use for picking the pRB threshold: the control if there is one."""
-    meta = exp.well_metadata
-    for m in meta.values():
-        if "control" in str(m.get("treatment", "")).lower():
-            return m.get("sample_ID")
-    ids = [m.get("sample_ID") for m in meta.values() if "sample_ID" in m]
-    return ids[0] if ids else None

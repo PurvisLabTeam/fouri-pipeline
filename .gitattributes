@@ -1,3 +1,0 @@
-# strip notebook outputs and the recorded Python version on commit (one-time setup per clone: see Setup in README.md)
-*.ipynb filter=nbstripout
-*.ipynb diff=ipynb
