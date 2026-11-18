@@ -246,8 +246,7 @@ def read_round_table(exp: Experiment, well: str) -> pd.DataFrame:
 def require_raw_files(table: pd.DataFrame, well: str) -> None:
     if "raw_file_name" not in table.columns:
         raise ValueError(
-            f"Well {well}'s round table was made using an old version of the pipeline. "
-            "Rerun the preprocessing step first."
+            f"Well {well}'s round table was made using an old version of the pipeline. Rerun Convert images first."
         )
 
 
