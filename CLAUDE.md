@@ -317,7 +317,7 @@ does, the embedding keys (`run_key`) and the `app.embedding` format are in `.cla
 - Messages and bars go through `fouri.report` (`say`, `say_skipped`, `progress`), never `print` or tqdm directly:
   after `report.report_to(path)` (the app, when it starts a step) they are written to that file as JSON lines
   (message; bar open, move, close with its parent bar; `report.finished` at the end) instead of printed.
-- `.gitignore` ignores every dotfile except `.gitignore`, `.gitattributes`, `.python-version` and
+- `.gitignore` ignores every dotfile except `.gitignore`, `.gitattributes`, `.python-version`, `.github/` and
   `.claude/rules/` (the rest of `.claude/` stays ignored), so a new dot-folder (e.g. `.vscode/`) is not committed
   unless that rule changes.
 
