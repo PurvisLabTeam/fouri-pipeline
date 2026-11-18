@@ -80,15 +80,14 @@ line-length = 119
 target-version = "py312"
 
 [tool.ruff.lint]
-# The rule families foursight uses.
-select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF", "D", "C4"]
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF", "D", "C4", "T20"]
 extend-select = ["W505"]
 # A docstring is optional (module, package, class, function, method), but one that exists is checked.
 ignore = ["D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107"]
 
 [tool.ruff.lint.per-file-ignores]
-# Notebooks import in a cell after the CONFIG cell, by design.
 "*.ipynb" = ["E402"]
+"tests/**" = ["T20"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"

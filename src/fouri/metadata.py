@@ -104,27 +104,6 @@ def read_metadata_table(source):
     return df.reset_index(drop=True)
 
 
-def assign_sample_ids(table, condition_columns):
-    """Fill in sample_IDs.
-
-    If every row already has a sample_ID, those are kept. Otherwise wells with
-    identical values in ``condition_columns`` get the same ID, numbered 1, 2, ...
-    by the first well (in plate order) with each condition.
-    """
-    df = table.copy()
-    if "sample_ID" in df.columns and (df["sample_ID"].map(_clean) != "").all():
-        df["sample_ID"] = df["sample_ID"].map(to_sample_id)
-        return df
-    cols = [c for c in condition_columns if c in df.columns]
-    order = df.sort_values("well", key=lambda s: s.map(plate_sort_key), kind="stable")
-    ids = {}
-    for _, row in order.iterrows():
-        cond = tuple(_clean(row[c]) for c in cols)
-        ids.setdefault(cond, len(ids) + 1)
-    df["sample_ID"] = [ids[tuple(_clean(row[c]) for c in cols)] for _, row in df.iterrows()]
-    return df
-
-
 def _listed(values):
     return ", ".join(str(value) for value in values)
 

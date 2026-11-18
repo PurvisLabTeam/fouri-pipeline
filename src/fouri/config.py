@@ -1,25 +1,4 @@
-r"""Experiment configuration: one ``experiment.json`` per experiment.
-
-Every pipeline notebook starts with::
-
-    from fouri import load_config
-    CONFIG = r'Z:\PATH\TO\EXPERIMENT\experiment.json'
-    exp = load_config(CONFIG)
-
-and takes all of its paths and the well list from ``exp``. Create or edit the
-file with ``setup_experiment.ipynb``.
-
-The JSON format is compatible with the older ``project_config`` configs
-(experiment_key, experiment_name, base_dir, mac_base_dir, well_list,
-well_metadata, ...). Fields added here are optional:
-
-- ``well_metadata[well]["treatment_time"]`` and any extra per-well columns
-- ``condition_columns``: metadata columns that define a sample_ID
-- ``derived_features``: ``[{"name": ..., "formula": ...}]`` used by notebook 07
-- ``paths``: per-folder overrides, absolute or relative to base_dir
-- ``anchor_round``: the round every other round is aligned onto and cells are
-  outlined on (notebooks 02, 03, 06), counted from 0; default 0, the first round
-"""
+"""@TODO."""
 
 import json
 import os
@@ -27,6 +6,7 @@ import platform
 import shutil
 
 from .metadata import normalize_well, plate_sort_key, to_sample_id
+from .report import say
 
 CONFIG_NAME = "experiment.json"
 
@@ -230,15 +210,15 @@ def load_config(path, announce=True):
 
 def announce_experiment(exp):
     """Print a banner with the experiment and warn about missing folders."""
-    print(f"Experiment: {exp.key or '(no key)'}" + (f" - {exp.name}" if exp.name else ""))
-    print(f"  config:   {exp.config_path}")
-    print(f"  base_dir: {exp.base_dir}")
-    print(f"  wells:    {len(exp.well_list)}")
+    say(f"Experiment: {exp.key or '(no key)'}" + (f" - {exp.name}" if exp.name else ""))
+    say(f"  config:   {exp.config_path}")
+    say(f"  base_dir: {exp.base_dir}")
+    say(f"  wells:    {len(exp.well_list)}")
     if not os.path.isdir(exp.base_dir):
-        print(f"  WARNING: base_dir does not exist: {exp.base_dir}")
+        say(f"  WARNING: base_dir does not exist: {exp.base_dir}")
     for name in ("data", "info_file"):
         if not os.path.exists(exp.paths[name]):
-            print(f"  WARNING: {name} not found: {exp.paths[name]}")
+            say(f"  WARNING: {name} not found: {exp.paths[name]}")
 
 
 def save_config(config, path):

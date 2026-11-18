@@ -55,7 +55,7 @@ and is the Dock icon of the app opened from the bundle; `fouri.app.main` sets no
   folder that already has an experiment.json, an ND2 folder with no well's files, or an info_exp.csv that
   can't be read.
 - The details card (`wells.save_details`) writes `experiment_key`, `experiment_name`, `cell_type`, `passage`,
-  `date_completed` and `notes`, as the setup form does. The wells card (`wells.save_wells`) writes
+  `date_completed` and `notes`. The wells card (`wells.save_wells`) writes
   `well_list`, `well_metadata` (`metadata.table_to_config`) and `condition_columns`, and is refused while
   `check_metadata` finds an error. The standard three keep their Condition ticks whatever their values; an
   added column with no value in any well is saved in neither. With no ND2 files found, wells can be removed
@@ -64,7 +64,7 @@ and is the Dock icon of the app opened from the bundle; `fouri.app.main` sets no
 - The page never changes a sample ID already set, only one typed in its table or imported (a whole number
   above 0; a cleared one counts as none). On Save, `wells.fill_sample_ids` gives a well with none the ID of
   the first well in plate order with the same values in the condition columns, else one more than the
-  largest ID, in plate order; it does not call `assign_sample_ids`, which numbers every well again.
+  largest ID, in plate order.
 - The app's Experiment page (`config_to_save` in `fouri/app/pages/experiment.py`, with `path_entry` in
   `fouri/app/wells.py`) writes the results folder
   to the key it is read from on that PC (`mac_base_dir` on non-Windows if set, else `base_dir`), left out

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Jupyter notebooks for the Purvis lab 4i image-analysis pipeline: stitched ND2 images from the Photon
 microscope → per-cell feature tables → AnnData → PHATE plots. Lab members run the notebooks in order
-(`00`–`08`, after `setup_experiment.ipynb`), mostly on Windows with experiments on a `Z:` network drive.
+(`00`–`08`), mostly on Windows with experiments on a `Z:` network drive.
 Code shared between notebooks lives in the `fouri` package, `src/fouri/`.
 
 Further guidance is read on demand: a subdirectory's `CLAUDE.md` when a file under that directory is read, a
@@ -70,11 +70,10 @@ cells (one cutoff or two) meant to be run one or the other, so a top-to-bottom r
 
 Each notebook's first code cell is `CONFIG = r'...experiment.json'` followed by
 `exp = load_config(CONFIG)`; every folder and the well list come from `exp` (`fouri.config.Experiment`).
-`setup_experiment.ipynb` calls `fouri.setup_form` (an ipywidgets plate form), and the app's Experiment page
-starts an experiment and saves, each with its own Save, its paths and anchor round, the details, the wells
-with their metadata and condition columns, and the derived features; both write the file through
-`save_config`, which keeps the previous version as `experiment.json.bak`, and each of the page's Saves
-writes only its own keys, every other key as it was.
+The app's Experiment page starts an experiment and saves, each with its own Save, its paths and anchor round,
+the details, the wells with their metadata and condition columns, and the derived features; each Save writes
+the file through `save_config`, which keeps the previous version as `experiment.json.bak`, and writes only its
+own keys, every other key as it was.
 The page's rules are in `src/fouri/app/CLAUDE.md`.
 
 - `base_dir` is `mac_base_dir` on non-Windows if set, else `base_dir`, else the folder holding the config.
@@ -85,7 +84,7 @@ The page's rules are in `src/fouri/app/CLAUDE.md`.
   against that dict. New fields must be optional.
 - Optional `anchor_round`: the round every other round is aligned onto, counted from 0 like `round_index`;
   default 0, the first round in `info_exp.csv`. The app's Experiment page sets it and always writes it, 0
-  included. It is not in the setup form, which keeps any key it does not manage when it saves.
+  included.
 - Optional `app`: what the app's pages save, through `save_config`. `app.filters` and `app.labels` hold the
   filter and label rules, in the format given in `.claude/rules/filters-labels.md`; `app.embedding` holds the
   Embedding page's set-up, in the format given in `.claude/rules/embeddings.md`; `app.batch_effects` holds the
@@ -232,9 +231,8 @@ separator, a name ending in `.partial`, or a directory without `model.json`; Del
 
 ## Metadata and notebook 07
 
-- `sample_ID` is filled by `metadata.assign_sample_ids` (the setup form) unless every well already has one:
-  wells with the same values in `condition_columns` share an ID, numbered in plate order. The app's
-  Experiment page fills only the wells with none (`wells.fill_sample_ids`, in `src/fouri/app/CLAUDE.md`).
+- `sample_ID` is filled by the app's Experiment page, only for the wells with none (`wells.fill_sample_ids`,
+  in `src/fouri/app/CLAUDE.md`).
 - `features.build_fullest_df` joins each well's CSV (via `io.cell_data_path`, dropping an old `Unnamed: 0`
   column if present) with its `well_metadata`; `treatment_time` is renamed
   `treatment time` in `fullest_df` and `adata.obs` (`_OBS_NAMES`), the name 07 has always used.
