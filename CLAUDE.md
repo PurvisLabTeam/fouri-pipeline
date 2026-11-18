@@ -146,8 +146,9 @@ Every step takes `wells=` (checked and put in plate order by `Experiment.pick_we
 ## Fine-tuning Cellpose
 
 Fine-tune Cellpose (`fouri.finetune.finetune_cellpose(exp, n_epochs=100, wells=None)`; the step `finetune` in
-`fouri.run`, absent from the Run page, the Status page and the plate, and passed wells as the per-well steps are,
-through `status.WELL_STEPS`) trains a copy of Cellpose-SAM on the hand-edited rounds of the chosen wells.
+`fouri.run`, absent from the Run page, the Status page and the Experiment page's plate, and passed wells as the
+per-well steps are, through `status.WELL_STEPS`) trains a copy of Cellpose-SAM on the hand-edited rounds of the
+chosen wells.
 `training_squares` cuts, for each 4-connected region where a round's saved labels differ from its Cellpose original,
 a 300 × 300 px square of the round's alignment-channel image and saved labels, centered on the region's bounding box
 and moved inside the image at its edges; every square found is trained on, none held back, with Cellpose's
@@ -174,6 +175,17 @@ Segment nuclei's `model` setting is `None` for Cellpose-SAM, the default, or a k
 refuses a name `model_path` refuses before examining any well, and the run record keeps the name. The Run page's
 Model row lists Cellpose-SAM (built in) and each kept model by its shown name, and names under the row the models
 left out for an unreadable `model.json`.
+
+The app's Models page (`fouri/app/pages/models.py`) starts fine-tuning as a run of one step, with the wells chosen
+on the page's plate (`fouri.app.plate.wells_card`, the Run page's well chooser, every well chosen at first) and Epochs, a
+whole number of 1 or more, then opens the Run page, which shows the step's bar, Stop and log as for any run.
+Fine-tune is disabled while a run is going, while the GPU check has not answered and on a PC with no GPU. The page
+counts the corrected regions saved (`fouri.app.finetuning.corrected_regions`: the squares `training_squares` finds
+in every well, a well whose round table is missing or predates `raw_file_name` passed over) and names each well's
+rounds that hold them. The page lists the kept models with their created time, experiment key and wells, and the
+left-out line of the Run page's Model row. Delete asks, then removes the model's directory whole through
+`fouri.app.finetuning.delete_model`, which raises `FileNotFoundError`, removing nothing, for a name holding a path
+separator, a name ending in `.partial`, or a directory without `model.json`; Delete is disabled while a run is going.
 
 ## Inputs, naming and couplings
 

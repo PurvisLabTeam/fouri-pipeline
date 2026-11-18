@@ -117,3 +117,14 @@ async def pick_file(start: str | Path, *, suffix: str) -> Path | None:
 async def pick_folder(start: str | Path) -> Path | None:
     """Return a folder picked in a dialog opened at ``start``, or None if canceled."""
     return await _pick(start, suffix=None)
+
+
+async def ask(question: str, yes: str) -> bool:
+    with ui.dialog() as dialog, ui.card().classes("p-5 gap-3 max-w-lg"):
+        ui.label(question).classes("text-sm")
+        with ui.row().classes("w-full justify-end gap-2"):
+            ui.button("Cancel", on_click=lambda: dialog.submit(False)).props("flat")
+            ui.button(yes, on_click=lambda: dialog.submit(True))
+    answer = await dialog
+    dialog.delete()
+    return answer is True

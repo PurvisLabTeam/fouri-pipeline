@@ -18,6 +18,7 @@ from nicegui import run, ui
 from nicegui.events import GenericEventArguments, ValueChangeEventArguments
 
 from fouri.app.cells import Cells, load_cells
+from fouri.app.dialogs import ask
 from fouri.app.embeddings import sample_names, sample_number
 from fouri.app.figures import cells_line
 from fouri.app.gates import (
@@ -317,17 +318,6 @@ def _otsu(values: npt.NDArray[np.float64]) -> float | None:
     return suggestions[Threshold.OTSU][0] if Threshold.OTSU in suggestions else None
 
 
-async def _ask(question: str, yes: str) -> bool:
-    with ui.dialog() as dialog, ui.card().classes("p-5 gap-3 max-w-lg"):
-        ui.label(question).classes("text-sm")
-        with ui.row().classes("w-full justify-end gap-2"):
-            ui.button("Cancel", on_click=lambda: dialog.submit(False)).props("flat")
-            ui.button(yes, on_click=lambda: dialog.submit(True))
-    answer = await dialog
-    dialog.delete()
-    return answer is True
-
-
 class _LabelsPage:
     def __init__(self, exp: Experiment, cells: Cells, menu: Menu, kept: pd.Series | None, problem: str | None) -> None:
         self.exp = exp
@@ -479,7 +469,7 @@ class _LabelsPage:
     async def ask_discard(self) -> bool:
         self.asking = True
         try:
-            return await _ask(f"Discard the changes to {self.name_for_question()}?", "Discard")
+            return await ask(f"Discard the changes to {self.name_for_question()}?", "Discard")
         finally:
             self.asking = False
 
@@ -1005,7 +995,7 @@ class _LabelsPage:
             )
             self.asking = True
             try:
-                go_on = await _ask(question, "Clear the gates")
+                go_on = await ask(question, "Clear the gates")
             finally:
                 self.asking = False
             if not go_on:
@@ -1148,7 +1138,7 @@ class _LabelsPage:
             return
         self.asking = True
         try:
-            sure = await _ask(f'Delete the label "{_text(self.saved[index].get("column"))}"?', "Delete")
+            sure = await ask(f'Delete the label "{_text(self.saved[index].get("column"))}"?', "Delete")
         finally:
             self.asking = False
         if not sure:

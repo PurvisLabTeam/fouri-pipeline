@@ -6,8 +6,10 @@ far they have got and the Run page by whether they are picked.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Collection, Iterable, Mapping
 from string import ascii_uppercase
+from typing import Any
 
 from nicegui import ui
 
@@ -21,6 +23,9 @@ SMALLEST_COLUMNS = 12
 DASHED = "border: 1px dashed var(--c-line)"
 OUTLINED = "border: 2px solid var(--c-muted)"
 PALER = "opacity: 0.3"
+SECTION_TITLE = "text-[1.05rem] font-semibold"
+PICKED = "var(--c-primary)"
+NOT_PICKED = "var(--c-line)"
 
 
 def plate_grid(wells: Iterable[str]) -> tuple[list[str], list[int]]:
@@ -96,3 +101,75 @@ def plate(
                     cell.tooltip(texts[well])
                 if on_click is not None:
                     cell.classes("cursor-pointer").on("click", _click(on_click, well))
+
+
+def _text(value: Any) -> str:
+    """Return a metadata value as text, empty when missing."""
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return ""
+    return str(value).strip()
+
+
+def conditions(exp: Experiment) -> dict[str, list[str]]:
+    """Return each condition's wells, in plate order; a condition is its condition columns' values.
+
+    Columns no well has a value in are left out of the names.
+    """
+    wells = sorted({normalize_well(well) for well in exp.well_list}, key=plate_sort_key)
+    metadata = {normalize_well(well): values for well, values in exp.well_metadata.items()}
+    columns = [
+        column for column in exp.condition_columns if any(_text(metadata.get(w, {}).get(column)) for w in wells)
+    ]
+    groups: dict[str, list[str]] = {}
+    for well in wells:
+        values = [_text(metadata.get(well, {}).get(column)) for column in columns]
+        name = " · ".join(value for value in values if value) or "No condition"
+        groups.setdefault(name, []).append(well)
+    return groups
+
+
+def wells_card(exp: Experiment, picked: dict[str, bool]) -> None:
+    groups = conditions(exp)
+    hover = {well: f"{well}: {name}" for name, wells in groups.items() for well in wells}
+    with ui.card().classes("w-full p-4 gap-2"):
+        with ui.row().classes("items-center w-full"):
+            ui.label("Wells").classes(SECTION_TITLE)
+            ui.space()
+            count = ui.label().classes("text-sm muted")
+
+        @ui.refreshable
+        def drawn() -> None:
+            colors = {well: PICKED if on else NOT_PICKED for well, on in picked.items()}
+            plate(exp, colors, hover=hover, on_click=toggle)
+            count.text = f"{sum(picked.values())} of {len(picked)} wells chosen"
+
+        def pick(wells: set[str]) -> None:
+            for well in picked:
+                picked[well] = well in wells
+            drawn.refresh()
+
+        def toggle(well: str) -> None:
+            if well not in picked:  # not imaged
+                return
+            picked[well] = not picked[well]
+            condition.set_value(None)
+            drawn.refresh()
+
+        def pick_all(on: bool) -> None:
+            pick(set(picked) if on else set())
+            condition.set_value(None)
+
+        def pick_condition(name: str | None) -> None:
+            if name is not None:
+                pick(set(groups[name]))
+
+        drawn()
+        with ui.row().classes("items-center gap-2"):
+            ui.button("All", on_click=lambda: pick_all(True)).props("outline dense")
+            ui.button("None", on_click=lambda: pick_all(False)).props("outline dense")
+            condition = ui.select(
+                list(groups), label="Condition only", on_change=lambda event: pick_condition(event.value)
+            ).classes("w-56")
+        ui.label("Click a well to include or exclude it. Dashed wells were not imaged in this experiment.").classes(
+            "text-xs muted"
+        )

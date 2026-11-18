@@ -7,6 +7,7 @@ import h5py
 import pandas as pd
 from nicegui import run, ui
 
+from fouri.app.dialogs import ask
 from fouri.app.embeddings import embedding_names
 from fouri.app.exports import (
     BLANK_NAME,
@@ -94,17 +95,6 @@ def _embeddings(exp: Experiment) -> dict[str, str] | None:
     if not path.is_file():
         return None
     return embedding_names(ad.read_h5ad(path))
-
-
-async def _ask(question: str, yes: str) -> bool:
-    with ui.dialog() as dialog, ui.card().classes("p-5 gap-3 max-w-lg"):
-        ui.label(question).classes("text-sm")
-        with ui.row().classes("w-full justify-end gap-2"):
-            ui.button("Cancel", on_click=lambda: dialog.submit(False)).props("flat")
-            ui.button(yes, on_click=lambda: dialog.submit(True))
-    answer = await dialog
-    dialog.delete()
-    return answer is True
 
 
 def _no_table() -> None:
@@ -351,7 +341,7 @@ class _ExportPage:
             ui.button("Delete", on_click=lambda: self.delete(export)).props("flat dense no-caps color=negative")
 
     async def delete(self, export: ExportFile) -> None:
-        if not await _ask(DELETE.format(file=export.path.name), "Delete"):
+        if not await ask(DELETE.format(file=export.path.name), "Delete"):
             return
         try:
             export.path.unlink()
@@ -372,7 +362,7 @@ class _ExportPage:
         file_format = str(self.kind.value)
         path = export_path(self.exp, name, file_format)
         overwrite = path.exists()
-        if overwrite and not await _ask(REPLACE.format(file=path.name), "Replace"):
+        if overwrite and not await ask(REPLACE.format(file=path.name), "Replace"):
             return
         if run_going():
             return

@@ -16,7 +16,7 @@ from nicegui import events, run, ui
 
 from fouri.app.cells import CONDITION, PLATE_COLUMN, PLATE_ROW, WELL, Cells, load_cells
 from fouri.app.derived import FormulaCheck, check_formulas
-from fouri.app.dialogs import pick_file, pick_folder
+from fouri.app.dialogs import ask, pick_file, pick_folder
 from fouri.app.names import Feature, describe
 from fouri.app.plate import DASHED, OUTLINED, overall_state, plate
 from fouri.app.shell import page_frame
@@ -584,17 +584,6 @@ def _id_key(value: object) -> tuple[int, int, str]:
     return (0, value, "") if isinstance(value, int) else (1, 0, str(value))
 
 
-async def _ask(question: str, yes: str) -> bool:
-    with ui.dialog() as dialog, ui.card().classes("p-5 gap-3 max-w-lg"):
-        ui.label(question).classes("text-sm")
-        with ui.row().classes("w-full justify-end gap-2"):
-            ui.button("Cancel", on_click=lambda: dialog.submit(False)).props("flat")
-            ui.button(yes, on_click=lambda: dialog.submit(True))
-    answer = await dialog
-    dialog.delete()
-    return answer is True
-
-
 @ui.refreshable
 def _status_plate(problem: str, states: dict[str, State] | None) -> None:
     exp = STATE.experiment
@@ -1069,7 +1058,7 @@ class _Wells:
         if exp is None:
             return
         path = Path(exp.base_dir) / METADATA_CSV
-        if path.exists() and not await _ask(REPLACE_CSV, "Replace"):
+        if path.exists() and not await ask(REPLACE_CSV, "Replace"):
             return
         try:
             self._table().to_csv(path, index=False)

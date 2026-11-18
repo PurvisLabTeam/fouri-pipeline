@@ -8,7 +8,6 @@ the run going. With no GPU found, Run asks before Segment nuclei runs on the CPU
 from __future__ import annotations
 
 import datetime as dt
-import math
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
@@ -20,7 +19,7 @@ from tqdm import tqdm
 from fouri.app.batches import batch_setup_line, saved_batch_setup
 from fouri.app.embeddings import embedding_settings
 from fouri.app.gpu import images_to_segment
-from fouri.app.plate import plate
+from fouri.app.plate import wells_card
 from fouri.app.rules import switched_on_filters, switched_on_labels
 from fouri.app.runner import Bar, Run, StepProgress, StepRequest, time_left
 from fouri.app.shell import page_frame, running_line
@@ -42,8 +41,6 @@ from fouri.run import STEP_NAMES
 from fouri.status import PER_WELL_STEPS, Step
 
 SECTION_TITLE = "text-[1.05rem] font-semibold"
-PICKED = "var(--c-primary)"
-NOT_PICKED = "var(--c-line)"
 BADGE_STYLE = "background: var(--c-primary-soft); color: var(--c-primary)"
 WORKER_CHOICES = {0: "Automatic", 1: "1", 2: "2", 4: "4", 8: "8", 12: "12"}  # 0 is Automatic
 MAX_BARS = 3  # the step's own bars shown under the step bar
@@ -77,31 +74,6 @@ WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")  # not %a, which fo
 
 
 # -- what the page shows -------------------------------------------------------------------------
-
-
-def _text(value: Any) -> str:
-    """Return a metadata value as text, empty when missing."""
-    if value is None or (isinstance(value, float) and math.isnan(value)):
-        return ""
-    return str(value).strip()
-
-
-def conditions(exp: Experiment) -> dict[str, list[str]]:
-    """Return each condition's wells, in plate order; a condition is its condition columns' values.
-
-    Columns no well has a value in are left out of the names.
-    """
-    wells = sorted({normalize_well(well) for well in exp.well_list}, key=plate_sort_key)
-    metadata = {normalize_well(well): values for well, values in exp.well_metadata.items()}
-    columns = [
-        column for column in exp.condition_columns if any(_text(metadata.get(w, {}).get(column)) for w in wells)
-    ]
-    groups: dict[str, list[str]] = {}
-    for well in wells:
-        values = [_text(metadata.get(well, {}).get(column)) for column in columns]
-        name = " · ".join(value for value in values if value) or "No condition"
-        groups.setdefault(name, []).append(well)
-    return groups
 
 
 def open_bars(progress: StepProgress) -> list[Bar]:
@@ -189,53 +161,6 @@ def ending(run: Run) -> str:
 
 
 # -- the page ------------------------------------------------------------------------------------
-
-
-def _wells_card(exp: Experiment, picked: dict[str, bool]) -> None:
-    groups = conditions(exp)
-    hover = {well: f"{well}: {name}" for name, wells in groups.items() for well in wells}
-    with ui.card().classes("w-full p-4 gap-2"):
-        with ui.row().classes("items-center w-full"):
-            ui.label("Wells").classes(SECTION_TITLE)
-            ui.space()
-            count = ui.label().classes("text-sm muted")
-
-        @ui.refreshable
-        def drawn() -> None:
-            colors = {well: PICKED if on else NOT_PICKED for well, on in picked.items()}
-            plate(exp, colors, hover=hover, on_click=toggle)
-            count.text = f"{sum(picked.values())} of {len(picked)} wells chosen"
-
-        def pick(wells: set[str]) -> None:
-            for well in picked:
-                picked[well] = well in wells
-            drawn.refresh()
-
-        def toggle(well: str) -> None:
-            if well not in picked:  # not imaged
-                return
-            picked[well] = not picked[well]
-            condition.set_value(None)
-            drawn.refresh()
-
-        def pick_all(on: bool) -> None:
-            pick(set(picked) if on else set())
-            condition.set_value(None)
-
-        def pick_condition(name: str | None) -> None:
-            if name is not None:
-                pick(set(groups[name]))
-
-        drawn()
-        with ui.row().classes("items-center gap-2"):
-            ui.button("All", on_click=lambda: pick_all(True)).props("outline dense")
-            ui.button("None", on_click=lambda: pick_all(False)).props("outline dense")
-            condition = ui.select(
-                list(groups), label="Condition only", on_change=lambda event: pick_condition(event.value)
-            ).classes("w-56")
-        ui.label("Click a well to include or exclude it. Dashed wells were not imaged in this experiment.").classes(
-            "text-xs muted"
-        )
 
 
 def _control(step: Step, setting: Setting, values: dict[str, Any]) -> None:
@@ -583,7 +508,7 @@ def _content(exp: Experiment) -> None:
             with ui.column().classes("gap-0"):
                 ui.label("Steps").classes(SECTION_TITLE)
                 ui.label("Wells already done are skipped unless Overwrite is on.").classes("text-sm muted")
-            _wells_card(exp, picked)
+            wells_card(exp, picked)
             ui.select(WORKER_CHOICES, label="Wells processed in parallel").bind_value(workers, "count").classes("w-80")
             for badge, step in enumerate(RUN_PAGE_STEPS, start=1):
                 _step_card(exp, badge, step, ticked, overwrite, values[step])
