@@ -1,6 +1,8 @@
 """File helpers shared by the pipeline notebooks."""
 
+import os
 import pickle
+import sys
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -15,6 +17,7 @@ from tifffile import imread, imwrite
 
 from fouri.config import Experiment
 
+APP_DIR = "4i Pipeline"
 EXPOSURE_UNIT_VALUE: Final[dict[str, float]] = {
     "s": 1e3,
     "ms": 1,
@@ -55,6 +58,15 @@ def _normalize_exposure(exposure: float | None, exposure_time_unit: str | None) 
     if factor is None:
         return None
     return exposure * factor
+
+
+def app_data_dir() -> Path:
+    if sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA")
+        base = Path(local) if local else Path.home() / "AppData" / "Local"
+    else:
+        base = Path.home() / ".local" / "share"
+    return base / APP_DIR
 
 
 def fullest_df_path(exp: Experiment) -> Path:

@@ -10,6 +10,7 @@ from tifffile import imread
 
 from fouri.config import Experiment
 from fouri.io import alignment_paths, label_path, original_label_path, write_tiff
+from fouri.models import model_path
 from fouri.parallel import Failed, check_results, error_in_words
 from fouri.report import Stopped, progress, say, say_skipped
 
@@ -27,11 +28,13 @@ def segment_wells(
     flow_threshold: float = 0.4,
     cellprob_threshold: float = 0.0,
     min_size: int = 15,
+    model: str | None = None,
     allow_cpu: bool = False,
     overwrite: bool = False,
     wells: Sequence[str] | None = None,
 ) -> None:
     """Segment all the round images for all wells in the experiment."""
+    mod_path = str(model_path(model)) if model is not None else None
     worklist = {}
     skipped = []
     hand_edited = []
@@ -85,12 +88,12 @@ def segment_wells(
             raise RuntimeError(message)
         say("GPU not detected, segmenting on the CPU.")
 
-    model = models.CellposeModel(gpu=gpu)
+    cp_model = models.CellposeModel(gpu=gpu, pretrained_model=mod_path) if mod_path else models.CellposeModel(gpu=gpu)
 
-    if model.device.type == "cuda":
+    if cp_model.device.type == "cuda":
         say(f"Detected GPU: {torch.cuda.get_device_name(0)}")
-    if model.device.type != "cuda" and not allow_cpu:
-        raise RuntimeError(f"Cellpose is running on {model.device}, not the GPU.")
+    if cp_model.device.type != "cuda" and not allow_cpu:
+        raise RuntimeError(f"Cellpose is running on {cp_model.device}, not the GPU.")
 
     outcomes: list[str | Failed] = []  # each well's name, or its Failed
     for well, work in progress(worklist.items(), desc="Overall Progress", unit="well", total=len(worklist)):
@@ -103,7 +106,7 @@ def segment_wells(
                 for round_index, path_image, path_label in round_bar:
                     image = imread(path_image)
                     labels, peak_gb = segment_image(
-                        model,
+                        cp_model,
                         image,
                         diameter,
                         desc=f"Segmenting round {round_index}",
@@ -124,7 +127,7 @@ def segment_wells(
         else:
             outcomes.append(well)
 
-    del model
+    del cp_model
     torch.cuda.empty_cache()
     check_results(outcomes, unit="well")
 
