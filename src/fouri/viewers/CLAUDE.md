@@ -13,7 +13,7 @@ Read with the root `CLAUDE.md` when a file under `src/fouri/viewers/` is read.
   dropdown) and before its window closes, the base frame asks Save, Discard or Cancel when `_unsaved_rounds`
   names any, naming them; a round switch asks nothing. After Save or Discard on closing, the editor closes the
   window itself, so napari's own close question doesn't follow (napari's Ctrl+W and Ctrl+Q still ask theirs
-  first). `alignment.AlignmentViewer` is 02's optional check and 03: it starts each
+  first). `alignment.AlignmentViewer` checks Align rounds' transforms and aligns rounds by hand: it starts each
   round from its saved transform or from none, clicks snap to cell centers, Fit (Shift+F) needs 3 pairs with
   two clicks a third of the image apart. A failed well or round switch leaves the old one on screen and puts
   the reason in the prompt; a round the viewer doesn't offer (the anchor, or one the well lacks) opens its first
@@ -51,7 +51,8 @@ Read with the root `CLAUDE.md` when a file under `src/fouri/viewers/` is read.
   channel or holding an array of another shape, or with an unreadable `.json`, is refused and never written over. The
   panel is docked as its Qt widget (`panel.native`): napari
   resets a docked magicgui panel's dropdowns whenever a layer is added, removed or renamed, which would empty
-  the round list. 03 no longer uses Affinder, whose 0.5.0 calls `viewer._canvas_size`, removed in napari 0.9.
+  the round list. The hand alignment no longer uses Affinder, whose 0.5.0 calls `viewer._canvas_size`, removed
+  in napari 0.9.
 - `python -m fouri.viewers alignment --config <experiment.json> --well B02 [--round R2]` opens one viewer as
   its own program (the names are `EDITORS` in `viewers/__main__.py`: `alignment`, `segmentation` and `artifacts`) and waits until its window closes, as the
   app's Review page will start it: exit code 0 when the window is closed, 2 for an unknown editor or a well not

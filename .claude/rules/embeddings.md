@@ -6,7 +6,7 @@ paths:
   - "tests/test_embedding.py"
 ---
 
-# Embeddings (08)
+# Embeddings
 
 Loaded with the root `CLAUDE.md` when a file matching `paths` is read.
 
@@ -51,9 +51,10 @@ Original or ComBat-corrected (Original for a record without `values`).
   `embed_grid` states how many.
 - `rank_features(adata, features, samples=None, k=100, values="original")`: the picked features decide which
   cells are neighbors (k of them), and delve's `feature_select` scores every feature by how smoothly it changes
-  between neighbors, lower is better. For the picked features this is exactly old 08's Laplacian ranking.
-  delve's own `delve_fs` is not used: its test only finds changing features when most features don't change,
-  and on a 4i panel nearly every column follows the cell cycle (nothing found in 21 of 22 settings tried).
+  between neighbors, lower is better. For the picked features this is exactly the pre-refactor notebooks'
+  Laplacian ranking. delve's own `delve_fs` is not used: its test only finds changing features when most features
+  don't change, and on a 4i panel nearly every column follows the cell cycle (nothing found in 21 of 22 settings
+  tried).
 - `embed(path, method, features, *, samples, dims, settings, seed=42, values="original")`: one PHATE or UMAP
   run (`Method`), 2D or 3D, returning a row per cell of the file (NaN for samples left out). Seeded, and fitted on one maths
   thread (`threadpoolctl`): PHATE's coordinates otherwise shift with the thread count, mainly on its third

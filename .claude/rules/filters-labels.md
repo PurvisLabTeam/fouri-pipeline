@@ -63,4 +63,4 @@ labels with one column.
   within `sds` SD of the mean, 3 by default; `middle_values`, `curve_range` and `plot_threshold_histogram`
   take the same `sds`), `features.threshold_labels(values, cutoffs, classes)` (the classes are the label's
   names; `fouri.labels` uses it) and `plots.plot_threshold_histogram` (plotly; the cut-off lines are its only
-  shapes, so a page can make every shape draggable, and the Otsu–valley band is a trace). 07 doesn't use them.
+  shapes, so a page can make every shape draggable, and the Otsu–valley band is a trace).
