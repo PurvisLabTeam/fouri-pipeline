@@ -39,7 +39,7 @@ uv run pytest -m 'not slow and not gpu'  # the quick tests; -m slow for the ones
 # run one notebook top to bottom without touching the file in the repo
 uv run jupyter nbconvert --to notebook --execute --output-dir /tmp/nbrun 06_calculate_cell_properties.ipynb
 
-# run one step as its own program, as the app does (steps: convert segment align artifacts measure table batch embedding export)
+# run one step as its own program, as the app does (steps: convert segment align artifacts measure table batch embedding export finetune)
 uv run python -m fouri.run measure --config ~/data/4i_local_test/experiment.json --wells B02 --settings '{"overwrite": true}'
 ```
 
@@ -94,7 +94,7 @@ the writing and the reading side, so change them together.
 | Step | Writes | Read by |
 |------|--------|---------|
 | 00 | `output_df/round_table_{well}.csv`: one row per round × channel listed in `info_exp.csv`, with its ND2 file, acquisition settings, `is_align_channel` and `raw_file_name`. `output_images/{well}/Round_{round_name}_well{well}_{signal}.tif` (the `raw_file_name`): every channel of every round, cropped to the smallest image, with an OME header (pixel size, wavelengths, exposure); 0.3–0.9 GB per well | table: 01, 02, 03, 06, Find artifacts; images: 01 (the `is_align_channel` ones), 06 (all), Find artifacts (the image size from each header) |
-| 01 | `segmented/{well}/labels_{well}_round_{NNN}.tif` (Cellpose-SAM). The segmentation editor saves over these, and the first time it saves a round keeps the file as Cellpose left it in `segmented/{well}/cellpose_original/` under the same name; a round with a file there is hand-edited | 02, 03, 06 (anchor round only) |
+| 01 | `segmented/{well}/labels_{well}_round_{NNN}.tif` (Cellpose-SAM, or the kept fine-tuned model named in Segment nuclei's `model` setting). The segmentation editor saves over these, and the first time it saves a round keeps the file as Cellpose left it in `segmented/{well}/cellpose_original/` under the same name; a round with a file there is hand-edited | 02, 03, 06 (anchor round only) |
 | 02 | `output_df/tmat_{well}.npy`: rigid transforms (rounds × 3 × 3) indexed by `round_index`, identity for the anchor; found on the outlines at half size by default (`downscale_factor` 2: within 0.27 px of full size on the local wells, 4× faster) | 03, 06 |
 | 03 | replaces one entry of `tmat_{well}.npy` per saved round with a hand alignment: matching cells clicked in the alignment viewer (`fouri.viewers.AlignmentViewer`); creates the file if 02 never ran | 06 |
 | 04 | removed: 06 moves the anchor's outlines into each round instead of measuring aligned copies of the images | — |
@@ -142,6 +142,38 @@ Every output a step writes goes through `io.written_whole`: it is written to its
 file stays as it was. Readers match exact names or the `.tif` suffix, so a `.partial` left by a killed process is
 never read. `save_transforms` hands `numpy.save` an open file, since it adds `.npy` to any other name.
 Every step takes `wells=` (checked and put in plate order by `Experiment.pick_wells`); `None` means every well.
+
+## Fine-tuning Cellpose
+
+Fine-tune Cellpose (`fouri.finetune.finetune_cellpose(exp, n_epochs=100, wells=None)`; the step `finetune` in
+`fouri.run`, absent from the Run page, the Status page and the plate, and passed wells as the per-well steps are,
+through `status.WELL_STEPS`) trains a copy of Cellpose-SAM on the hand-edited rounds of the chosen wells.
+`training_squares` cuts, for each 4-connected region where a round's saved labels differ from its Cellpose original,
+a 300 × 300 px square of the round's alignment-channel image and saved labels, centered on the region's bounding box
+and moved inside the image at its edges; every square found is trained on, none held back, with Cellpose's
+`train_seg` at Cellpose's default settings except `n_epochs`. The step refuses an `n_epochs` below 1, then a PC without a CUDA
+GPU, before any square is read, and then a run with no square in any chosen well; a chosen well with no square is
+named and passed over. Cellpose drops a square with fewer than 5 nuclei (`min_train_masks`): a logging handler on
+the `cellpose.train` logger states the count and refuses the step when every square is dropped. The same handler
+moves the bar from Cellpose's epoch lines (epoch 0, epoch 5 and every 10th), so Stop ends training at the next such
+epoch; when no epoch line is recognized, the step states so, with the Cellpose version.
+
+Each fine-tuned model is kept until deleted, in `models/cellpose/<name>` under the app-data directory
+(`io.app_data_dir`: `%LOCALAPPDATA%\4i Pipeline` on Windows, `~/.local/share/4i Pipeline` elsewhere; NiceGUI's
+storage is its `nicegui` directory, `fouri.app.storage_dir`), the name being the creation time in ISO's compact
+form, `20261117T204206`. The directory is written as `<name>.partial`, renamed when training ends cleanly and
+removed on any failure or Stop; a name already in use, kept or `.partial`, refuses the step before training. The
+directory holds Cellpose's file `models/model` (1.2 GB) and `model.json`: `created` (ISO time), `experiment_key`,
+`config` (the experiment.json path), `wells` (each well with the rounds its squares come from), `squares` (the count
+found) and `n_epochs`. `fouri.models.kept_models` returns the readable kept models, newest first, and the names of
+the directories whose `model.json` cannot be read (not JSON, a key missing, or a value of the wrong type);
+`model_path(name)` returns a kept model's file and raises `FileNotFoundError` for a name not kept or not readable;
+`shown_name` gives the name the app shows, `Fine-tuned 2026-11-17 20:42 [4i_local_test: B02]`.
+
+Segment nuclei's `model` setting is `None` for Cellpose-SAM, the default, or a kept model's name: `segment_wells`
+refuses a name `model_path` refuses before examining any well, and the run record keeps the name. The Run page's
+Model row lists Cellpose-SAM (built in) and each kept model by its shown name, and names under the row the models
+left out for an unreadable `model.json`.
 
 ## Inputs, naming and couplings
 

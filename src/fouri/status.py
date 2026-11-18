@@ -47,9 +47,11 @@ class Step(StrEnum):
     BATCH = "batch"
     EMBEDDING = "embedding"
     EXPORT = "export"
+    FINETUNE = "finetune"
 
 
 PER_WELL_STEPS = (Step.CONVERT, Step.SEGMENT, Step.ALIGN, Step.ARTIFACTS, Step.MEASURE)
+WELL_STEPS = (*PER_WELL_STEPS, Step.FINETUNE)
 
 
 class State(StrEnum):

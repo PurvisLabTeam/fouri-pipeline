@@ -9,12 +9,15 @@ program.
 from __future__ import annotations
 
 import inspect
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from fouri.models import kept_models, shown_name
 from fouri.run import step_function
 from fouri.status import PER_WELL_STEPS, Step
+
+BUILT_IN_MODEL = "Cellpose-SAM (built in)"
 
 
 @dataclass(frozen=True)
@@ -24,6 +27,17 @@ class Setting:
     name: str
     label: str
     control: Literal["text", "number", "choice", "switch"]
+    choices: Callable[[], dict[Any, str]] | None = None
+
+
+def model_choices() -> dict[Any, str]:
+    models, _ = kept_models()
+    return {None: BUILT_IN_MODEL} | {model.name: shown_name(model) for model in models}
+
+
+def models_left_out() -> str | None:
+    _, skipped = kept_models()
+    return f"Left out, model.json can't be read: {', '.join(skipped)}." if skipped else None
 
 
 SETTINGS: dict[Step, list[Setting]] = {
@@ -33,6 +47,7 @@ SETTINGS: dict[Step, list[Setting]] = {
         Setting("flow_threshold", "Flow threshold", "number"),
         Setting("cellprob_threshold", "Cell probability threshold", "number"),
         Setting("min_size", "Smallest nucleus kept (px)", "number"),
+        Setting("model", "Model", "choice", model_choices),
     ],
     Step.ALIGN: [Setting("downscale_factor", "Downscale factor", "number")],
     Step.ARTIFACTS: [],
@@ -63,7 +78,7 @@ DESCRIPTIONS = {
 # the steps whose n_workers counts wells: Segment nuclei has no pool, and Embedding's counts runs
 WELL_WORKER_STEPS = (Step.CONVERT, Step.ALIGN, Step.MEASURE)
 
-RUN_PAGE_STEPS: tuple[Step, ...] = tuple(step for step in Step if step is not Step.EXPORT)
+RUN_PAGE_STEPS: tuple[Step, ...] = tuple(step for step in Step if step not in (Step.EXPORT, Step.FINETUNE))
 
 
 def _parameters(step: Step) -> dict[str, inspect.Parameter]:

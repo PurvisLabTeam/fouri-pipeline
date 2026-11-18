@@ -14,19 +14,14 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from fouri.app.shortcuts import icon_file
+from fouri.io import app_data_dir
 
-APP_FOLDER = "4i Pipeline"
 ICON = Path(__file__).resolve().parent / "icons" / "fouri-pipeline.png"
 
 
-def storage_folder() -> Path:
+def storage_dir() -> Path:
     """Return the folder NiceGUI keeps its storage in, inside the user's app-data."""
-    if sys.platform == "win32":
-        local = os.environ.get("LOCALAPPDATA")
-        base = Path(local) if local else Path.home() / "AppData" / "Local"
-    else:
-        base = Path.home() / ".local" / "share"
-    return base / APP_FOLDER / "nicegui"
+    return app_data_dir() / "nicegui"
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -36,7 +31,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     # NiceGUI reads the storage folder when it is imported, and creates only the path's last folder
-    folder = storage_folder()
+    folder = storage_dir()
     folder.mkdir(parents=True, exist_ok=True)
     os.environ["NICEGUI_STORAGE_PATH"] = str(folder)
 

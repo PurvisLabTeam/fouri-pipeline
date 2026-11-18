@@ -31,6 +31,7 @@ from fouri.app.steps import (
     Setting,
     can_tick,
     default,
+    models_left_out,
     settings_for,
     shown_settings,
     whole_number,
@@ -246,7 +247,12 @@ def _control(step: Step, setting: Setting, values: dict[str, Any]) -> None:
         box.bind_value(values, setting.name).classes("w-56")
     elif setting.control == "switch":
         ui.switch(setting.label).bind_value(values, setting.name)
-    else:  # text; no row is a choice yet
+    elif setting.control == "choice" and setting.choices is not None:
+        ui.select(setting.choices(), label=setting.label).bind_value(values, setting.name).classes("w-56")
+        left_out = models_left_out() if setting.name == "model" else None
+        if left_out:
+            ui.label(left_out).classes("text-xs text-warning")
+    else:  # text
         ui.input(setting.label).bind_value(values, setting.name).classes("w-56")
 
 

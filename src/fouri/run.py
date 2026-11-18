@@ -34,7 +34,7 @@ from fouri import report
 from fouri.config import Experiment, load_config
 from fouri.io import adata_sub_path, run_record_path
 from fouri.parallel import error_in_words
-from fouri.status import PER_WELL_STEPS, Step
+from fouri.status import WELL_STEPS, Step
 
 STEP_NAMES = {
     Step.CONVERT: "Convert images",
@@ -46,6 +46,7 @@ STEP_NAMES = {
     Step.BATCH: "Batch effects",
     Step.EMBEDDING: "Embedding",
     Step.EXPORT: "Export",
+    Step.FINETUNE: "Fine-tune Cellpose",
 }
 EXIT_CODES = {"done": 0, "failed": 1, "stopped": 3}
 
@@ -153,6 +154,10 @@ def step_function(step: Step) -> Callable[..., Any]:
         from fouri.export import export_cells
 
         return export_cells
+    if step is Step.FINETUNE:
+        from fouri.finetune import finetune_cellpose
+
+        return finetune_cellpose
     return build_cell_table if step is Step.TABLE else make_embeddings
 
 
@@ -237,7 +242,7 @@ def run_step(
     started = time.monotonic()
     try:
         exp = load_config(config, announce=False)
-        if step in PER_WELL_STEPS:
+        if step in WELL_STEPS:
             settings["wells"] = exp.pick_wells(wells)
         elif wells is not None:
             raise ValueError(f"{STEP_NAMES[step]} always uses every well; it takes no wells.")
