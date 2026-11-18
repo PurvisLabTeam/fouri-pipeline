@@ -20,7 +20,6 @@ from fouri.app.embeddings import (
     LONGEST,
     ORIGINAL,
     RECORDS,
-    SETTING_LABELS,
     SHORTEST,
     box_shape,
     data_proportions,
@@ -34,8 +33,6 @@ from fouri.app.embeddings import (
     sample_names,
     sample_number,
     save_setup,
-    saved_setup,
-    setup_runs,
     time_text,
     total_seconds,
 )
@@ -46,6 +43,7 @@ from fouri.app.steps import default
 from fouri.app.theme import on_white_panel, restyle
 from fouri.config import Experiment
 from fouri.embedding import Method, Run, rank_features, run_key
+from fouri.embedding_setup import SETTING_LABELS, saved_setup, setup_runs
 from fouri.io import COMBAT_LAYER, adata_sub_path, read_info_file
 from fouri.parallel import error_in_words
 from fouri.plots import plot_embedding

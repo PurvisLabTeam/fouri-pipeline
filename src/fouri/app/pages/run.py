@@ -17,7 +17,6 @@ from nicegui import ui
 from tqdm import tqdm
 
 from fouri.app.batches import batch_setup_line, saved_batch_setup
-from fouri.app.embeddings import embedding_settings
 from fouri.app.gpu import images_to_segment
 from fouri.app.plate import wells_card
 from fouri.app.rules import switched_on_filters, switched_on_labels
@@ -36,6 +35,7 @@ from fouri.app.steps import (
     whole_number,
 )
 from fouri.config import Experiment, load_config
+from fouri.embedding_setup import embedding_settings
 from fouri.metadata import normalize_well, plate_sort_key
 from fouri.run import STEP_NAMES
 from fouri.status import PER_WELL_STEPS, Step
