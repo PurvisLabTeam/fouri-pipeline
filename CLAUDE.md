@@ -41,7 +41,15 @@ uv run jupyter nbconvert --to notebook --execute --output-dir /tmp/nbrun 06_calc
 
 # run one step as its own program, as the app does (steps: convert segment align artifacts measure table batch embedding export finetune)
 uv run python -m fouri.run measure --config ~/data/4i_local_test/experiment.json --wells B02 --settings '{"overwrite": true}'
+# the same with the settings in a YAML or JSON file, and one setting replaced on the command line
+uv run python -m fouri.run measure --config experiment.json --wells B02 --settings-file measure.yaml ring_width=8
 ```
+
+`--settings` takes a step's settings as a JSON object and `--settings-file` as a YAML or JSON file; giving both is
+refused. Each `key=value` argument in any position, a `--wells` value holding `=` included, replaces one setting,
+with the value read as YAML (`8`, `true`, `[B02, B09]`), and the run record holds the merged settings. The Embedding
+step given no `runs` makes the runs of the experiment's saved set-up (`app.embedding`), each setting given replacing
+the set-up's.
 
 Tests are pytest under `tests/`, on a made-up three-well experiment (`tests/builders.py` writes what each
 step would have, `tests/conftest.py` the fixture); they cover only mistakes that would lose or miscount data
@@ -107,10 +115,11 @@ the writing and the reading side, so change them together.
 
 `NNN` is the 0-based `round_index`, zero-padded to 3 digits. A step run through `python -m fouri.run` (the app)
 also adds a "started" and an "ended" line to `run_record.jsonl` in `base_dir` (`io.run_record_path`). The app's
-Run page starts its steps that way one after another (`fouri.app.runner.Run`), each step's progress file, stop file
-and printed output in `fouri-app/<run id>/` under the system's temporary folder; the run id, also in the run record,
-is the run's start time in ISO's compact form, `20261109T173005`, with `-2`, `-3` and so on added when a run's folder
-of that id already exists.
+Run page starts its steps that way one after another (`fouri.app.runner.Run`), each step's settings file
+(`<step>.settings.json`, passed to the step through `--settings-file`), progress file, stop file and printed output in
+`fouri-app/<run id>/` under the system's temporary folder; the run id, also in the run record, is the run's start
+time in ISO's compact form, `20261109T173005`, with `-2`, `-3` and so on added when a run's folder of that id already
+exists.
 
 File names live in `fouri/io.py` (`round_table_path`, `tmat_path`, `cell_data_path`, `label_paths`,
 `label_path`, `original_label_path`, `mask_path`, `mask_paths`, `mask_record_path`, `fullest_df_path`, `adata_path`, `adata_sub_path`, `run_record_path`, `export_path`), with the functions that read and write those
@@ -259,6 +268,9 @@ does, the embedding keys (`run_key`) and the `app.embedding` format are in `.cla
 - `delve-fs` is pinned to a tag on the omar-merhebi fork until the upstream change is merged.
 - OpenCV is `opencv-python-headless`, the build Cellpose also uses; the plain `opencv-python` bundles its
   own Qt, which can clash with napari's.
+- OmegaConf is used only by `python -m fouri.run`, to read `--settings-file` and the `key=value` overrides;
+  PyYAML, installed with OmegaConf, supplies the error caught for a file that is not YAML or JSON, and
+  `types-PyYAML` in the dev group types PyYAML for mypy.
 
 ## Register of app text, messages and slides
 

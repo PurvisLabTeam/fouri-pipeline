@@ -1,6 +1,6 @@
 ---
 paths:
-  - "src/fouri/{embedding,plots,run}.py"
+  - "src/fouri/{embedding,embedding_setup,plots,run}.py"
   - "src/fouri/app/embeddings.py"
   - "src/fouri/app/pages/{embedding,run}.py"
   - "tests/test_embedding.py"
@@ -20,9 +20,14 @@ Loaded with the root `CLAUDE.md` when a file matching `paths` is read.
 offers Values, Original or ComBat-corrected, only when `standard_adata_sub.h5ad` holds `layers["combat"]`, ranks
 the features with the choice and saves the choice; without the layer the tab saves `original`, and states so under
 Save when the saved set-up said `combat`.
-`fouri.app.embeddings.saved_setup` reads it, None when missing, and refuses one with a key missing or of the
-wrong type; `embedding_settings` turns it into what the Run page's Embedding card sends `make_embeddings`: every
-run of the set-up not skipped, `picked`, `samples`, `ranking_k`, `seed` and `values`.
+`fouri.embedding_setup` holds `saved_setup`, which reads the set-up, None when missing, and refuses one with a key
+missing or of the wrong type, and `embedding_settings`, which turns the set-up into what the Run page's Embedding
+card sends `make_embeddings`: every run of the set-up not skipped, `picked`, `samples`, `ranking_k`, `seed` and
+`values`. The app imports both from there. The Embedding step given no `runs` key, as typed after
+`python -m fouri.run`, uses the same `embedding_settings`: `fouri.run.run_step` resolves the saved set-up before
+checking the settings and writing the started line, each setting given replacing the set-up's of the same key, so
+the run record holds the settings the step runs with, as from the Run page. No set-up saved, or a set-up with every
+run unticked, is refused there; runs given, an empty list included, are passed as given.
 
 The view tab shows a Corrected values switch with Color by marker when the subsample holds `layers["combat"]`;
 choosing an embedding sets the switch to whether the record's `values` is `combat`, and with the switch on the
