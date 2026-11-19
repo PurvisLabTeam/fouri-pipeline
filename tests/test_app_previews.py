@@ -17,15 +17,16 @@ SWITCHED_OFF = {**SMALL_AREAS, "name": "very small areas", "use": False, "high":
 KEY = "X_phate_3d_top2_knn5"
 
 
-def _table(exp: Experiment) -> Experiment:
-    varied_cell_data(exp)
+def _table(exp: Experiment, wells: Sequence[str] | None = None) -> Experiment:
+    varied_cell_data(exp, wells)
     exp = with_filters(exp, [SMALL_AREAS, SWITCHED_OFF])
     run.build_cell_table(exp, filters=switched_on_filters(exp))
     return exp
 
 
-def test_kept_cells_match_build_cell_tables_included(experiment: Experiment) -> None:
-    exp = _table(experiment)
+@pytest.mark.parametrize("wells", [None, ["B02", "C02"]], ids=["every-well", "one-well-not-measured"])
+def test_kept_cells_match_build_cell_tables_included(experiment: Experiment, wells: Sequence[str] | None) -> None:
+    exp = _table(experiment, wells)
 
     cells = load_cells(exp)
     kept, problem = kept_cells(cells, exp)

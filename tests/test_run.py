@@ -499,6 +499,42 @@ def test_a_per_sample_filter_with_a_well_lacking_sample_id_is_refused(experiment
     assert _table_files(exp) == {}
 
 
+def _without_round(exp: Experiment, well: str, round_name: str) -> None:
+    path = io.cell_data_path(exp, well)
+    cells = pd.read_csv(path)
+    cells.drop(columns=[column for column in cells.columns if column.startswith(f"{round_name}_")]).to_csv(
+        path, index=False
+    )
+
+
+def test_build_cell_table_builds_from_the_measured_wells_and_names_the_others(
+    experiment: Experiment, tmp_path: Path
+) -> None:
+    varied_cell_data(experiment, ["B02", "B03"])
+    _without_round(experiment, "B03", "R2")
+    progress = tmp_path / "progress.jsonl"
+    report.report_to(progress)
+
+    run.build_cell_table(experiment)
+
+    built = pd.read_csv(io.fullest_df_path(experiment))
+    measured_cells = pd.read_csv(io.cell_data_path(experiment, "B02"))
+    lines = [json.loads(line) for line in progress.read_text(encoding="utf-8").splitlines()]
+    said = [line["text"] for line in lines if line["event"] == "message"]
+    assert built["well"].astype(str).tolist() == ["B02"] * len(measured_cells)
+    assert any("B03" in text and "C02" in text for text in said)
+
+
+def test_build_cell_table_refuses_when_no_well_is_measured(experiment: Experiment) -> None:
+    varied_cell_data(experiment, ["B02"])
+    _without_round(experiment, "B02", "R2")
+
+    with pytest.raises(ValueError):
+        run.build_cell_table(experiment)
+
+    assert _table_files(experiment) == {}
+
+
 def test_embedding_refuses_a_subsample_from_another_cell_table(experiment: Experiment, stand_in_umap: object) -> None:
     varied_cell_data(experiment)
     run.build_cell_table(experiment)

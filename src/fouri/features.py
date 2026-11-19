@@ -74,10 +74,12 @@ def measured_columns(exp: Experiment) -> list[str]:
     return sorted(dict.fromkeys(measured))
 
 
-def build_fullest_df(exp):
+def build_fullest_df(exp: Experiment, wells: Sequence[str]) -> pd.DataFrame:
     """Concatenate every well's cell_data CSV and add its metadata from the config."""
     frames = []
-    for well, meta in exp.well_metadata.items():
+    metadata = exp.well_metadata
+    for well in wells:
+        meta = metadata[well]
         df = pd.read_csv(cell_data_path(exp, well), sep=",")
         meta_df = pd.DataFrame(
             {_OBS_NAMES.get(c, c): [v] * len(df) for c, v in meta.items()},

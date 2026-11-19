@@ -67,7 +67,7 @@ def build_adata(exp: Experiment, fullest_df: pd.DataFrame, labels: Sequence[str]
         features = features.drop(columns=unusable)
     features.index = pd.Index(names)
 
-    round_tables = pd.concat([read_round_table(exp, well) for well in exp.well_list], ignore_index=True)
+    round_tables = pd.concat([read_round_table(exp, well) for well in fullest_df["well"].unique()], ignore_index=True)
     adata = ad.AnnData(
         X=features.to_numpy(),
         obs=obs,

@@ -41,7 +41,7 @@ from fouri.io import adata_path, adata_sub_path, run_record_path
 from fouri.parallel import error_in_words
 from fouri.preprocess import changed_wells
 from fouri.report import say
-from fouri.status import WELL_STEPS, Step
+from fouri.status import WELL_STEPS, Step, measured_wells
 
 STEP_NAMES = {
     Step.CONVERT: "Convert images",
@@ -106,8 +106,16 @@ def build_cell_table(exp: Experiment, filters: Sequence[str] = (), labels: Seque
             f"Invalid derived feature names found: {', '.join(clashed_names)}. "
             "Please use derived feature names that do not end in '_covered' and that don't clash with existing ones."
         )
+    wells_measured, wells_unmeasured = measured_wells(exp)
+    if not wells_measured:
+        raise ValueError("Cannot build cell table; no well has been measured yet. Run measure cells first.")
+    if wells_unmeasured:
+        say(
+            f"Building cell table from {len(wells_measured)} of {len(exp.well_list)} wells. "
+            f"The following wells have not been measured yet: {', '.join(wells_unmeasured)}."
+        )
 
-    table = add_derived_features(build_fullest_df(exp), exp.derived_features)
+    table = add_derived_features(build_fullest_df(exp, wells_measured), exp.derived_features)
     initial_count = len(table)
     table, dropped_count = remove_covered(table)
     filter_rules = named_filters(exp, filters)

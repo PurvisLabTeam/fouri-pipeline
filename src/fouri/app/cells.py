@@ -17,8 +17,8 @@ from fouri.app.names import Feature, describe
 from fouri.config import Experiment
 from fouri.features import add_derived_features, metadata_obs_columns
 from fouri.io import cell_data_path, read_info_file
-from fouri.metadata import natural_key, normalize_well, plate_sort_key
-from fouri.status import State, Step, step_status
+from fouri.metadata import natural_key, normalize_well
+from fouri.status import measured_wells
 
 # the groups added besides the wells' metadata
 CONDITION = "condition"
@@ -129,10 +129,7 @@ def _covered(table: pd.DataFrame) -> pd.Series:
 
 
 def _load(exp: Experiment) -> Cells:
-    status = step_status(exp, Step.MEASURE)
-    wells = sorted(status, key=plate_sort_key)
-    measured = [well for well in wells if status[well].state == State.COMPLETE]
-    missing = [well for well in wells if well not in measured]
+    measured, missing = measured_wells(exp)
     if not measured:
         return Cells(pd.DataFrame(), pd.DataFrame(), {}, [], measured, missing, pd.Series(dtype=bool))
 

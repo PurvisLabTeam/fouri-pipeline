@@ -83,6 +83,14 @@ class OutputStatus:
     note: str = ""
 
 
+def measured_wells(exp: Experiment) -> tuple[list[str], list[str]]:
+    measured_stats = step_status(exp, Step.MEASURE)
+    completed = [well for well, status in measured_stats.items() if status.state is State.COMPLETE]
+    not_completed = [well for well, status in measured_stats.items() if status.state is not State.COMPLETE]
+
+    return completed, not_completed
+
+
 def step_status(exp: Experiment, step: Step | str, wells: Sequence[str] | None = None) -> dict[str, WellStatus]:
     """Return each chosen well's state for one per-well step, in plate order."""
     step = Step(step)
