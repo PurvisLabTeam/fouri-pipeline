@@ -36,6 +36,12 @@ def measure_wells(
 
     @TODO.
     """
+    if ring_width < 1:
+        raise ValueError(f"Ring width must be >= 1. Got {ring_width}")
+    if ring_gap < 0:
+        raise ValueError(f"Ring gap must be >= 0. Got {ring_gap}")
+    if ring_gap >= ring_width:
+        raise ValueError(f"Ring gap must be less than ring width. Got ring_gap={ring_gap}, ring_width={ring_width}")
     if edge_margin < 0:
         raise ValueError(f"Edge margin must be >= 0. Got {edge_margin}")
 
@@ -92,6 +98,16 @@ def measure_well(
     round_table = read_round_table(exp, well)
     require_raw_files(round_table, well)
     transforms = load_transforms(exp, well)
+    if (tr := transforms.shape[0]) < (ta := round_table["round_index"].nunique()):
+        raise ValueError(
+            f"Not all rounds are aligned: found alignment for {tr} rounds but the round table has {ta} rounds."
+        )
+    if not np.allclose(transforms[exp.anchor_round], np.eye(3, 3)):
+        raise ValueError(
+            f"Transforms were saved with a different anchor round than round {exp.anchor_round}. "
+            "Align this well again with overwrite. WARNING: this also replaces manually aligned rounds."
+        )
+
     unaligned = set(np.flatnonzero(np.isnan(transforms).any(axis=(1, 2))).tolist())
     unaligned_round_names = [
         str(row.round_name)
@@ -104,6 +120,9 @@ def measure_well(
             "Align these rounds before measuring."
         )
     labels = read_labels(exp.segmented, well, [exp.anchor_round])[0]
+    unique_labels = np.unique(labels)
+    starting_cells = len(unique_labels[unique_labels != 0])
+
     cleaned = clear_border(labels)
     rings = make_rings(cleaned, ring_width, ring_gap)
     table = pd.DataFrame(
@@ -141,6 +160,8 @@ def measure_well(
 
         no_data = (images == 0).all(axis=-1)
         has_data = ~no_data
+        has_data[[0, -1], :] = False
+        has_data[:, [0, -1]] = False
         has_data_in_anchor = move_to_anchor(has_data, transform)
         covered &= has_data_in_anchor  # pixels are true only where this round and every one before it had data
 
@@ -175,9 +196,13 @@ def measure_well(
         ring_means.append(_mean_per_cell(round_rings, images, columns=[prfx + "_ring_mean" for prfx in prefixes]))
         col_prefixes.extend(prefixes)
 
-    covered = cv2.erode(covered.astype(np.uint8), np.full((3, 3), 1, dtype=np.uint8), iterations=edge_margin).astype(
-        bool
-    )
+    covered = cv2.erode(
+        covered.astype(np.uint8),
+        np.full((3, 3), 1, dtype=np.uint8),
+        borderType=cv2.BORDER_CONSTANT,
+        borderValue=0,
+        iterations=edge_margin,
+    ).astype(bool)
 
     tables = [table, *nuc_means, rings_table, *ring_means, *covers]
     cells = functools.reduce(lambda left, right: pd.merge(left, right, on="label", how="inner"), tables)
@@ -197,11 +222,17 @@ def measure_well(
     lost_labels = lost_labels[lost_labels != 0]
     cells = cells[~cells["label"].isin(lost_labels)]
 
+    if cells.empty:
+        raise ValueError(
+            f"Nothing written for well {well}: no cells left to measure after clearing border cells, cells within "
+            f"edge_margin={edge_margin} and cells without a ring (ring_width={ring_width}, ring_gap={ring_gap})."
+        )
+
     path = cell_data_path(exp, well)
     path.parent.mkdir(parents=True, exist_ok=True)
     with written_whole(path) as partial:
         cells.to_csv(partial, index=False)
-    return path, len(lost_labels)
+    return path, starting_cells - len(cells)
 
 
 def _mean_per_cell(labels: npt.NDArray[Any], images: npt.NDArray[Any], columns: list[str]) -> pd.DataFrame:
