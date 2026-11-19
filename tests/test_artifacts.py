@@ -1,7 +1,11 @@
 import json
 from pathlib import Path
+from typing import Any
 
+import numpy as np
+import numpy.typing as npt
 import pytest
+import scipy.ndimage as ndi
 from builders import converted, masked
 
 from fouri import artifacts, io
@@ -9,6 +13,13 @@ from fouri.config import Experiment
 from fouri.report import StepFailed
 
 PAINTED = {"DNA": (slice(20, 30), slice(20, 30))}
+
+BLOB_SIZE = 128
+BLOB_RADIUS = 8
+BIG_SEED_CENTER = (40, 40)
+SMALL_SEED_CENTER = (90, 90)
+SPREAD = 4
+PAD = 3
 
 BROKEN_RECORDS = [
     pytest.param("{not json", id="not-json"),
@@ -103,3 +114,78 @@ def test_masks_without_a_record_are_skipped_without_overwrite(experiment: Experi
 
     assert io.mask_path(experiment, "B02", 1).read_bytes() == masks
     assert not io.mask_record_path(experiment, "B02", 1).exists()
+
+
+def _disk(center: tuple[int, int]) -> npt.NDArray[np.bool_]:
+    rows, cols = np.ogrid[:BLOB_SIZE, :BLOB_SIZE]
+    return np.asarray((rows - center[0]) ** 2 + (cols - center[1]) ** 2 <= BLOB_RADIUS**2)
+
+
+def _excess() -> tuple[npt.NDArray[np.float32], float]:
+    image = np.random.default_rng(0).normal(1000, 20, (BLOB_SIZE, BLOB_SIZE))
+    for center in (BIG_SEED_CENTER, SMALL_SEED_CENTER):
+        image[_disk(center)] += 400
+    return artifacts.excess_over_background(image.astype(np.uint16))
+
+
+def _seeds(*, small: bool = False) -> npt.NDArray[np.uint16]:
+    outlines = np.zeros((BLOB_SIZE, BLOB_SIZE), dtype=np.uint16)
+    row, col = BIG_SEED_CENTER
+    outlines[row - 3 : row + 3, col - 3 : col + 3] = 1
+    if small:
+        row, col = SMALL_SEED_CENTER
+        outlines[row - 1 : row + 2, col - 1 : col + 2] = 2
+    return outlines
+
+
+def _grown(outlines: npt.NDArray[np.uint16], spread: int, pad: int, **options: Any) -> npt.NDArray[np.bool_]:
+    excess, noise = _excess()
+    values = dict.fromkeys(range(1, int(outlines.max()) + 1), (spread, pad))
+    return artifacts.grow_artifacts(outlines, excess, noise, values, **options)
+
+
+def _near(center: tuple[int, int]) -> npt.NDArray[np.bool_]:
+    return np.asarray(ndi.binary_dilation(_disk(center), iterations=PAD))
+
+
+def test_spread_grows_an_artifact_over_its_excess() -> None:
+    final = _grown(_seeds(), SPREAD, 0)
+
+    assert final[_disk(BIG_SEED_CENTER)].all()
+    assert not final[~_near(BIG_SEED_CENTER)].any()
+
+
+def test_spread_0_keeps_the_painted_seed() -> None:
+    outlines = _seeds()
+
+    final = _grown(outlines, 0, 0)
+
+    np.testing.assert_array_equal(final, outlines == 1)
+
+
+def test_pad_widens_the_grown_mask() -> None:
+    grown = _grown(_seeds(), SPREAD, 0)
+
+    padded = _grown(_seeds(), SPREAD, PAD)
+
+    np.testing.assert_array_equal(padded, ndi.binary_dilation(grown, iterations=PAD))
+
+
+def test_an_artifact_under_the_minimum_size_is_left_out() -> None:
+    outlines = _seeds(small=True)
+
+    final = _grown(outlines, SPREAD, 0, min_size=25)
+    kept = _grown(outlines, SPREAD, 0, min_size=9)
+
+    assert final[_disk(BIG_SEED_CENTER)].all()
+    assert not final[_near(SMALL_SEED_CENTER)].any()
+    assert kept[_disk(SMALL_SEED_CENTER)].all()
+
+
+def test_growth_leaves_the_outlines_unchanged() -> None:
+    outlines = _seeds(small=True)
+    painted = outlines.copy()
+
+    _grown(outlines, SPREAD, PAD, min_size=9)
+
+    np.testing.assert_array_equal(outlines, painted)
