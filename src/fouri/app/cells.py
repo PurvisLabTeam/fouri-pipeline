@@ -118,6 +118,11 @@ def _as_built(base: pd.DataFrame, exp: Experiment) -> pd.DataFrame:
     return base.copy()
 
 
+def blank_as_missing(values: pd.Series) -> pd.Series:
+    text = values.astype("string")
+    return text.mask(text.eq(BLANK))
+
+
 def _covered(table: pd.DataFrame) -> pd.Series:
     columns = [column for column in table.columns if str(column).endswith(COVER)]
     return table[columns].eq(True).any(axis=1)

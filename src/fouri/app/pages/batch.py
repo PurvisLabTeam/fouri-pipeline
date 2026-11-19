@@ -51,6 +51,9 @@ UNREADABLE = "The saved set-up can't be read. Save it again."
 NOT_SAVED = "The set-up was not saved: {error}"
 CONDITIONS_TITLE = "Conditions and their batches"
 LEFT_OUT = "(one {batch} only; left out)"
+BLANK_WELLS = (
+    "The following wells have been excluded from batch correction because they have no value in {column}: {wells}."
+)
 WORKING = "Working out the numbers…"
 FAILED = "The numbers could not be worked out: {error}"
 NEAR = (
@@ -324,6 +327,9 @@ class _BatchPage:
 
     def warnings(self, live: LiveNumbers) -> list[str]:
         texts = [live.problem] if live.problem else []
+        for column, wells in live.blank_wells.items():
+            listed = ", ".join(f"{well} ({count:,} cells)" for well, count in wells.items())
+            texts.append(BLANK_WELLS.format(column=column, wells=listed))
         metrics = live.metrics
         if (
             metrics is not None
@@ -416,6 +422,9 @@ class _BatchPage:
         with self.results:
             if live.why_not is not None:
                 ui.label(live.why_not).classes("text-sm")
+                for column, wells in live.blank_wells.items():
+                    listed = ", ".join(f"{well} ({count:,} cells)" for well, count in wells.items())
+                    _warning(BLANK_WELLS.format(column=column, wells=listed))
                 return
             for text in self.warnings(live):
                 _warning(text)

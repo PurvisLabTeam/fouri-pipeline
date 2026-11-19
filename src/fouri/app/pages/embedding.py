@@ -33,6 +33,7 @@ from fouri.app.embeddings import (
     sample_names,
     sample_number,
     save_setup,
+    subsample_is_current,
     time_text,
     total_seconds,
 )
@@ -58,6 +59,7 @@ MODE_SECONDS = 0.25
 PLOT_MARGIN = {"l": 40, "r": 20, "t": 50, "b": 40}
 WHITE_PANEL = "background: #FFFFFF; border-radius: 12px"
 NO_PANEL = "background: transparent"
+EARLIER_TABLE = "Made from an earlier cell table. Run Embedding with Overwrite to update it."
 SCALE_NOTE = "Markers are colored by their z-score; the color scale runs from the 1st to the 99th percentile."
 CORRECTED_NOTE = (
     "Markers are colored by their ComBat-corrected z-score; the color scale runs from the 1st to the 99th "
@@ -163,6 +165,10 @@ def _view_tab(adata: ad.AnnData, exp: Experiment) -> None:
     )
     view.corrected = has_combat and _made_on_combat(adata, view.key)
 
+    if not subsample_is_current(exp, adata):
+        with ui.row().classes("items-center gap-2 no-wrap"):
+            ui.icon("warning").classes("text-base text-warning")
+            ui.label(EARLIER_TABLE).classes("text-sm")
     with ui.row().classes("w-full no-wrap items-start gap-6"):
         with ui.column().classes("w-80 shrink-0 gap-2"):
             ui.select(

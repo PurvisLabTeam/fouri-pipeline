@@ -6,7 +6,7 @@ from typing import Any
 
 import pandas as pd
 
-from fouri.app.cells import Cells
+from fouri.app.cells import Cells, blank_as_missing
 from fouri.app.state import open_experiment
 from fouri.config import Experiment, save_config
 from fouri.filters import apply_filters, keep, saved_filters
@@ -20,6 +20,12 @@ def switched_on_filters(exp: Experiment) -> list[str]:
     return [str(rule.get("name")) for rule in saved_filters(exp) if rule.get("use") is True]
 
 
+def filter_table(table: pd.DataFrame) -> pd.DataFrame:
+    if "sample_ID" not in table.columns:
+        return table
+    return table.assign(sample_ID=blank_as_missing(table["sample_ID"]))
+
+
 def kept_cells(cells: Cells, exp: Experiment) -> tuple[pd.Series | None, str | None]:
     covered = cells.covered
     any_covered = bool(covered.any())
@@ -31,7 +37,7 @@ def kept_cells(cells: Cells, exp: Experiment) -> tuple[pd.Series | None, str | N
     if not names:
         return uncovered_only, None
     rules = [rule for rule in saved_filters(exp) if str(rule.get("name")) in names]
-    table = cells.table[~covered] if any_covered else cells.table
+    table = filter_table(cells.table[~covered] if any_covered else cells.table)
     try:
         included, _ = apply_filters(table, rules)
     except (ValueError, TypeError):

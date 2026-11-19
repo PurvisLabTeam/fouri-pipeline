@@ -10,15 +10,19 @@ from dataclasses import dataclass
 from typing import Any
 
 import anndata as ad
+import h5py
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from anndata.io import read_elem
 
+from fouri.adata import is_current_subsample
 from fouri.app.cells import CONDITION_JOIN
 from fouri.app.state import open_experiment
 from fouri.config import Experiment, save_config
 from fouri.embedding import EMBED_MEM_PER_WORKER, Method, Run
 from fouri.embedding_setup import _whole
+from fouri.io import adata_path
 from fouri.metadata import natural_key, plate_sort_key
 from fouri.parallel import worker_count
 
@@ -203,6 +207,16 @@ def sample_names(cells: pd.DataFrame, exp: Experiment) -> dict[int, str]:
         condition = CONDITION_JOIN.join(str(meta[c]).strip() for c in columns if not _blank(meta.get(c)))
         names[sample] = f"{sample}: {condition}" if condition else str(sample)
     return names
+
+
+def subsample_is_current(exp: Experiment, subsample: ad.AnnData) -> bool:
+    table_uns: dict[str, Any] = {}
+    path = adata_path(exp)
+    if path.is_file():
+        with h5py.File(path, "r") as file:
+            if "uns/cell_table" in file:
+                table_uns["cell_table"] = read_elem(file["uns/cell_table"])
+    return is_current_subsample(table_uns, subsample.uns)
 
 
 def embedding_keys(adata: ad.AnnData) -> list[str]:

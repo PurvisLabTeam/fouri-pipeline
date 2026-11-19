@@ -15,7 +15,7 @@ from nicegui.events import ValueChangeEventArguments
 
 from fouri.app.cells import Cells, load_cells
 from fouri.app.names import VALUE, marker_menu
-from fouri.app.rules import save_filters
+from fouri.app.rules import filter_table, save_filters
 from fouri.app.shell import empty_state, page_frame
 from fouri.app.state import STATE
 from fouri.app.theme import restyle
@@ -402,7 +402,7 @@ class _FiltersPage:
         ui.notify(f"Saved {count} {noun} to experiment.json.", type="positive")
 
     def update(self) -> None:
-        table = self.table
+        table = filter_table(self.table)
         for rule in self.rules:
             try:
                 rule.kept, rule.problem = keep(table, rule.saved()), ""

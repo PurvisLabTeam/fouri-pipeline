@@ -14,7 +14,7 @@ import plotly.graph_objects as go
 from anndata.io import read_elem
 from plotly.subplots import make_subplots
 
-from fouri.app.cells import load_cells
+from fouri.app.cells import blank_as_missing, load_cells
 from fouri.app.rules import kept_cells
 from fouri.app.state import open_experiment
 from fouri.batch import (
@@ -28,12 +28,13 @@ from fouri.batch import (
     condition_shares,
     conditions_in_batches,
     uneven_conditions,
+    used_conditions,
     why_not_combat,
 )
 from fouri.config import Experiment, save_config
 from fouri.features import metadata_obs_columns, standardize_columns
 from fouri.io import COMBAT_LAYER, adata_path
-from fouri.metadata import natural_key
+from fouri.metadata import natural_key, plate_sort_key
 from fouri.plots import FONT
 
 SETUP_KEY = "batch_effects"
@@ -71,6 +72,7 @@ class LiveNumbers:
     uneven: list[tuple[str, str, str]]
     groups: list[list[str]]
     metrics: BatchMetrics | None
+    blank_wells: dict[str, dict[str, int]]
 
 
 @dataclass(frozen=True)
@@ -170,14 +172,18 @@ def live_numbers(exp: Experiment, batch: str, keep: Sequence[str]) -> LiveNumber
     kept, problem = kept_cells(cells, exp)
     table = cells.table if kept is None else cells.table.loc[kept]
     table = table.reset_index(drop=True)
+    columns = [column for column in dict.fromkeys([batch, *keep]) if column in table.columns]
+    table = table.assign(**{column: blank_as_missing(table[column]) for column in columns})
     batches = batch_labels(table, batch)
     conditions = condition_labels(table, list(keep))
+    blanks = {batch: batches.isna()} | {column: table[column].isna() for column in keep if column in table.columns}
+    blank_wells = {column: wells for column, blank in blanks.items() if (wells := _blank_wells(table, blank))}
     in_batches = conditions_in_batches(conditions, batches)
-    usable = in_batches.loc[in_batches["usable"], "condition"]
-    used = int(conditions.isin(usable).sum())
+    _, used_mask = used_conditions(conditions, batches)
+    used = int(used_mask.sum())
     why_not = why_not_combat(conditions, batches)
     if why_not is not None:
-        return LiveNumbers(len(table), used, problem, in_batches, why_not, pd.DataFrame(), [], [], None)
+        return LiveNumbers(len(table), used, problem, in_batches, why_not, pd.DataFrame(), [], [], None, blank_wells)
     values, features = _zscored(table[list(cells.features)])
     shares = condition_shares(conditions, batches)
     return LiveNumbers(
@@ -190,7 +196,13 @@ def live_numbers(exp: Experiment, batch: str, keep: Sequence[str]) -> LiveNumber
         uneven=uneven_conditions(shares),
         groups=batch_groups(conditions, batches),
         metrics=batch_metrics(values, features, conditions, batches),
+        blank_wells=blank_wells,
     )
+
+
+def _blank_wells(table: pd.DataFrame, blank: pd.Series) -> dict[str, int]:
+    counts = table["well"].astype(str)[blank.to_numpy(dtype=bool)].value_counts()
+    return {str(well): int(counts[well]) for well in sorted(counts.index, key=plate_sort_key)}
 
 
 def _texts(value: Any) -> list[str]:

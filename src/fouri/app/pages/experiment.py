@@ -14,7 +14,7 @@ from typing import Any
 import pandas as pd
 from nicegui import events, run, ui
 
-from fouri.app.cells import CONDITION, PLATE_COLUMN, PLATE_ROW, WELL, Cells, load_cells
+from fouri.app.cells import CONDITION, COVER, PLATE_COLUMN, PLATE_ROW, WELL, Cells, load_cells
 from fouri.app.derived import FormulaCheck, check_formulas
 from fouri.app.dialogs import ask, pick_file, pick_folder
 from fouri.app.names import Feature, describe
@@ -35,6 +35,7 @@ from fouri.app.wells import (
     wells_table,
 )
 from fouri.config import CONFIG_NAME, DEFAULT_PATHS, Experiment, save_config
+from fouri.features import measured_columns
 from fouri.io import read_info_file
 from fouri.metadata import check_metadata, default_derived_features, plate_sort_key, read_metadata_table, wells_in_data
 from fouri.plots import GROUP_COLORS
@@ -62,7 +63,8 @@ NO_WELLS = "Not checked: no wells measured yet."
 CANT_READ_CELLS = "Not checked: can't read the measured cells: {reason}"
 NEEDS_BOTH = "Give every row a name and a formula, or delete it."
 NAMED_TWICE = "Duplicate row names: change one of the rows named {name}."
-MEASURED_NAME = "{name} is already a measured column. Choose another name."
+MEASURED_NAME = "{name}: a measured column has this name."
+COVERED_NAME = "{name}: a name ending in _covered is not allowed."
 GROUP_NAME = "{name} is already a column. Choose another name."
 FIX_RED = "Fix the formulas marked in red, then save."
 SAVED_DERIVED = "Saved {count} to experiment.json."
@@ -334,6 +336,7 @@ class _Derived:
         self.generation = 0
         self.checks: list[FormulaCheck] = []
         self.lines: list[ui.label] = []
+        self.measured_names: set[str] = set()
 
     def show(self, exp: Experiment, info: pd.DataFrame | None) -> None:
         if exp.config_path != self.config_path:
@@ -341,6 +344,7 @@ class _Derived:
             self.rows = [_Row(str(spec["name"]), str(spec["formula"])) for spec in exp.derived_features]
             self.selected = None
         self.info = info
+        self.measured_names = set(measured_columns(exp))
         self.cells = None
         self.problem = ""
         self.loading = True
@@ -534,7 +538,9 @@ class _Derived:
             seen.add(row.name)
         cells = self._measured()
         for row in self.rows:
-            if cells is not None and row.name in cells.base.columns:
+            if row.name.endswith(COVER):
+                return COVERED_NAME.format(name=row.name)
+            if row.name in self.measured_names or (cells is not None and row.name in cells.base.columns):
                 return MEASURED_NAME.format(name=row.name)
             if row.name in GROUP_NAMES:
                 return GROUP_NAME.format(name=row.name)
