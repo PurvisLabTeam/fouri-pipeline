@@ -31,6 +31,7 @@ uv run ruff check src tests    # lint src/fouri and the tests
 uv run ruff format src tests   # format them
 uv run mypy                    # type-check src/fouri
 uv run pytest -m 'not slow and not gpu'  # the quick tests; -m slow for the ones importing torch or UMAP
+uv run pre-commit install      # once per clone: install the commit and push hooks of .pre-commit-config.yaml
 
 # run one step as its own program, as the app does (steps: convert segment align artifacts measure table batch embedding export finetune)
 uv run python -m fouri.run measure --config ~/data/4i_local_test/experiment.json --wells B02 --settings '{"overwrite": true}'
@@ -59,6 +60,17 @@ the run, and exits with the step's code.
 `.github/workflows/checks.yml`, the workflow `Checks`, runs on every pull request and every push to `main`, on Ubuntu,
 Windows and macOS with `fail-fast` off and uv's cache off: `uv sync --locked`, `uv run ruff check src tests`,
 `uv run ruff format --check src tests`, `uv run mypy` and `uv run pytest -m "not gpu" -n 0 --tb=short`.
+
+`.pre-commit-config.yaml` defines two git hooks, installed by `uv run pre-commit install` once per clone; a lab
+member's clone, never set up with that command, has no hooks. Before each commit, `ruff check --fix` and then
+`ruff format` run on the staged Python files under `src/` and `tests/`, and `mypy`, given no file names, runs when a
+Python file under `src/` is staged. Before each push, `pytest -m "not slow and not gpu"` runs. A hook fixing or
+reformatting a file stops the commit and leaves the change unstaged in the working tree, to be reviewed, staged and
+committed again; no hook stages a file. Each hook calls `uv run --no-sync`, so ruff, mypy and pytest are the
+versions installed from `uv.lock`, and no hook changes the environment or `uv.lock`. While the hooks run, pre-commit
+sets every unstaged edit to a tracked file aside and restores the edits afterwards, so commits, pushes and hand runs
+of the hooks are made only while other sessions working in the same tree wait at a commit point; mypy and the tests
+also read untracked files of the working tree.
 
 Tests are pytest under `tests/`, on a made-up three-well experiment (`tests/builders.py` writes what each
 step would have, `tests/conftest.py` the fixture); they cover only mistakes that would lose or miscount data
@@ -351,9 +363,9 @@ does, the embedding keys (`run_key`) and the `app.embedding` format are in `.cla
 - Messages and bars go through `fouri.report` (`say`, `say_skipped`, `progress`), never `print` or tqdm directly:
   after `report.report_to(path)` (the app, when it starts a step) they are written to that file as JSON lines
   (message; bar open, move, close with its parent bar; `report.finished` at the end) instead of printed.
-- `.gitignore` ignores every dotfile except `.gitignore`, `.gitattributes`, `.python-version`, `.github/` and
-  `.claude/rules/` (the rest of `.claude/` stays ignored), so a new dot-folder (e.g. `.vscode/`) is not committed
-  unless that rule changes.
+- `.gitignore` ignores every dotfile except `.gitignore`, `.gitattributes`, `.python-version`,
+  `.pre-commit-config.yaml`, `.github/` and `.claude/rules/` (the rest of `.claude/` stays ignored), so a new
+  dot-folder (e.g. `.vscode/`) is not committed unless that rule changes.
 
 ## Checking a change
 
