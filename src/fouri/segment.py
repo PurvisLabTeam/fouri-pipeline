@@ -1,6 +1,7 @@
 """Cellpose segmentation with progress bar over an image's tiles."""
 
 import warnings
+from collections import defaultdict
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -96,6 +97,7 @@ def segment_wells(
         raise RuntimeError(f"Cellpose is running on {cp_model.device}, not the GPU.")
 
     outcomes: list[str | Failed] = []  # each well's name, or its Failed
+    not_written: defaultdict[str, list[int]] = defaultdict(list)
     for well, work in progress(worklist.items(), desc="Overall Progress", unit="well", total=len(worklist)):
         try:
             segment_path = Path(exp.segmented) / well
@@ -114,6 +116,11 @@ def segment_wells(
                         cellprob_threshold=cellprob_threshold,
                         flow_threshold=flow_threshold,
                     )
+                    if original_label_path(exp, well, round_index).exists():
+                        not_written[well].append(round_index)
+                        torch.cuda.empty_cache()
+                        continue
+
                     write_tiff(path_label, labels)
 
                     if peak_gb is not None:
@@ -129,6 +136,12 @@ def segment_wells(
 
     del cp_model
     torch.cuda.empty_cache()
+
+    if not_written:
+        say(
+            "The following labels were edited by hand while this step ran, so they were not overwritten: "
+            f"{', '.join(f'{w} (round(s): {", ".join(map(str, rounds))})' for w, rounds in not_written.items())}"
+        )
     check_results(outcomes, unit="well")
 
 
