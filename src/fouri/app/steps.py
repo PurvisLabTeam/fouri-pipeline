@@ -11,11 +11,17 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Literal
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal
 
+from fouri.config import Experiment
+from fouri.io import cell_data_path, round_table_path, tmat_path
 from fouri.models import kept_models, shown_name
 from fouri.run import step_function
 from fouri.status import PER_WELL_STEPS, Step
+
+if TYPE_CHECKING:
+    from fouri.preprocess import ChangedWell
 
 BUILT_IN_MODEL = "Cellpose-SAM (built in)"
 
@@ -136,3 +142,23 @@ def settings_for(step: Step, shown: Mapping[str, Any], *, overwrite: bool, worke
         if value != parameters[setting.name].default:
             settings[setting.name] = value
     return settings
+
+
+def _output_names(exp: Experiment, well: str) -> dict[Path, str]:
+    return {
+        round_table_path(exp, well): "round table",
+        Path(exp.output_images) / well: "images",
+        Path(exp.segmented) / well: "labels",
+        tmat_path(exp, well, ".npy"): "transforms",
+        Path(exp.masks) / well: "masks",
+        cell_data_path(exp, well): "cell data",
+    }
+
+
+def changed_well_line(exp: Experiment, changed: ChangedWell) -> str:
+    names = _output_names(exp, changed.well)
+    outputs = ", ".join(names.get(path, path.name) for path in changed.outputs)
+    line = f"{changed.well} ({', '.join(changed.rounds)} changed): {outputs}."
+    if changed.hand_edited:
+        line += f" Hand-edited: {', '.join(changed.hand_edited)}."
+    return line

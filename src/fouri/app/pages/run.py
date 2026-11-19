@@ -28,6 +28,7 @@ from fouri.app.steps import (
     RUN_PAGE_STEPS,
     Setting,
     can_tick,
+    changed_well_line,
     default,
     models_left_out,
     settings_for,
@@ -37,6 +38,7 @@ from fouri.app.steps import (
 from fouri.config import Experiment, load_config
 from fouri.embedding_setup import embedding_settings
 from fouri.metadata import normalize_well, plate_sort_key
+from fouri.preprocess import changed_wells
 from fouri.run import STEP_NAMES
 from fouri.status import PER_WELL_STEPS, Step
 
@@ -279,6 +281,26 @@ async def _ask_cpu(images: int) -> bool:
     return answer is True
 
 
+async def _ask_reconvert(lines: list[str]) -> bool:
+    wells = f"{len(lines)} well{'' if len(lines) == 1 else 's'} whose rounds changed"
+    with ui.dialog() as dialog, ui.card().classes("p-5 gap-3 max-w-2xl"):
+        with ui.row().classes("items-center gap-2 no-wrap"):
+            ui.icon("warning").classes("text-2xl text-warning")
+            ui.label(f"Convert images will delete and reconvert {wells} in info_exp.csv:").classes("text-sm")
+        with ui.column().classes("gap-1"):
+            for line in lines:
+                ui.label(line).classes("text-sm")
+        ui.label("This can't be undone.").classes("text-sm font-bold text-negative")
+        with ui.row().classes("w-full justify-end gap-2"):
+            ui.button("Cancel", on_click=lambda: dialog.submit(False)).props("flat")
+            ui.button("Delete and reconvert", icon="delete", on_click=lambda: dialog.submit(True)).props(
+                "color=negative"
+            )
+    answer = await dialog
+    dialog.delete()
+    return answer is True
+
+
 def _step_card(
     exp: Experiment,
     badge: int,
@@ -488,6 +510,18 @@ def _content(exp: Experiment) -> None:
             except (OSError, ValueError) as error:
                 ui.notify(f"The run could not start: {error}", type="negative")
                 return
+        reconvert = False
+        if Step.CONVERT in chosen:
+            try:
+                saved = load_config(exp.config_path, announce=False)
+                changed = changed_wells(saved, wells_picked)
+            except (OSError, ValueError) as error:
+                ui.notify(f"The run could not start: {error}", type="negative")
+                return
+            if changed:
+                if not await _ask_reconvert([changed_well_line(saved, well) for well in changed]) or run_going():
+                    return
+                reconvert = True
         requests = [
             StepRequest(
                 step,
@@ -499,6 +533,8 @@ def _content(exp: Experiment) -> None:
         ]
         if on_cpu:  # this run only: the next run's settings start without it
             next(request for request in requests if request.step == Step.SEGMENT).settings["allow_cpu"] = True
+        if reconvert:
+            next(request for request in requests if request.step == Step.CONVERT).settings["reconvert_changed"] = True
         if Step.TABLE in chosen:
             table_settings = next(request for request in requests if request.step == Step.TABLE).settings
             table_settings["filters"] = filters
