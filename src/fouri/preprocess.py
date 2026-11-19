@@ -175,13 +175,18 @@ def round_table(exp: Experiment, well: str, align_signal: str = "DNA") -> pd.Dat
 
 def _round_rows(exp: Experiment, well: str, round_index: int, round_info: pd.Series[Any]) -> list[dict[str, Any]]:
     round_name = str(round_info["round_name"])
-    subdir = next((d for d in Path(exp.data_dir).iterdir() if f"Round_{round_name}_" in d.name and d.is_dir()), None)
-    if subdir is None:
+    subdirs = sorted(d for d in Path(exp.data_dir).iterdir() if f"Round_{round_name}_" in d.name and d.is_dir())
+    if subdirs == []:
         raise FileNotFoundError(f"No folder for round {round_name}")
-    fpath = next((f for f in subdir.iterdir() if f"Well{well}_" in f.name and f.name.endswith(".nd2")), None)
-    if fpath is None:
+    if len(subdirs) > 1:
+        raise ValueError(f"Multiple round folders found matching {round_name}: {', '.join(s.name for s in subdirs)}")
+    subdir = subdirs[0]
+    fpaths = sorted(f for f in subdir.iterdir() if f"Well{well}_" in f.name and f.name.endswith(".nd2"))
+    if fpaths == []:
         raise FileNotFoundError(f"No file found for round {round_name}, well {well}")
-
+    if len(fpaths) > 1:
+        raise ValueError(f"Multiple ND2 files match {round_name}: {', '.join(f.name for f in fpaths)}")
+    fpath = fpaths[0]
     metadata = nd2_metadata(fpath)
     shared = {
         "dir": str(exp.data_dir),

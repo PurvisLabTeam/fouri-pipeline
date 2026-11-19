@@ -1,10 +1,11 @@
 """Convert images refuses only the well whose converted rounds no longer match info_exp.csv."""
 
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
 import pytest
-from builders import converted, hand_edited, masked, raw_files, segmented
+from builders import INFO_EXP, ND2_FILE, ND2_FOLDER, converted, hand_edited, masked, raw_files, segmented
 from tifffile import imread
 
 from fouri import io, preprocess
@@ -96,3 +97,94 @@ def test_the_crop_trims_only_the_bottom_and_right(experiment: Experiment, monkey
     with np.load(io.mask_path(experiment, "B02", 0)) as arrays:
         for name, array in masks.items():
             np.testing.assert_array_equal(arrays[name], array[:height, :width])
+
+
+ALIGNMENT_CHANNELS = [
+    pytest.param("R1,Hoechst,cMyc,", id="none"),
+    pytest.param("R1,DNA,cMyc,DNA", id="two"),
+]
+
+
+def _with_info(exp: Experiment, old: str, new: str) -> None:
+    Path(exp.info_file).write_text(INFO_EXP.replace(old, new), encoding="utf-8")
+
+
+def _nothing_converted(exp: Experiment, well: str) -> bool:
+    images = Path(exp.output_images) / well
+    return not io.round_table_path(exp, well).exists() and not (images.exists() and any(images.iterdir()))
+
+
+def _second_file(exp: Experiment) -> list[str]:
+    folder = Path(exp.data_dir) / ND2_FOLDER.format(round_name="R2")
+    (folder / ND2_FILE.format(well="B02").replace("Seq0000", "Seq0001")).touch()
+    return ["B02"]
+
+
+def _second_folder(exp: Experiment) -> list[str]:
+    folder = Path(exp.data_dir) / "Round_R2_again_made_up"
+    folder.mkdir()
+    for well in exp.well_list:
+        (folder / ND2_FILE.format(well=well)).touch()
+    return ["B02", "B03"]
+
+
+@pytest.mark.parametrize("add_match", [_second_file, _second_folder], ids=["two-files", "two-folders"])
+def test_two_files_matching_one_round_are_refused(
+    experiment: Experiment, monkeypatch: pytest.MonkeyPatch, add_match: Callable[[Experiment], list[str]]
+) -> None:
+    raw_files(experiment, monkeypatch)
+    refused = add_match(experiment)
+
+    with pytest.raises(StepFailed) as raised:
+        preprocess.preprocess(experiment, wells=["B02", "B03"])
+
+    assert raised.value.failed == refused
+    for well in ("B02", "B03"):
+        assert _nothing_converted(experiment, well) == (well in refused)
+
+
+def test_a_signal_named_twice_in_a_round_is_refused(experiment: Experiment, monkeypatch: pytest.MonkeyPatch) -> None:
+    _with_info(experiment, "R0,DNA,pRB,RB", "R0,DNA,pRB,pRB")
+    raw_files(experiment, monkeypatch)
+
+    with pytest.raises(StepFailed) as raised:
+        preprocess.preprocess(experiment, wells=["B02"])
+
+    assert raised.value.failed == ["B02"]
+    assert _nothing_converted(experiment, "B02")
+
+
+@pytest.mark.parametrize("round_1", ALIGNMENT_CHANNELS)
+def test_a_round_without_one_alignment_channel_is_refused(
+    experiment: Experiment, monkeypatch: pytest.MonkeyPatch, round_1: str
+) -> None:
+    _with_info(experiment, "R1,DNA,cMyc,", round_1)
+    raw_files(experiment, monkeypatch)
+
+    with pytest.raises(StepFailed) as raised:
+        preprocess.preprocess(experiment, wells=["B02"])
+
+    assert raised.value.failed == ["B02"]
+    assert _nothing_converted(experiment, "B02")
+
+
+def test_an_empty_cell_converts_no_channel(experiment: Experiment, monkeypatch: pytest.MonkeyPatch) -> None:
+    raw_files(experiment, monkeypatch)
+
+    preprocess.preprocess(experiment, wells=["B02"])
+
+    table = io.read_round_table(experiment, "B02")
+    assert table.loc[table["round_name"] == "R1", "signal"].tolist() == ["DNA", "cMyc"]
+    written = sorted(path.name for path in (Path(experiment.output_images) / "B02").glob("Round_R1_*"))
+    assert written == ["Round_R1_wellB02_DNA.tif", "Round_R1_wellB02_cMyc.tif"]
+
+
+def test_each_channel_is_written_to_its_own_file(experiment: Experiment, monkeypatch: pytest.MonkeyPatch) -> None:
+    raw_files(experiment, monkeypatch)
+
+    preprocess.preprocess(experiment, wells=["B02"])
+
+    for row in io.read_round_table(experiment, "B02").itertuples():
+        nd2 = preprocess.read_nd2(Path(str(row.dir)) / str(row.sub_dir) / str(row.file))
+        written = imread(Path(experiment.output_images) / "B02" / str(row.raw_file_name))
+        np.testing.assert_array_equal(written, nd2[int(row.channel_in_file)])
