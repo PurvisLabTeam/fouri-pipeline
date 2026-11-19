@@ -41,7 +41,9 @@ def corrected_regions(exp: Experiment) -> Regions:
 def delete_model(name: str) -> None:
     directory = models_dir() / name
     if (
-        any(separator in name for separator in SEPARATORS)
+        name in ("", ".", "..")
+        or directory.name != name
+        or any(separator in name for separator in SEPARATORS)
         or name.endswith(".partial")
         or not (directory / "model.json").is_file()
     ):

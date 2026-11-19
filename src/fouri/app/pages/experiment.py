@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import keyword
 import os
-import platform
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path, PurePath
@@ -25,16 +24,15 @@ from fouri.app.wells import (
     DETAILS,
     SAMPLE_ID,
     blank,
+    config_to_save,
     fill_sample_ids,
-    in_full,
     new_config,
-    path_entry,
-    same_path,
     save_details,
     save_wells,
+    split_wells,
     wells_table,
 )
-from fouri.config import CONFIG_NAME, DEFAULT_PATHS, Experiment, save_config
+from fouri.config import CONFIG_NAME, Experiment, save_config
 from fouri.features import measured_columns
 from fouri.io import read_info_file
 from fouri.metadata import check_metadata, default_derived_features, plate_sort_key, read_metadata_table, wells_in_data
@@ -102,56 +100,11 @@ WHOLE_ID = "A sample ID is a whole number above 0."
 IMPORT_ID = "Can't import: a sample ID is a whole number above 0, and {wells} {verb} others."
 FIX_PROBLEMS = "Fix the problems in red, then save."
 SAVED_WELLS = "Saved {wells} to experiment.json."
+IDS_CHANGED = "Sample IDs changed: {wells}, whose condition differs from the other wells with their ID."
 METADATA_CSV = "well_metadata.csv"
 REPLACE_CSV = "Replace well_metadata.csv in the results folder?"
 WROTE_CSV = "Wrote {path}. Fill it in, for example in Excel, then Import CSV."
 IMPORTED = "Imported {wells} from {file}."
-
-
-# -- how the paths are written ---------------------------------------------------------------
-
-
-def _results_key(config: dict[str, Any]) -> str:
-    """Return the key Experiment reads the results folder from on this PC."""
-    if platform.system() != "Windows" and (config.get("mac_base_dir") or "").strip():
-        return "mac_base_dir"
-    return "base_dir"
-
-
-def config_to_save(exp: Experiment, *, data: str, info_file: str, results: str, anchor: int | None) -> dict[str, Any]:
-    """Return the experiment's settings with the page's paths and anchor round, as Save writes them.
-
-    The results folder goes to the key it is read from on this PC: ``mac_base_dir`` on a PC that
-    isn't Windows when that is set, ``base_dir`` otherwise. That key is left out only when the
-    folder would be read the same without it: the folder holding experiment.json, with no other
-    key to take over, so on such a PC ``mac_base_dir`` stays while ``base_dir`` is set. The ND2
-    folder and info_exp.csv go under ``paths``, each left out when its box is empty or it is the
-    results folder's own ``data`` or ``info_exp.csv``, relative to the results folder when
-    inside it, and in full otherwise. A path typed without a drive or root is relative to the
-    results folder. ``anchor`` None keeps the saved anchor round.
-    """
-    config = dict(exp.config)
-    home = os.path.dirname(exp.config_path)
-    base_dir = in_full(results, home) if results.strip() else home
-    key = _results_key(config)
-    config[key] = base_dir
-    without = {name: value for name, value in config.items() if name != key}
-    if same_path(Experiment(without, exp.config_path).base_dir, base_dir):
-        config = without
-    paths = dict(config.get("paths") or {})
-    for name, value in (("data", data), ("info_file", info_file)):
-        entry = path_entry(value, base_dir, DEFAULT_PATHS[name])
-        if entry is None:
-            paths.pop(name, None)
-        else:
-            paths[name] = entry
-    if paths:
-        config["paths"] = paths
-    else:
-        config.pop("paths", None)
-    if anchor is not None:
-        config["anchor_round"] = anchor
-    return config
 
 
 # -- reading what the page shows ---------------------------------------------------------------
@@ -1080,12 +1033,15 @@ class _Wells:
         if any(level == "error" for level, _ in self._issues()):
             ui.notify(FIX_PROBLEMS, type="negative")
             return
+        changed = split_wells(self._table(), self._condition_list())
         try:
             saved = save_wells(exp, self._table(), self._condition_list())
         except (OSError, ValueError) as error:
             ui.notify(f"Not saved: {_reason(error)}", type="negative")
             return
         ui.notify(SAVED_WELLS.format(wells=_count(len(saved.well_list), "well")), type="positive")
+        if changed:
+            ui.notify(IDS_CHANGED.format(wells=", ".join(changed)), type="info")
         self.load(saved)
         self.exp = saved
         self._draw_boxes()

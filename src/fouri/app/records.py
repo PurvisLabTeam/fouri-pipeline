@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from fouri.config import Experiment
 from fouri.io import run_record_path
-from fouri.metadata import plate_sort_key
+from fouri.metadata import normalize_well, plate_sort_key
 from fouri.run import STEP_NAMES
 from fouri.status import Step
 
@@ -51,7 +51,22 @@ def _parse(text: str) -> dict[str, Any] | None:
     run = line.get("run")
     if run is not None and not isinstance(run, str):
         return None
+    if not _well_names(line.get("wells")):
+        return None
     return line
+
+
+def _well_names(wells: object) -> bool:
+    if wells is None:
+        return True
+    if not isinstance(wells, list):
+        return False
+    try:
+        for well in wells:
+            normalize_well(well)
+    except ValueError:
+        return False
+    return True
 
 
 def _read_lines(exp: Experiment) -> list[dict[str, Any]]:

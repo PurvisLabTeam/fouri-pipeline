@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePath
 from typing import Any
@@ -19,6 +20,7 @@ DETAILS = ("experiment_key", "experiment_name", "cell_type", "passage", "date_co
 ALREADY_THERE = "This folder already has an experiment.json. Open it instead."
 NO_ND2 = "No ND2 files for any well in {folder}."
 CANT_READ_INFO = "Can't read info_exp.csv: {reason}"
+LISTED_TWICE = "{wells} {verb} listed twice."
 
 
 def same_path(first: str, second: str) -> bool:
@@ -47,6 +49,49 @@ def path_entry(value: str, base_dir: str, default: str) -> str | None:
     if _inside(path, base_dir):
         return PurePath(os.path.relpath(path, base_dir)).as_posix()
     return path
+
+
+def _results_key(config: dict[str, Any]) -> str:
+    """Return the key Experiment reads the results folder from on this PC."""
+    if platform.system() != "Windows" and (config.get("mac_base_dir") or "").strip():
+        return "mac_base_dir"
+    return "base_dir"
+
+
+def config_to_save(exp: Experiment, *, data: str, info_file: str, results: str, anchor: int | None) -> dict[str, Any]:
+    """Return the experiment's settings with the page's paths and anchor round, as Save writes them.
+
+    The results folder goes to the key it is read from on this PC: ``mac_base_dir`` on a PC that
+    isn't Windows when that is set, ``base_dir`` otherwise. That key is left out only when the
+    folder would be read the same without it: the folder holding experiment.json, with no other
+    key to take over, so on such a PC ``mac_base_dir`` stays while ``base_dir`` is set. The ND2
+    folder and info_exp.csv go under ``paths``, each left out when its box is empty or it is the
+    results folder's own ``data`` or ``info_exp.csv``, relative to the results folder when
+    inside it, and in full otherwise. A path typed without a drive or root is relative to the
+    results folder. ``anchor`` None keeps the saved anchor round.
+    """
+    config = _read(exp)
+    home = os.path.dirname(exp.config_path)
+    base_dir = in_full(results, home) if results.strip() else home
+    key = _results_key(config)
+    config[key] = base_dir
+    without = {name: value for name, value in config.items() if name != key}
+    if same_path(Experiment(without, exp.config_path).base_dir, base_dir):
+        config = without
+    paths = dict(config.get("paths") or {})
+    for name, value in (("data", data), ("info_file", info_file)):
+        entry = path_entry(value, base_dir, DEFAULT_PATHS[name])
+        if entry is None:
+            paths.pop(name, None)
+        else:
+            paths[name] = entry
+    if paths:
+        config["paths"] = paths
+    else:
+        config.pop("paths", None)
+    if anchor is not None:
+        config["anchor_round"] = anchor
+    return config
 
 
 def _reason(error: Exception) -> str:
@@ -109,15 +154,40 @@ def _condition(row: pd.Series, columns: list[str]) -> tuple[str, ...]:
     return tuple("" if blank(row[column]) else str(row[column]).strip() for column in columns)
 
 
+def _ids_and_conditions(
+    table: pd.DataFrame, condition_columns: Sequence[str]
+) -> tuple[list[object], list[tuple[str, ...]], list[int]]:
+    columns = [column for column in condition_columns if column in table.columns]
+    given = table[SAMPLE_ID] if SAMPLE_ID in table.columns else pd.Series("", index=table.index)
+    ids: list[object] = [as_sample_id(value) for value in given]
+    conditions = [_condition(row, columns) for _, row in table.iterrows()]
+    wells = table["well"].tolist()
+    order = sorted(range(len(wells)), key=lambda index: plate_sort_key(wells[index]))
+    return ids, conditions, order
+
+
+def _split_off(ids: list[object], conditions: list[tuple[str, ...]], order: list[int]) -> list[int]:
+    holders: dict[object, tuple[str, ...]] = {}
+    split = []
+    for index in order:
+        if ids[index] != "" and holders.setdefault(ids[index], conditions[index]) != conditions[index]:
+            split.append(index)
+    return split
+
+
+def split_wells(table: pd.DataFrame, condition_columns: Sequence[str]) -> list[str]:
+    ids, conditions, order = _ids_and_conditions(table, condition_columns)
+    wells = table["well"].tolist()
+    return [str(wells[index]) for index in _split_off(ids, conditions, order)]
+
+
 def fill_sample_ids(table: pd.DataFrame, condition_columns: Sequence[str]) -> pd.DataFrame:
     filled = table.copy()
     if SAMPLE_ID not in filled.columns:
         filled[SAMPLE_ID] = ""
-    columns = [column for column in condition_columns if column in filled.columns]
-    ids = [as_sample_id(value) for value in filled[SAMPLE_ID]]
-    conditions = [_condition(row, columns) for _, row in filled.iterrows()]
-    wells = filled["well"].tolist()
-    order = sorted(range(len(wells)), key=lambda index: plate_sort_key(wells[index]))
+    ids, conditions, order = _ids_and_conditions(filled, condition_columns)
+    for index in _split_off(ids, conditions, order):
+        ids[index] = ""
     first: dict[tuple[str, ...], object] = {}
     for index in order:
         if ids[index] != "":
@@ -141,6 +211,9 @@ def _read(exp: Experiment) -> dict[str, Any]:
 
 
 def save_wells(exp: Experiment, table: pd.DataFrame, condition_columns: Sequence[str]) -> Experiment:
+    twice = sorted(set(table.loc[table["well"].duplicated(), "well"]), key=plate_sort_key)
+    if twice:
+        raise ValueError(LISTED_TWICE.format(wells=", ".join(twice), verb="is" if len(twice) == 1 else "are"))
     filled = fill_sample_ids(table, condition_columns)
     well_list, well_metadata = table_to_config(filled)
     kept = [
