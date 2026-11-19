@@ -226,6 +226,39 @@ def check_settings(step: Step, settings: Mapping[str, Any]) -> None:
     missing = [p.name for p in parameters if p.default is inspect.Parameter.empty and p.name not in settings]
     if missing:
         raise ValueError(f"{STEP_NAMES[step]} needs {', '.join(missing)}.")
+    for param in parameters:
+        if param.name not in settings:
+            continue
+        if param.default is inspect.Parameter.empty:
+            continue
+
+        setting = settings.get(param.name)
+
+        should_raise = False
+        kind_message = ""
+        match param.default:
+            case bool():
+                should_raise = not isinstance(setting, bool)
+                kind_message = "a boolean (true or false)"
+            case int():
+                should_raise = not isinstance(setting, int) or isinstance(setting, bool)
+                kind_message = "an integer (a whole number)"
+            case float():
+                should_raise = not isinstance(setting, float | int) or isinstance(setting, bool)
+                kind_message = "a number"
+            case str():
+                should_raise = not isinstance(setting, str)
+                kind_message = "text"
+            case tuple():
+                should_raise = not isinstance(setting, tuple | list)
+                kind_message = "a list"
+            case _:
+                continue
+        if should_raise:
+            message = (
+                f"{STEP_NAMES[step]} takes the {param.name} setting as {kind_message}. Got {json.dumps(setting)}."
+            )
+            raise ValueError(message)
 
 
 def command(
@@ -318,7 +351,7 @@ def run_step(
             entry["settings"] = settings
 
         if step in WELL_STEPS:
-            settings["wells"] = exp.pick_wells(wells)
+            settings["wells"] = exp.pick_wells(wells if wells is not None else settings.get("wells"))
         elif wells is not None:
             raise ValueError(f"{STEP_NAMES[step]} always uses every well; it takes no wells.")
         entry["wells"] = settings.get("wells")
@@ -404,7 +437,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise parser.error("Use either --settings or --settings-file, not both.")
 
     if args.settings is not None:
-        settings = json.loads(args.settings)
+        try:
+            settings = json.loads(args.settings)
+        except json.JSONDecodeError as e:
+            raise parser.error("--settings must be a JSON object, e.g. '{\"overwrite\": true}'") from e
 
     if args.settings_file is not None:
         settings_file = Path(args.settings_file)

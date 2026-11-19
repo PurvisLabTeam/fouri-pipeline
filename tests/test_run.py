@@ -1,5 +1,6 @@
 """A step run as the app runs it records the wells that failed."""
 
+import functools
 import json
 from collections.abc import Iterable
 from pathlib import Path
@@ -24,6 +25,7 @@ from builders import (
     varied_cell_data,
     well_outputs,
     with_derived,
+    with_embedding_setup,
     with_filters,
     with_info,
     with_labels,
@@ -33,7 +35,9 @@ from builders import (
 from fouri import io, preprocess, report, run
 from fouri.config import Experiment
 from fouri.embedding import subsample
+from fouri.embedding_setup import embedding_settings
 from fouri.labels import apply_labels, named_labels
+from fouri.status import Step
 
 
 def _nuc_area_between(name: str, low: float, high: float) -> dict[str, Any]:
@@ -560,3 +564,241 @@ def test_embedding_overwrite_subsamples_again(experiment: Experiment, stand_in_u
     assert list(sub.obsm) == keys
     assert sub.uns["subsample"]["cells_per_sample"] == 3
     assert sub.n_obs == 9
+
+
+def _record_entries(exp: Experiment) -> list[dict[str, Any]]:
+    path = Path(io.run_record_path(exp))
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def _exit_code(argv: list[str]) -> int | str | None:
+    try:
+        return run.main(argv)
+    except SystemExit as stop:
+        return stop.code
+
+
+@pytest.mark.parametrize(
+    ("arguments", "chosen"),
+    [
+        pytest.param(["--settings", '{"overwrite": true, "wells": ["B03"]}'], "B03", id="settings"),
+        pytest.param(["--settings-file", "<settings file>"], "B03", id="settings-file"),
+        pytest.param(["wells=[B03]", "--settings", '{"overwrite": true}'], "B03", id="key-value"),
+        pytest.param(
+            ["--settings", '{"overwrite": true, "wells": ["B03"]}', "--wells", "B02"], "B02", id="wells-given-too"
+        ),
+    ],
+)
+def test_a_wells_setting_given_is_used(
+    experiment: Experiment, tmp_path: Path, arguments: list[str], chosen: str
+) -> None:
+    for well in experiment.well_list:
+        converted(experiment, well)
+    settings_file = tmp_path / "artifacts.yaml"
+    settings_file.write_text("overwrite: true\nwells: [B03]\n", encoding="utf-8")
+    given = [str(settings_file) if part == "<settings file>" else part for part in arguments]
+
+    code = run.main(["artifacts", "--config", experiment.config_path, *given])
+
+    started = next(entry for entry in _record_entries(experiment) if entry["event"] == "started")
+    written = {well: [io.mask_path(experiment, well, r).exists() for r in range(3)] for well in experiment.well_list}
+    assert code == 0
+    assert started["wells"] == [chosen]
+    assert written == {well: [well == chosen] * 3 for well in experiment.well_list}
+
+
+@pytest.mark.parametrize(
+    ("step", "settings"),
+    [
+        pytest.param("artifacts", {"overwrite": "false"}, id="text-for-true-or-false"),
+        pytest.param("artifacts", {"overwrite": 1}, id="number-for-true-or-false"),
+        pytest.param("measure", {"ring_width": True}, id="true-for-a-whole-number"),
+        pytest.param("measure", {"ring_width": "8"}, id="text-for-a-whole-number"),
+        pytest.param("align", {"downscale_factor": 2.5}, id="decimal-for-a-whole-number"),
+    ],
+)
+def test_a_setting_of_the_wrong_type_is_refused_before_the_started_line(
+    experiment: Experiment, step: str, settings: dict[str, Any]
+) -> None:
+    outcome = run.run_step(step, experiment.config_path, settings=settings)
+
+    assert outcome == "failed"
+    assert [entry["event"] for entry in _record_entries(experiment)] == []
+
+
+@pytest.mark.parametrize(
+    ("step", "settings"),
+    [
+        pytest.param(Step.SEGMENT, {"flow_threshold": 1}, id="whole-number-for-a-number"),
+        pytest.param(Step.TABLE, {"filters": ["not the biggest"]}, id="list-for-a-tuple"),
+        pytest.param(Step.SEGMENT, {"model": "20261117T204206"}, id="text-for-none"),
+        pytest.param(Step.EXPORT, {"name": "cycling", "features": ["nuc_area"]}, id="list-for-none"),
+        pytest.param(Step.EXPORT, {"name": "cycling", "file_format": "csv"}, id="text-for-a-text-choice"),
+    ],
+)
+def test_an_int_is_taken_for_a_float_setting(step: Step, settings: dict[str, Any]) -> None:
+    run.check_settings(step, settings)
+
+
+EMBEDDING_SETUP = {
+    "picked": ["nuc_area", "R0_pRB_nuc_mean"],
+    "samples": [1, 3],
+    "ranking_k": 10,
+    "top_n": [2],
+    "methods": {
+        "PHATE": {"dims": [3], "settings": {"knn": [5], "t": ["auto"], "gamma": [1], "decay": [40], "n_pca": [100]}},
+        "UMAP": {"dims": [2], "settings": {"n_neighbors": [5, 10], "min_dist": [0.1], "metric": ["euclidean"]}},
+    },
+    "skipped": ["X_umap_2d_top2_metriceuclidean_min_dist0.1_n_neighbors10"],
+    "seed": 3,
+    "values": "combat",
+}
+TICKED_RUNS = [
+    {
+        "method": "PHATE",
+        "dims": 3,
+        "top_n": 2,
+        "settings": {"knn": 5, "t": "auto", "gamma": 1, "decay": 40, "n_pca": 100},
+    },
+    {"method": "UMAP", "dims": 2, "top_n": 2, "settings": {"n_neighbors": 5, "min_dist": 0.1, "metric": "euclidean"}},
+]
+EVERY_RUN_UNTICKED = {
+    **EMBEDDING_SETUP,
+    "skipped": [
+        "X_phate_3d_top2_decay40_gamma1_knn5_n_pca100_tauto",
+        "X_umap_2d_top2_metriceuclidean_min_dist0.1_n_neighbors5",
+        "X_umap_2d_top2_metriceuclidean_min_dist0.1_n_neighbors10",
+    ],
+}
+
+
+def _sorted_runs(runs: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(runs, key=lambda entry: (entry["method"], json.dumps(entry, sort_keys=True)))
+
+
+def _recorded_embeddings(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+
+    @functools.wraps(run.make_embeddings)
+    def recorder(exp: Experiment, **settings: Any) -> list[str]:
+        calls.append(settings)
+        return []
+
+    monkeypatch.setattr(run, "make_embeddings", recorder)
+    return calls
+
+
+def test_given_settings_replace_the_saved_setups(experiment: Experiment, monkeypatch: pytest.MonkeyPatch) -> None:
+    exp = with_embedding_setup(experiment, EMBEDDING_SETUP)
+    calls = _recorded_embeddings(monkeypatch)
+
+    outcome = run.run_step("embedding", exp.config_path, settings={"seed": 7})
+
+    started = next(entry for entry in _record_entries(exp) if entry["event"] == "started")
+    recorded = dict(started["settings"])
+    assert outcome == "done"
+    assert _sorted_runs(recorded.pop("runs")) == TICKED_RUNS
+    assert recorded == {
+        "picked": ["nuc_area", "R0_pRB_nuc_mean"],
+        "samples": [1, 3],
+        "ranking_k": 10,
+        "seed": 7,
+        "values": "combat",
+    }
+    assert [call["seed"] for call in calls] == [7]
+    assert _sorted_runs(calls[0]["runs"]) == TICKED_RUNS
+
+
+@pytest.mark.parametrize(
+    "setup", [pytest.param(None, id="no-setup"), pytest.param(EVERY_RUN_UNTICKED, id="every-run-unticked")]
+)
+def test_the_saved_setups_refusals(
+    experiment: Experiment, monkeypatch: pytest.MonkeyPatch, setup: dict[str, Any] | None
+) -> None:
+    exp = experiment if setup is None else with_embedding_setup(experiment, setup)
+    calls = _recorded_embeddings(monkeypatch)
+
+    outcome = run.run_step("embedding", exp.config_path)
+
+    assert outcome == "failed"
+    assert [entry["event"] for entry in _record_entries(exp)] == []
+    assert calls == []
+
+
+def test_embedding_settings_keep_the_ticked_runs_and_the_setup(experiment: Experiment) -> None:
+    exp = with_embedding_setup(experiment, EMBEDDING_SETUP)
+
+    settings = embedding_settings(exp)
+
+    assert settings is not None
+    kept = dict(settings)
+    assert _sorted_runs(kept.pop("runs")) == TICKED_RUNS
+    assert kept == {
+        "picked": ["nuc_area", "R0_pRB_nuc_mean"],
+        "samples": [1, 3],
+        "ranking_k": 10,
+        "seed": 3,
+        "values": "combat",
+    }
+
+
+@pytest.mark.parametrize(
+    ("arguments", "code", "recorded"),
+    [
+        pytest.param(["artifacts", "overwrite"], 2, None, id="override-without-equals"),
+        pytest.param(["artifacts", "=true"], 2, None, id="override-without-name"),
+        pytest.param(["artifacts", "overwrite=[true"], 2, None, id="override-not-yaml"),
+        pytest.param(
+            ["artifacts", "--settings", "{}", "--settings-file", "<yaml>"], 2, None, id="settings-and-settings-file"
+        ),
+        pytest.param(["artifacts", "--settings-file", "<missing>"], 2, None, id="settings-file-missing"),
+        pytest.param(["artifacts", "--settings-file", "<broken>"], 2, None, id="settings-file-not-yaml"),
+        pytest.param(["artifacts", "--settings", "[true]"], 2, None, id="settings-not-a-mapping"),
+        pytest.param(["artifacts", "--settings", "{oops"], 2, None, id="settings-not-json"),
+        pytest.param(["artifacts", "--settings-file", "<listed>"], 2, None, id="settings-file-not-a-mapping"),
+        pytest.param(["table", "--wells", "B02"], 1, None, id="wells-for-a-step-without-wells"),
+        pytest.param(["artifacts", "--settings", '{"bogus": true}'], 1, None, id="unknown-setting"),
+        pytest.param(["export"], 1, None, id="missing-required-setting"),
+        pytest.param(
+            ["artifacts", "--wells", "B02", "overwrite=true"], 0, {"overwrite": True}, id="wells-holding-equals"
+        ),
+        pytest.param(None, 0, {"overwrite": True}, id="command-with-settings-file"),
+    ],
+)
+def test_command_line_refusals(
+    experiment: Experiment,
+    tmp_path: Path,
+    arguments: list[str] | None,
+    code: int,
+    recorded: dict[str, Any] | None,
+) -> None:
+    converted(experiment, "B02")
+    files = {
+        "<yaml>": tmp_path / "artifacts.yaml",
+        "<missing>": tmp_path / "absent.yaml",
+        "<broken>": tmp_path / "broken.yaml",
+        "<listed>": tmp_path / "listed.yaml",
+    }
+    files["<yaml>"].write_text("overwrite: true\n", encoding="utf-8")
+    files["<broken>"].write_text("overwrite: [true\n", encoding="utf-8")
+    files["<listed>"].write_text("- overwrite\n- true\n", encoding="utf-8")
+    if arguments is None:
+        argv = run.command("artifacts", experiment.config_path, wells=["B02"], settings_file=files["<yaml>"])[3:]
+        assert "--settings" not in argv
+        assert argv[argv.index("--settings-file") + 1] == str(files["<yaml>"])
+    else:
+        given = [str(files[part]) if part in files else part for part in arguments[1:]]
+        argv = [arguments[0], "--config", experiment.config_path, *given]
+
+    exit_code = _exit_code(argv)
+
+    entries = _record_entries(experiment)
+    assert exit_code == code
+    if recorded is None:
+        assert entries == []
+    else:
+        assert [entry["event"] for entry in entries] == ["started", "ended"]
+        assert entries[0]["settings"] == recorded
+        assert entries[0]["wells"] == ["B02"]
