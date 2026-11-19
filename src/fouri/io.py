@@ -150,6 +150,8 @@ def read_nd2(path: str | Path) -> npt.NDArray:
 def label_paths(labels_path: str | Path, well: str) -> list[Path]:
     name_pattern = rf"labels_{re.escape(well)}_round_[0-9]{{3}}\.tif"
     folder = Path(labels_path) / well
+    if not folder.exists():
+        return []
     return sorted(path for path in folder.iterdir() if re.fullmatch(name_pattern, path.name))
 
 

@@ -258,3 +258,59 @@ def test_a_label_file_for_a_round_the_table_lacks_refuses_the_well_with_a_round_
     assert np.isfinite(io.load_transforms(experiment, "B02")).all()
     assert not io.tmat_path(experiment, "B03", ".npy").exists()
     assert raised.value.failed == ["B03"]
+
+
+def test_a_well_not_yet_segmented_is_refused_alone(experiment: Experiment) -> None:
+    converted(experiment, "B02")
+    segmented(experiment, "B02")
+    converted(experiment, "B03")
+
+    with pytest.raises(StepFailed) as raised:
+        align.find_transforms(experiment, wells=["B02", "B03"])
+
+    assert np.isfinite(io.load_transforms(experiment, "B02")).all()
+    assert not io.tmat_path(experiment, "B03", ".npy").exists()
+    assert raised.value.failed == ["B03"]
+
+
+def test_a_shifted_round_is_registered_and_moved_back(experiment: Experiment) -> None:
+    converted(experiment, "B02")
+    segmented(experiment, "B02")
+    anchor = imread(io.label_path(experiment, "B02", 0))
+    shifted = np.roll(anchor, (6, 4), axis=(0, 1))
+    io.write_tiff(io.label_path(experiment, "B02", 1), shifted)
+
+    align.find_transforms(experiment, wells=["B02"])
+
+    transform = io.load_transforms(experiment, "B02")[1]
+    np.testing.assert_allclose(transform[:2, 2], [4.0, 6.0], atol=0.1)
+    np.testing.assert_allclose(transform[:2, :2], np.eye(2), atol=0.01)
+    np.testing.assert_array_equal(align.move_to_anchor(shifted, transform), anchor)
+
+
+def test_a_refused_well_is_not_reported_done(experiment: Experiment) -> None:
+    for well in ("B02", "B03"):
+        converted(experiment, well)
+        segmented(experiment, well)
+    aligned(experiment, "B02")
+    shutil.copyfile(io.label_path(experiment, "B03", 0), io.label_path(experiment, "B03", 3))
+
+    with pytest.raises(StepFailed) as raised:
+        align.find_transforms(experiment, wells=["B02", "B03"])
+
+    assert raised.value.failed == ["B03"]
+
+
+def test_overwrite_with_every_round_failing_keeps_hand_alignments(experiment: Experiment) -> None:
+    converted(experiment, "B02")
+    segmented(experiment, "B02")
+    align.save_manual_transform(experiment, "B02", 1, HAND_AFFINE)
+    align.save_manual_transform(experiment, "B02", 2, HAND_AFFINE)
+    hand = io.load_transforms(experiment, "B02")
+    for round_index in (1, 2):
+        io.label_path(experiment, "B02", round_index).write_bytes(b"these bytes are not a TIFF")
+
+    with pytest.raises(StepFailed):
+        align.find_transforms(experiment, overwrite=True, wells=["B02"])
+
+    np.testing.assert_array_equal(io.load_transforms(experiment, "B02"), hand)
