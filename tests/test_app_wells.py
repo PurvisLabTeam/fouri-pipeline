@@ -5,7 +5,7 @@ from typing import Any
 
 import pandas as pd
 import pytest
-from builders import four_wells, with_filters, with_metadata
+from builders import INFO_EXP, ND2_FILE, ND2_FOLDER, four_wells, with_filters, with_metadata
 
 from fouri.app import wells
 from fouri.app.wells import fill_sample_ids, in_full, new_config, path_entry, save_wells, wells_table
@@ -147,6 +147,18 @@ def test_new_config_refuses_an_existing_experiment_json(experiment: Experiment) 
         new_config(config_path.parent, data="", info_file="")
 
     assert config_path.read_bytes() == before
+
+
+def test_new_config_gives_every_well_sample_id_1(tmp_path: Path) -> None:
+    (tmp_path / "info_exp.csv").write_text(INFO_EXP, encoding="utf-8")
+    folder = tmp_path / "data" / ND2_FOLDER.format(round_name="R0")
+    folder.mkdir(parents=True)
+    for well in ("B02", "B03", "C02"):
+        (folder / ND2_FILE.format(well=well)).touch()
+
+    config = new_config(tmp_path, data="", info_file="")
+
+    assert config["well_metadata"] == {well: {"sample_ID": 1} for well in ("B02", "B03", "C02")}
 
 
 def test_path_entry_writes_paths_relative_to_base_dir(tmp_path: Path) -> None:

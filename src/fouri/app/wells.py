@@ -122,7 +122,7 @@ def new_config(folder: Path, *, data: str, info_file: str) -> dict[str, Any]:
     config: dict[str, Any] = {
         "experiment_key": key,
         "well_list": wells,
-        "well_metadata": {},
+        "well_metadata": {well: {SAMPLE_ID: 1} for well in wells},
         "condition_columns": list(DEFAULT_CONDITION_COLUMNS),
     }
     if paths:
