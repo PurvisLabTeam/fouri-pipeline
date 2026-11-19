@@ -1,6 +1,7 @@
 """@TODO."""
 
 import json
+from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -201,12 +202,16 @@ def find_artifacts(exp: Experiment, overwrite: bool = False, wells: Sequence[str
     outcomes: list[str | Failed] = []
     rounds_written = 0
     wells_written: set[str] = set()
+    not_written: defaultdict[str, list[int]] = defaultdict(list)
     for well, work in progress(plan.worklist.items(), desc="Overall Progress", unit="well", total=len(plan.worklist)):
         try:
             with progress(work.items(), desc=well, unit="round", leave=False) as round_bar:
                 for round_index, images in round_bar:
                     masks = round_masks(images)
-                    _write_round(exp, well, round_index, masks)
+                    written = _write_round(exp, well, round_index, masks)
+                    if not written:
+                        not_written[well].append(round_index)
+                        continue
                     rounds_written += 1
                     wells_written.add(well)
         except Stopped:
@@ -217,18 +222,28 @@ def find_artifacts(exp: Experiment, overwrite: bool = False, wells: Sequence[str
             outcomes.append(well)
 
     say(f"Wrote masks for {rounds_written} round(s) in {len(wells_written)} well(s).")
+    if not_written:
+        say(
+            "The following masks were edited by hand while this step ran, so they were not overwritten: "
+            f"{', '.join(f'{w} (round(s): {", ".join(map(str, rounds))})' for w, rounds in not_written.items())}"
+        )
     check_results([*plan.refused, *outcomes], unit="well")
 
 
 def _write_round(
     exp: Experiment, well: str, round_index: int, masks: dict[str, tuple[npt.NDArray[np.bool], npt.NDArray[np.uint16]]]
-) -> None:
+) -> bool:
+    record_path = io.mask_record_path(exp, well, round_index)
+    edited = _is_mask_edited(record_path)
+    if edited:
+        return False
+
     path = io.mask_path(exp, well, round_index)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     record = {"edited": False, "masks": {signal: {"spread": 0, "pad": 0} for signal in masks}}
     with (
-        io.written_whole(io.mask_record_path(exp, well, round_index)) as partial,
+        io.written_whole(record_path) as partial,
         open(partial, "w", encoding="utf-8") as fh,
     ):
         json.dump(record, fh, indent=2)
@@ -239,6 +254,15 @@ def _write_round(
         for prefix, arr in zip(("final_", "outlines_"), arrs, strict=True)
     }
     write_npz(path, masks_write)
+
+    return True
+
+
+def _is_mask_edited(mask_record_path: Path) -> bool:
+    edited = json.loads(mask_record_path.read_text(encoding="utf-8"))["edited"] if mask_record_path.exists() else False
+    if not isinstance(edited, bool):
+        raise ValueError(f"Expected a boolean value under 'edited' in file: {mask_record_path.name}. Got '{edited}'.")
+    return edited
 
 
 def _plan_wells(exp: Experiment, overwrite: bool = False, wells: Sequence[str] | None = None) -> _Plan:
@@ -263,13 +287,8 @@ def _plan_wells(exp: Experiment, overwrite: bool = False, wells: Sequence[str] |
                 record_path = io.mask_record_path(exp, well, rnd_idx)
                 mask_path = io.mask_path(exp, well, rnd_idx)
 
-                edited = (
-                    json.loads(record_path.read_text(encoding="utf-8"))["edited"] if record_path.exists() else False
-                )
-                if not isinstance(edited, bool):
-                    raise ValueError(
-                        f"Expected a boolean value under 'edited' in file: {record_path.name}. Got '{edited}'."
-                    )
+                edited = _is_mask_edited(record_path)
+
                 # e.g. {'DNA': Path(...)}
                 out_paths = {
                     str(row.signal): Path(exp.output_images) / well / str(row.raw_file_name)
