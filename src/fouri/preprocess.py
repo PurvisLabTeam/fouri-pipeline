@@ -10,13 +10,14 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
-from tifffile import imread
+import tifffile
 
 from fouri.config import Experiment
 from fouri.io import (
-    label_paths,
+    label_path,
     mask_paths,
     nd2_metadata,
+    original_label_path,
     read_info_file,
     read_nd2,
     read_round_table,
@@ -36,27 +37,31 @@ def trim(image: npt.NDArray[Any], width: int, height: int) -> npt.NDArray[Any]:
 def convert_well(exp: Experiment, well: str, align_signal: str = "DNA", overwrite: bool = False) -> None:
     table = round_table(exp, well, align_signal)
     round_table_pth = round_table_path(exp, well)
+    rounds_idx = table["round_index"].unique()
     to_write = table
-    if not overwrite and round_table_pth.exists():
+    if round_table_pth.exists():
         existing_round_table = read_round_table(exp, well)
         existing_dims = (
             int(existing_round_table["width_min"].iloc[0]),
             int(existing_round_table["height_min"].iloc[0]),
         )
         dims = (int(table["width_min"].iloc[0]), int(table["height_min"].iloc[0]))
-        if existing_dims == dims:
+        if existing_dims == dims and not overwrite:
             to_write = table[~table["round_name"].isin(existing_round_table["round_name"])]
-        else:
-            if (Path(exp.segmented) / well).exists():
-                for f in label_paths(exp.segmented, well):
-                    label_img = trim(imread(f), width=dims[0], height=dims[1])
-                    write_tiff(f, label_img)
-
+        elif existing_dims != dims:
             if (Path(exp.masks) / well).exists():
                 for path in mask_paths(exp.masks, well):
                     with np.load(path) as fh:
-                        masks = {name: trim(arr, width=dims[0], height=dims[1]) for name, arr in fh.items()}
+                        masks = {name: trim(arr, dims[0], dims[1]) for name, arr in fh.items()}
                     write_npz(path, masks)
+
+            labels_to_trim: list[Path] = []
+            labels_to_trim.extend(path for idx in rounds_idx if (path := label_path(exp, well, idx)).exists())
+            labels_to_trim.extend(path for idx in rounds_idx if (path := original_label_path(exp, well, idx)).exists())
+            for path in labels_to_trim:
+                label = tifffile.imread(path)
+                trimmed = trim(label, dims[0], dims[1])
+                write_tiff(path, trimmed)
 
     output_images = Path(exp.output_images) / well
     output_images.mkdir(parents=True, exist_ok=True)
