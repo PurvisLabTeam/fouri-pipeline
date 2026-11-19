@@ -26,6 +26,7 @@ import subprocess
 import sys
 import time
 import traceback
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal
@@ -34,8 +35,9 @@ import yaml
 from omegaconf import DictConfig, OmegaConf
 
 from fouri import report
+from fouri.adata import check_subsample
 from fouri.config import Experiment, load_config
-from fouri.io import adata_sub_path, run_record_path
+from fouri.io import adata_path, adata_sub_path, run_record_path
 from fouri.parallel import error_in_words
 from fouri.preprocess import changed_wells
 from fouri.report import say
@@ -82,11 +84,28 @@ def reconvert(config: str | Path, wells: Sequence[str] | None, *, dry_run: bool,
 
 def build_cell_table(exp: Experiment, filters: Sequence[str] = (), labels: Sequence[str] = ()) -> None:
     """Combine the wells' cell data, add derived features, save fullest_df.csv and the AnnData."""
+    given_counts = Counter(labels)
+    duplicated_labels = sorted(label for label, count in given_counts.items() if count > 1)
+    if duplicated_labels:
+        raise ValueError(f"The following given label(s), appear multiple times: {', '.join(duplicated_labels)}.")
+
     from fouri.adata import build_adata
     from fouri.artifacts import remove_covered
-    from fouri.features import add_derived_features, build_fullest_df
+    from fouri.features import add_derived_features, build_fullest_df, measured_columns
     from fouri.filters import apply_filters, named_filters
     from fouri.labels import apply_labels, named_labels
+
+    measured = set(measured_columns(exp))
+    clashed_names = [
+        feature["name"]
+        for feature in exp.derived_features
+        if feature["name"].endswith("_covered") or feature["name"] in measured
+    ]
+    if clashed_names:
+        raise ValueError(
+            f"Invalid derived feature names found: {', '.join(clashed_names)}. "
+            "Please use derived feature names that do not end in '_covered' and that don't clash with existing ones."
+        )
 
     table = add_derived_features(build_fullest_df(exp), exp.derived_features)
     initial_count = len(table)
@@ -139,11 +158,16 @@ def make_embeddings(
     Each run is ``{"method": "PHATE", "dims": 3, "top_n": 10, "settings": {"knn": 80}}``.
     Subsampling again replaces the subsample file and the embeddings in it.
     """
+    import anndata as ad
+
     from fouri.embedding import Method, Run, embed_grid, subsample
 
     if overwrite or not adata_sub_path(exp).exists():
         subsample(exp, cells_per_sample=cells_per_sample, seed=subsample_seed)
     else:
+        table_uns = ad.read_h5ad(adata_path(exp)).uns
+        subsample_uns = ad.read_h5ad(adata_sub_path(exp)).uns
+        check_subsample(table_uns, subsample_uns)
         report.say("Using the existing subsample. To subsample again, use overwrite=True")
     grid = [
         Run(Method(run["method"]), int(run["dims"]), int(run["top_n"]), dict(run.get("settings", {}))) for run in runs

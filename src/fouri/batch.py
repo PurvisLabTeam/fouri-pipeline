@@ -10,10 +10,11 @@ import numpy.typing as npt
 import pandas as pd
 
 from fouri import io
+from fouri.adata import check_subsample
 from fouri.config import Experiment
 from fouri.features import metadata_obs_columns
 from fouri.io import adata_sub_path, fullest_df_path
-from fouri.metadata import natural_key, normalize_well
+from fouri.metadata import natural_key, normalize_well, plate_sort_key
 from fouri.report import say
 
 PLATE_ROW: Final[str] = "plate row"
@@ -59,9 +60,10 @@ def batch_labels(obs: pd.DataFrame, batch: str) -> pd.Series:
         return wells.map({well: str(int(normalize_well(well)[1:])) for well in present}).rename(batch)
     else:
         try:
-            return obs[batch].astype("string").rename(batch)
+            labels = obs[batch].astype("string")
         except KeyError as e:
             raise ValueError(f"The cells table has no column named '{batch}'.") from e
+        return labels.mask(_blank(labels)).rename(batch)
 
 
 def condition_labels(obs: pd.DataFrame, keep: Sequence[str]) -> pd.Series:
@@ -74,12 +76,22 @@ def condition_labels(obs: pd.DataFrame, keep: Sequence[str]) -> pd.Series:
             f"The cells table does not have the following condition column(s): {', '.join(f'{m}' for m in missing)}"
         )
     selected = obs[keep].astype("string")
+    selected = selected.apply(lambda column: column.mask(_blank(column)))
     return selected.iloc[:, 0].str.cat(selected.iloc[:, 1:], sep=CONDITION_JOIN)
+
+
+def _blank(values: pd.Series) -> pd.Series:
+    return values.astype("string").str.strip().eq("").fillna(True).astype(bool)
+
+
+def _known(conditions: pd.Series, batches: pd.Series) -> pd.Series:
+    return conditions.notna() & batches.notna()
 
 
 def conditions_in_batches(conditions: pd.Series, batches: pd.Series) -> pd.DataFrame:
     """@TODO."""
-    by_conditions = batches.groupby(conditions).unique()
+    known = _known(conditions, batches)
+    by_conditions = batches[known].groupby(conditions[known]).unique()
 
     rows: dict[str, list[Any]] = {"condition": [], "batches": [], "usable": []}
     for condition in sorted(by_conditions.index, key=natural_key):
@@ -96,7 +108,7 @@ def used_conditions(conditions: pd.Series, batches: pd.Series) -> tuple[pd.DataF
     in_batches = conditions_in_batches(conditions, batches)
     usable = in_batches[in_batches["usable"]]
     usable = usable.reset_index(drop=True)
-    mask = conditions.isin(usable["condition"]).to_numpy()
+    mask = (conditions.isin(usable["condition"]) & _known(conditions, batches)).to_numpy(dtype=bool)
     usable = usable.drop(columns="usable")
     return usable, mask
 
@@ -314,7 +326,12 @@ def correct_batches(
     conditions = condition_labels(included_obs, keep)
 
     used, mask = used_conditions(conditions, batches)
-    left_counts = conditions[~mask].value_counts().to_dict()
+    blank = ~_known(conditions, batches).to_numpy(dtype=bool)
+    left_counts = conditions[~mask & ~blank].value_counts().to_dict()
+    blank_wells = _blank_wells(included_obs, blank)
+    blank_columns = {batch: batches.isna().to_numpy(dtype=bool)} | {
+        column: _blank(included_obs[column]).to_numpy(dtype=bool) for column in keep
+    }
 
     cells_values = np.asarray(cells.X, dtype=np.float64)
     cells_values = cells_values[included]
@@ -329,15 +346,11 @@ def correct_batches(
     subsampled: ad.AnnData | None = None
     if subsampled_path.exists():
         subsampled = ad.read_h5ad(subsampled_path)
+        check_subsample(cells.uns, subsampled.uns)
         sub_obs = cast(pd.DataFrame, subsampled.obs)
         full_keys = pd.MultiIndex.from_frame(obs[["well", "label"]])
         sub_keys = pd.MultiIndex.from_frame(sub_obs[["well", "label"]])
         matching = full_keys.get_indexer(sub_keys)
-        if np.any(matching == -1):
-            raise RuntimeError(
-                "The subsampled table has cells that the main table no longer has. Rerun Embedding with Overwrite to "
-                "make a new subsample."
-            )
     var = cast(pd.DataFrame, cells.var)
     log_cols = log_columns(var)
     formulas = cast(pd.DataFrame, cells.uns["derived_features"])
@@ -347,6 +360,13 @@ def correct_batches(
         logged = cells.var_names.isin(log_cols)
         combat_input[:, logged] = np.log1p(combat_input[:, logged])
 
+    for column, column_blank in blank_columns.items():
+        wells = _blank_wells(included_obs, column_blank)
+        if wells:
+            say(
+                "The following wells have been excluded from batch correction because they have no value in "
+                f"{column}: {', '.join(f'{well} ({count:,} cells)' for well, count in wells.items())}."
+            )
     if left_counts:
         say(
             f"The following conditions were left out and not corrected because they are in one {batch} "
@@ -407,6 +427,7 @@ def correct_batches(
         "log_transformed": log_transformed,
         "conditions": used["condition"].to_list(),
         "left_out": list(left_counts.keys()),
+        "blank_wells": blank_wells,
         "groups": {
             "batches": [batch for group in groups for batch in group],
             "values": np.repeat(np.arange(len(groups)), [len(g) for g in groups]),
@@ -543,11 +564,17 @@ def _shuffled_batches(conditions: pd.Series, batches: pd.Series) -> pd.Series:
     shuffled = batches.copy()
     rng = np.random.default_rng(0)
     used, _ = used_conditions(conditions, batches)
+    known = _known(conditions, batches)
     for condition in used["condition"]:
-        in_condition = conditions == condition
+        in_condition = ((conditions == condition).fillna(False) & known).to_numpy(dtype=bool)
         permuted = rng.permutation(batches[in_condition].to_numpy())
         shuffled[in_condition] = permuted
     return shuffled
+
+
+def _blank_wells(obs: pd.DataFrame, blank: npt.NDArray[np.bool]) -> dict[str, int]:
+    counts = obs["well"].astype(str)[blank].value_counts()
+    return {str(well): int(counts[well]) for well in sorted(counts.index, key=plate_sort_key)}
 
 
 def default_keep(exp: Experiment) -> list[str]:

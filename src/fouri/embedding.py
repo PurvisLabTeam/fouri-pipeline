@@ -31,6 +31,10 @@ class Method(StrEnum):
 def subsample(exp: Experiment, cells_per_sample: int = 2000, seed: int = 42) -> ad.AnnData:
     rpath = adata_path(exp)
     adata = ad.read_h5ad(rpath)
+    adata_id = adata.uns.get("cell_table", {}).get("id")
+    if adata_id is None:
+        raise ValueError("The adata cell table was built by an older version. Build the cell table again.")
+
     selected = adata if "included" not in adata.obs.columns else adata[adata.obs["included"]]
     adata_samples = set(adata.obs["sample_ID"])
     selected_samples = set(selected.obs["sample_ID"])
@@ -50,7 +54,11 @@ def subsample(exp: Experiment, cells_per_sample: int = 2000, seed: int = 42) -> 
     _, subsampled = sketch(
         selected, sample_set_key="sample_ID", num_subsamples=cells_per_sample, frequency_seed=seed, n_jobs=-1
     )
-    subsampled.uns["subsample"] = {"cells_per_sample": cells_per_sample, "seed": seed}
+    subsampled.uns["subsample"] = {
+        "cell_table": adata.uns["cell_table"]["id"],
+        "cells_per_sample": cells_per_sample,
+        "seed": seed,
+    }
     with written_whole(adata_sub_path(exp)) as partial:
         subsampled.write_h5ad(partial)
     say(f"Wrote subsampled dataframe with {len(cells_per_sample_actual)} samples and {subsampled.n_obs:,} cells.")
@@ -249,20 +257,21 @@ def embed_grid(
         names=[run_key(run) for run in runs],
     )
 
-    used_samples = sorted(int(sample) for sample in adata.obs["sample_ID"][_sample_mask(adata, samples)].unique())
+    sample_ids = adata.obs["sample_ID"].to_numpy()
     embeddings = adata.uns.setdefault("embeddings", {})
     keys = []
     for run, coords in zip(runs, coordinates, strict=True):
         if isinstance(coords, (Failed, Dropped)):
             continue
         features = order[: run.top_n]
+        embedded = ~np.isnan(np.asarray(coords, dtype=np.float64)).any(axis=1)
         record = {
             "method": str(run.method),
             "dims": run.dims,
             "top_n": run.top_n,
             "settings": dict(run.settings),
             "picked": list(picked),
-            "samples": used_samples,
+            "samples": sorted({int(sample) for sample in sample_ids[embedded]}),
             "ranking_k": ranking_k,
             "seed": seed,
             "values": values,

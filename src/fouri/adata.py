@@ -1,13 +1,14 @@
 """@TODO."""
 
-from collections.abc import Iterable, Sequence
+import uuid
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 import anndata as ad
 import pandas as pd
 
 from fouri.config import Experiment
-from fouri.features import metadata_obs_columns, standardize_columns
+from fouri.features import MEASURES, metadata_obs_columns, standardize_columns
 from fouri.io import COMBAT_LAYER, adata_path, adata_sub_path, fullest_df_path, read_round_table, written_whole
 from fouri.metadata import config_to_table, feature_prefix
 from fouri.report import say
@@ -15,10 +16,27 @@ from fouri.report import say
 POSITION_COLUMNS = ["centroid-0", "centroid-1", "bbox-0", "bbox-1", "bbox-2", "bbox-3", "orientation"]
 OLD_COLS_TO_DROP = ["nuc_mask", "ring_mask"]
 
-MEASURES = ["nuc_mean", "ring_mean", "total_nuc_protein", "nuc_cyto_ratio"]
 CHANNEL_COLUMNS = ["round_index", "channel_name", "excitation_nm", "emission_nm", "exposure_ms"]
 MICROSCOPE_COLUMNS = ["pixel_size_um", "objective", "bit_depth"]
 EXPERIMENT_KEYS = ["experiment_key", "experiment_name", "cell_type", "passage", "date_completed", "notes"]
+
+
+def is_current_subsample(table_uns: Mapping[str, Any], subsample_uns: Mapping[str, Any]) -> bool:
+    """@TODO."""
+    table_id = table_uns.get("cell_table", {}).get("id")
+    subsample_id = subsample_uns.get("subsample", {}).get("cell_table")
+
+    return table_id is not None and subsample_id is not None and table_id == subsample_id
+
+
+def check_subsample(table_uns: Mapping[str, Any], subsample_uns: Mapping[str, Any]) -> None:
+    table_id = table_uns.get("cell_table", {}).get("id")
+    if table_id is None:
+        raise ValueError("The adata cell table was built by an older version. Build the cell table again.")
+    if not is_current_subsample(table_uns, subsample_uns):
+        raise ValueError(
+            "The subsampled table was made from an outdated cell table. Rerun embedding with overwrite on."
+        )
 
 
 def build_adata(exp: Experiment, fullest_df: pd.DataFrame, labels: Sequence[str] = ()) -> ad.AnnData:
@@ -57,12 +75,13 @@ def build_adata(exp: Experiment, fullest_df: pd.DataFrame, labels: Sequence[str]
         uns=_experiment_info(exp, round_tables),
     )
 
+    adata.uns["cell_table"] = {"id": uuid.uuid4().hex}
+
     df_path = fullest_df_path(exp)
     ad_path = adata_path(exp)
-    with written_whole(df_path) as partial:
-        fullest_df.to_csv(partial, index=False)
-    with written_whole(ad_path) as partial:
-        adata.write_h5ad(partial)
+    with written_whole(df_path) as partial_df, written_whole(ad_path) as partial_adata:
+        fullest_df.to_csv(partial_df, index=False)
+        adata.write_h5ad(partial_adata)
 
     adata_sub = adata_sub_path(exp)
     if adata_sub.exists():

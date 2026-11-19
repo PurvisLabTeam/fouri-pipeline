@@ -21,14 +21,18 @@ from builders import (
     raw_files,
     segmented,
     subsampled,
+    varied_cell_data,
     well_outputs,
+    with_derived,
     with_filters,
     with_info,
     with_labels,
+    with_metadata,
 )
 
 from fouri import io, preprocess, report, run
 from fouri.config import Experiment
+from fouri.embedding import subsample
 from fouri.labels import apply_labels, named_labels
 
 
@@ -415,3 +419,144 @@ def test_reconvert_with_no_changed_well_runs_nothing(
 
     assert code == 0
     assert (record.read_bytes() if record.exists() else None) == before
+
+
+UMAP_RUN = {"method": "UMAP", "dims": 2, "top_n": 2, "settings": {"n_neighbors": 5}}
+PICKED = ["nuc_area", "R0_pRB_nuc_mean", "R0_RB_nuc_mean"]
+PER_SAMPLE_AREAS = {**MIDDLE_AREAS, "name": "middle areas per sample", "per_sample": True}
+
+
+def _table_files(exp: Experiment) -> dict[Path, bytes]:
+    paths = (io.fullest_df_path(exp), io.adata_path(exp))
+    return {path: path.read_bytes() for path in paths if path.exists()}
+
+
+def _embed(exp: Experiment, **options: Any) -> list[str]:
+    return run.make_embeddings(exp, [UMAP_RUN], PICKED, ranking_k=5, **options)
+
+
+def test_a_failed_anndata_write_leaves_both_files_as_they_were(
+    experiment: Experiment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    varied_cell_data(experiment)
+    run.build_cell_table(experiment)
+    before = _table_files(experiment)
+    measured_values(experiment, "B02", "nuc_area", [41.0, 42.0, 43.0, 44.0])
+
+    def write_fails(self: ad.AnnData, *args: Any, **kwargs: Any) -> None:
+        raise OSError("made-up failure while writing the AnnData")
+
+    monkeypatch.setattr(ad.AnnData, "write_h5ad", write_fails)
+
+    with pytest.raises(OSError):
+        run.build_cell_table(experiment)
+
+    assert _table_files(experiment) == before
+    assert list(Path(experiment.base_dir).glob("*.partial")) == []
+
+
+def test_a_label_named_twice_is_refused_before_writing(experiment: Experiment) -> None:
+    varied_cell_data(experiment)
+    exp = with_labels(experiment, [SIZE_LABEL])
+
+    with pytest.raises(ValueError):
+        run.build_cell_table(exp, labels=["size", "size"])
+
+    assert _table_files(exp) == {}
+
+
+def test_a_derived_feature_ending_in_covered_is_refused(experiment: Experiment) -> None:
+    varied_cell_data(experiment)
+    exp = with_derived(experiment, [{"name": "pRB_covered", "formula": "R0_pRB_nuc_mean / R0_RB_nuc_mean"}])
+
+    with pytest.raises(ValueError):
+        run.build_cell_table(exp)
+
+    assert _table_files(exp) == {}
+
+
+def test_a_derived_feature_named_as_a_measured_column_is_refused(experiment: Experiment) -> None:
+    varied_cell_data(experiment)
+    exp = with_derived(experiment, [{"name": "nuc_area", "formula": "nuc_area * 2"}])
+
+    with pytest.raises(ValueError):
+        run.build_cell_table(exp)
+
+    assert _table_files(exp) == {}
+
+
+def test_a_per_sample_filter_with_a_well_lacking_sample_id_is_refused(experiment: Experiment) -> None:
+    varied_cell_data(experiment)
+    exp = with_filters(with_metadata(experiment, "B03", sample_ID=None), [PER_SAMPLE_AREAS])
+
+    with pytest.raises(ValueError):
+        run.build_cell_table(exp, filters=[PER_SAMPLE_AREAS["name"]])
+
+    assert _table_files(exp) == {}
+
+
+def test_embedding_refuses_a_subsample_from_another_cell_table(experiment: Experiment, stand_in_umap: object) -> None:
+    varied_cell_data(experiment)
+    run.build_cell_table(experiment)
+    subsample(experiment)
+    run.build_cell_table(experiment)
+    before = io.adata_sub_path(experiment).read_bytes()
+
+    with pytest.raises(ValueError):
+        _embed(experiment)
+
+    assert io.adata_sub_path(experiment).read_bytes() == before
+
+
+def test_a_subsample_without_an_id_is_refused(experiment: Experiment, stand_in_umap: object) -> None:
+    varied_cell_data(experiment)
+    run.build_cell_table(experiment)
+    subsampled(experiment, list(range(12)), "X_phate_3d_top2_knn5", cell_table=False)
+    before = io.adata_sub_path(experiment).read_bytes()
+
+    with pytest.raises(ValueError):
+        _embed(experiment)
+
+    assert io.adata_sub_path(experiment).read_bytes() == before
+
+
+def test_a_table_without_an_id_is_refused_by_subsample(experiment: Experiment) -> None:
+    varied_cell_data(experiment)
+    run.build_cell_table(experiment)
+    table = ad.read_h5ad(io.adata_path(experiment))
+    table.uns.pop("cell_table", None)
+    table.write_h5ad(io.adata_path(experiment))
+
+    with pytest.raises(ValueError):
+        subsample(experiment)
+
+    assert not io.adata_sub_path(experiment).exists()
+
+
+def test_build_cell_table_removes_the_subsample_layer(experiment: Experiment) -> None:
+    varied_cell_data(experiment)
+    run.build_cell_table(experiment)
+    subsampled(experiment, list(range(12)), "X_phate_3d_top2_knn5")
+    sub = ad.read_h5ad(io.adata_sub_path(experiment))
+    sub.layers[io.COMBAT_LAYER] = np.asarray(sub.X, dtype=float)
+    sub.write_h5ad(io.adata_sub_path(experiment))
+
+    run.build_cell_table(experiment)
+
+    rebuilt = ad.read_h5ad(io.adata_sub_path(experiment))
+    assert io.COMBAT_LAYER not in rebuilt.layers
+    assert "X_phate_3d_top2_knn5" in rebuilt.obsm
+
+
+def test_embedding_overwrite_subsamples_again(experiment: Experiment, stand_in_umap: object) -> None:
+    varied_cell_data(experiment)
+    run.build_cell_table(experiment)
+    subsampled(experiment, [0, 1, 4, 5, 8, 9], "X_phate_3d_top2_knn5")
+
+    keys = _embed(experiment, overwrite=True, cells_per_sample=3)
+
+    sub = ad.read_h5ad(io.adata_sub_path(experiment))
+    assert "X_phate_3d_top2_knn5" not in sub.obsm
+    assert list(sub.obsm) == keys
+    assert sub.uns["subsample"]["cells_per_sample"] == 3
+    assert sub.n_obs == 9

@@ -118,6 +118,10 @@ def _check_rule(table: pd.DataFrame, rule: Mapping[str, Any]) -> FilterRule:
         raise ValueError(
             f"Filter '{name}' is set per sample but there is no 'sample_ID' column is in the cells table."
         )
+    if per_sample and pd.isna(table["sample_ID"]).any():
+        raise ValueError(
+            "Some well(s) in some filter(s) are missing sample IDs. Set them in the experiment configuration."
+        )
 
     low = rule.get("low", -1)
     high = rule.get("high", -1)

@@ -15,10 +15,26 @@ from scipy.signal import find_peaks
 from scipy.stats import gaussian_kde, zscore
 from skimage.filters import threshold_multiotsu, threshold_otsu
 
-from fouri.io import cell_data_path
+from fouri.config import Experiment
+from fouri.io import cell_data_path, read_round_table, round_table_path
+from fouri.metadata import feature_prefix
 from fouri.report import say
 
 DEFAULT_SDS: Final[float] = 3.0
+
+MEASURES: Final[list[str]] = ["nuc_mean", "ring_mean", "total_nuc_protein", "nuc_cyto_ratio"]
+_CHANNEL_SUFFIXES = [*MEASURES, "covered"]
+
+_SHAPE_IDENTITY: Final[list[str]] = [
+    "label",
+    "nuc_area",
+    "orientation",
+    "axis_major_length",
+    "axis_minor_length",
+    "ring_area",
+    *[f"bbox-{i}" for i in range(4)],
+    *[f"centroid-{i}" for i in range(2)],
+]
 
 # column names notebook 07 has always used in fullest_df / adata.obs
 _OBS_NAMES = {"treatment_time": "treatment time"}
@@ -32,6 +48,30 @@ class Threshold(StrEnum):
     OTSU = "Otsu"
     OTSU_2CUT = "Otsu, 2 cut"
     VALLEY = "Valley"
+
+
+def measured_columns(exp: Experiment) -> list[str]:
+    """@TODO."""
+    measured = []
+    for well in exp.well_list:
+        table_path = round_table_path(exp, well)
+
+        if not table_path.exists():
+            continue
+        table = read_round_table(exp, well)
+        channels = [
+            f"{feature_prefix(round_name, signal)}_{suffix}"
+            for round_name, signal in zip(table["round_name"], table["signal"], strict=True)
+            for suffix in _CHANNEL_SUFFIXES
+        ]
+        measured.extend(channels)
+
+    if measured == []:
+        # No well was converted yet.
+        return measured
+
+    measured.extend(_SHAPE_IDENTITY)
+    return sorted(dict.fromkeys(measured))
 
 
 def build_fullest_df(exp):

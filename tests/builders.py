@@ -261,12 +261,14 @@ def measured_values(exp: Experiment, well: str, column: str, values: Sequence[fl
     table.to_csv(path, index=False)
 
 
-def subsampled(exp: Experiment, rows: Sequence[int], key: str) -> None:
+def subsampled(exp: Experiment, rows: Sequence[int], key: str, *, cell_table: bool = True) -> None:
     adata = ad.read_h5ad(io.adata_path(exp))[list(rows)].copy()
     dims = 3 if "_3d_" in key else 2
     adata.obsm[key] = np.arange(adata.n_obs * dims, dtype=float).reshape(adata.n_obs, dims) * 1.5 + 0.25
     features = list(adata.var_names[:2])
     adata.uns["subsample"] = {"cells_per_sample": adata.n_obs, "seed": 42}
+    if cell_table and "cell_table" in adata.uns:
+        adata.uns["subsample"]["cell_table"] = adata.uns["cell_table"]["id"]
     adata.uns["embeddings"] = {
         key: {
             "method": key.split("_")[1].upper(),
@@ -489,3 +491,27 @@ def well_outputs(exp: Experiment, well: str) -> dict[Path, bytes]:
         if (Path(folder) / well).exists():
             files.extend(path for path in (Path(folder) / well).rglob("*") if path.is_file())
     return {path: path.read_bytes() for path in files if path.exists()}
+
+
+VARIED_FEATURES = ["nuc_area", "R0_pRB_nuc_mean", "R0_RB_nuc_mean", "R1_cMyc_nuc_mean", "R2_EdU_nuc_mean"]
+
+
+def varied_cell_data(exp: Experiment, wells: Sequence[str] | None = None) -> None:
+    for index, well in enumerate(exp.well_list):
+        if wells is not None and well not in wells:
+            continue
+        converted(exp, well)
+        segmented(exp, well)
+        aligned(exp, well)
+        measured(exp, well)
+        cells = [4 * index + cell for cell in range(4)]
+        measured_values(exp, well, "nuc_area", [30.0 + k + 0.5 * (k % 3) for k in cells])
+        measured_values(exp, well, "R0_pRB_nuc_mean", [1000.0 + 50 * k + 7 * (k % 3) for k in cells])
+        measured_values(exp, well, "R0_RB_nuc_mean", [800.0 + 20 * k + 11 * (k % 4) for k in cells])
+        measured_values(exp, well, "R1_cMyc_nuc_mean", [2000.0 + 30 * (5 * k % 12) for k in cells])
+        measured_values(exp, well, "R2_EdU_nuc_mean", [3000.0 + 40 * (7 * k % 12) for k in cells])
+
+
+def with_derived(exp: Experiment, derived: Sequence[Mapping[str, str]]) -> Experiment:
+    save_config({**exp.config, "derived_features": [dict(spec) for spec in derived]}, exp.config_path)
+    return load_config(exp.config_path, announce=False)

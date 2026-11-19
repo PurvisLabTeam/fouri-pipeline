@@ -20,7 +20,6 @@ NOT_THE_BIGGEST = {
     "low": 0,
     "high": 40,
 }
-NOT_THE_TWO_BIGGEST = {**NOT_THE_BIGGEST, "name": "not the two biggest", "high": 39}
 SIZE_LABEL = {
     "column": "size",
     "use": True,
@@ -255,21 +254,6 @@ def test_a_feature_without_z_scores_is_left_out_of_z_scores_only(experiment: Exp
 
 
 @FORMATS
-def test_a_subsampled_cell_the_filters_now_leave_out_is_not_exported(experiment: Experiment, file_format: str) -> None:
-    exp = _cell_table(experiment)
-    subsampled(exp, ROWS, KEY)
-    exp = with_filters(exp, [NOT_THE_BIGGEST, NOT_THE_TWO_BIGGEST])
-    run.build_cell_table(exp, filters=["not the two biggest"], labels=["size"])
-
-    path = export_cells(exp, NAME, file_format=file_format, embeddings=[KEY])
-
-    subsample = ad.read_h5ad(io.adata_sub_path(exp))
-    still_included = [cell for cell in _keys(subsample.obs) if cell != ("C02", 3)]
-    assert len(still_included) == len(ROWS) - 1
-    assert _keys(_cells_exported(path, file_format)) == still_included
-
-
-@FORMATS
 def test_corrected_takes_the_combat_layer(experiment: Experiment, file_format: str) -> None:
     exp = _cell_table(experiment)
     _with_combat(exp)
@@ -316,21 +300,6 @@ def test_embeddings_export_only_the_subsampled_cells_with_their_coordinates(
         coordinates = cells[COORDINATES].set_axis(_cells(cells))
     assert _keys(cells) == _keys(subsample.obs)
     _same_values(coordinates, expected)
-
-
-def test_a_subsample_from_an_earlier_table_is_refused(experiment: Experiment) -> None:
-    exp = _cell_table(experiment)
-    subsampled(exp, ROWS, KEY)
-    subsample = ad.read_h5ad(io.adata_sub_path(exp))
-    labels = subsample.obs["label"].to_numpy().copy()
-    labels[0] = 5
-    subsample.obs["label"] = labels
-    subsample.write_h5ad(io.adata_sub_path(exp))
-
-    with pytest.raises(ValueError):
-        export_cells(exp, NAME, embeddings=[KEY])
-
-    assert _files_in_exports(exp) == []
 
 
 def test_an_existing_export_is_refused_without_overwrite_and_replaced_with_it(experiment: Experiment) -> None:
@@ -406,3 +375,49 @@ def test_each_refusal_writes_nothing(
         export_cells(exp, name, **settings)
 
     assert _files_in_exports(exp) == []
+
+
+def test_export_refuses_a_subsample_from_another_cell_table(experiment: Experiment) -> None:
+    exp = _cell_table(experiment)
+    subsampled(exp, ROWS, KEY)
+    measured_values(exp, "B02", "R0_pRB_nuc_mean", [1500.0, 1600.0, 1700.0, 1800.0])
+    run.build_cell_table(exp, filters=["not the biggest"], labels=["size"])
+
+    with pytest.raises(ValueError):
+        export_cells(exp, NAME, embeddings=[KEY])
+
+    assert not io.export_path(exp, NAME, "h5ad").exists()
+
+
+def test_a_cell_missing_from_the_anndata_is_refused(experiment: Experiment) -> None:
+    exp = _cell_table(experiment)
+    table = ad.read_h5ad(io.adata_path(exp))
+    table[1:].copy().write_h5ad(io.adata_path(exp))
+
+    with pytest.raises(ValueError):
+        export_cells(exp, NAME, values="measured")
+
+    assert not io.export_path(exp, NAME, "h5ad").exists()
+
+
+def test_a_cell_missing_from_the_table_is_refused(experiment: Experiment) -> None:
+    exp = _cell_table(experiment)
+    table = pd.read_csv(io.fullest_df_path(exp))
+    table.iloc[1:].to_csv(io.fullest_df_path(exp), index=False)
+
+    with pytest.raises(ValueError):
+        export_cells(exp, NAME, values="measured")
+
+    assert not io.export_path(exp, NAME, "h5ad").exists()
+
+
+def test_an_x_feature_missing_from_the_table_is_refused(experiment: Experiment) -> None:
+    exp = _cell_table(experiment)
+    assert "nuc_area" in ad.read_h5ad(io.adata_path(exp)).var_names
+    table = pd.read_csv(io.fullest_df_path(exp))
+    table.drop(columns="nuc_area").to_csv(io.fullest_df_path(exp), index=False)
+
+    with pytest.raises(ValueError):
+        export_cells(exp, NAME)
+
+    assert not io.export_path(exp, NAME, "h5ad").exists()

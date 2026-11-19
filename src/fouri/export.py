@@ -1,6 +1,6 @@
 """@TODO."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, cast
@@ -11,6 +11,7 @@ import numpy.typing as npt
 import pandas as pd
 
 from fouri import io
+from fouri.adata import check_subsample
 from fouri.config import Experiment
 from fouri.report import say
 
@@ -49,14 +50,34 @@ def export_cells(
     cells_pd = _cell_keys(table_pd)
     cells_ad = _cell_keys(table_ad)
 
+    not_in_ad = cells_pd.difference(cells_ad)
+    not_in_pd = cells_ad.difference(cells_pd)
+    if len(not_in_ad) > 0:
+        raise ValueError(
+            f"standard_adata.h5ad is missing {len(not_in_ad)} cells that are in fullest_df.csv. "
+            "Rebuild the cell table."
+        )
+    if len(not_in_pd) > 0:
+        raise ValueError(
+            f"fullest_df.csv is missing {len(not_in_pd)} cells that are in standard_adata.h5ad. "
+            "Rebuild the cell table."
+        )
+    pd_missing_features = table_ad.var_names.difference(table_pd.columns)
+    if len(pd_missing_features) > 0:
+        raise ValueError(
+            f"fullest_df.csv is missing {len(pd_missing_features)} features that are in standard_adata.h5ad. "
+            "Rebuild the cell table."
+        )
+
     if corrected and io.COMBAT_LAYER not in table_ad.layers:
         raise ValueError(
             "There is no batch-corrected copy yet. Run Batch effects first or export the z-scores as built."
         )
 
     chosen_features = _chosen_features(table_pd, table_ad.obs.columns, features)
-    subsample = _subsample(exp, embeddings, cells_pd)
+    subsample = _subsample(exp, embeddings, table_ad.uns)
     chosen_cells, counts = _chosen_cells(table_pd, cells_pd, table_ad, cells_ad, subsample, corrected=corrected)
+
     measured, zscores, left_out = _export_values(
         table_pd, cells_pd, table_ad, cells_ad, chosen_cells, chosen_features, values=values, corrected=corrected
     )
@@ -308,7 +329,7 @@ def _chosen_features(table: pd.DataFrame, obs_cols: pd.Index, features: Sequence
     return [col for col in numeric if col in features]
 
 
-def _subsample(exp: Experiment, embeddings: Sequence[str], table_cells: pd.MultiIndex) -> ad.AnnData | None:
+def _subsample(exp: Experiment, embeddings: Sequence[str], table_uns: Mapping[str, Any]) -> ad.AnnData | None:
     if len(embeddings) == 0:
         return None
     subsample_file = io.adata_sub_path(exp)
@@ -320,14 +341,8 @@ def _subsample(exp: Experiment, embeddings: Sequence[str], table_cells: pd.Multi
     missing = [k for k in embeddings if k not in adata_sub.obsm]
     if missing:
         raise ValueError(f"The subsample file has no embedding(s) named:\n{'\n'.join(missing)}\n")
-    cell_keys = _cell_keys(adata_sub)
-    missing_cells = cell_keys.difference(table_cells)
-    if not missing_cells.empty:
-        raise ValueError(
-            "The subsample file has cells that the main table no longer has. It was probably made from an "
-            "outdated table. Run Embedding with Overwrite to make a new subsample "
-            f"(missing {len(missing_cells):,} cells)."
-        )
+
+    check_subsample(table_uns, adata_sub.uns)
 
     return adata_sub
 
