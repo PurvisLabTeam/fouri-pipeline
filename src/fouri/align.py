@@ -14,7 +14,7 @@ from skimage.transform import EuclideanTransform, downscale_local_mean
 from tifffile import imread
 
 from fouri.config import Experiment
-from fouri.io import label_paths, load_transforms, read_round_table, save_transforms
+from fouri.io import label_path, label_paths, load_transforms, read_round_table, save_transforms
 from fouri.parallel import Dropped, Failed, check_results, parallel_map
 from fouri.report import say, say_skipped
 
@@ -90,23 +90,35 @@ def find_transforms(
     paths_of: dict[str, list[Path]] = {}
     round_names: dict[str, list[str]] = {}  # each well's round names, in round order
     transforms: dict[str, npt.NDArray[np.float64]] = {}
+    planned: dict[str, npt.NDArray[np.float64]] = {}
     replaced: list[str] = []
     refused: list[Failed] = []  # wells set up wrongly, each with the first check it fails
     for well in exp.pick_wells(wells):
         labels = label_paths(exp.segmented, well)
         df = read_round_table(exp, well)
-        n_rounds_df = df["round_index"].nunique()
-        if len(labels) != n_rounds_df:
-            refused.append(
-                Failed(
-                    well,
-                    f"{len(labels)} label images in segmented, {n_rounds_df} rounds in its round table. "
-                    "Each round needs exactly one label image; segment this well again or remove the extra "
-                    ".tif files.",
+
+        rounds_df = df["round_index"].unique()
+        expected_paths = [label_path(exp, well, index) for index in rounds_df]
+        missing = [index for index, path in zip(rounds_df, expected_paths, strict=True) if path not in labels]
+        extra = [path for path in labels if path not in expected_paths]
+        if missing or extra:
+            message = ""
+            trailer = ""
+            if missing:
+                missing_names = [str(df[df["round_index"] == idx]["round_name"].iloc[0]) for idx in missing]
+                message += f"Missing label file for round(s): {', '.join(missing_names)}. "
+                trailer += "Segment this well again"
+            if extra:
+                message += (
+                    "The following extra files were found for rounds not listed in the rounds table: "
+                    f"{', '.join(ex.name for ex in extra)}. "
                 )
-            )
+                trailer = trailer + " and remove the extra file(s)" if trailer != "" else "Remove the extra file(s)"
+            message = message + trailer + "."
+            refused.append(Failed(well, message))
             continue
-        if anchor_round >= len(labels):
+
+        if anchor_round not in rounds_df:
             refused.append(
                 Failed(
                     well,
@@ -116,7 +128,7 @@ def find_transforms(
             )
             continue
 
-        well_transforms = _unaligned(len(labels), anchor_round)
+        well_transforms = _unaligned(len(rounds_df), anchor_round)
         try:
             saved = load_transforms(exp, well)
         except FileNotFoundError:
@@ -124,11 +136,11 @@ def find_transforms(
         if saved is not None:
             if overwrite:
                 replaced.append(well)
-            elif len(saved) > len(labels):
+            elif len(saved) > len(rounds_df):
                 refused.append(
                     Failed(
                         well,
-                        f"{len(saved)} rounds saved, {len(labels)} rounds in the well. Align this well again "
+                        f"{len(saved)} rounds saved, {len(rounds_df)} rounds in the well. Align this well again "
                         "with Overwrite; that also replaces rounds aligned by hand.",
                     )
                 )
@@ -145,9 +157,15 @@ def find_transforms(
             else:
                 well_transforms[: len(saved)] = saved
 
-        paths_of[well] = labels
+        well_planned = _unaligned(len(rounds_df), anchor_round)
+        if saved is not None:
+            saved_rows = saved[: len(well_planned)]
+            well_planned[: len(saved_rows)] = saved_rows
+
+        paths_of[well] = sorted(expected_paths)
         round_names[well] = df.sort_values("round_index")["round_name"].unique().tolist()
         transforms[well] = well_transforms
+        planned[well] = well_planned
 
     jobs = [
         (well, r, labels[anchor_round], label)
@@ -185,7 +203,7 @@ def find_transforms(
         names=[j[0] for j in jobs],
     )
     outcomes: list[object] = []  # the results, with each failed pair's error naming its round
-    to_write = []
+    computed: dict[str, dict[int, npt.NDArray[np.float64]]] = {}
     for job, result in zip(jobs, results, strict=True):
         well, rnd, _, _ = job
         if isinstance(result, Failed):
@@ -194,12 +212,30 @@ def find_transforms(
         outcomes.append(result)
         if isinstance(result, Dropped):
             continue
-        to_write.append(well)
-        transforms[well][rnd] = result
+        computed.setdefault(well, {})[rnd] = result
 
-    to_write = list(dict.fromkeys(to_write))
-    for well in to_write:
-        save_transforms(exp, well, transforms[well])
+    hand_saved: dict[str, list[int]] = {}
+    for well, rounds in computed.items():
+        try:
+            current = load_transforms(exp, well)
+        except FileNotFoundError:
+            current = planned[well]
+        written = _unaligned(len(planned[well]), anchor_round)
+        current_rows = current[: len(written)]
+        written[: len(current_rows)] = current_rows
+        for rnd, matrix in rounds.items():
+            if np.array_equal(written[rnd], planned[well][rnd], equal_nan=True):
+                written[rnd] = matrix
+            else:
+                hand_saved.setdefault(well, []).append(rnd)
+        save_transforms(exp, well, written)
+        transforms[well] = written
+
+    if hand_saved:
+        say(
+            "The following well(s) were aligned by hand while this step ran, so they were not overwritten: "
+            f"{', '.join(f'{w} (round(s) {", ".join(str(r) for r in rounds)})' for w, rounds in hand_saved.items())}."
+        )
 
     check_results([*refused, *outcomes], unit="well")
     return transforms

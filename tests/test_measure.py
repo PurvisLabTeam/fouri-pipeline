@@ -165,3 +165,16 @@ def test_masks_missing_a_channel_or_of_another_size_refuse_the_well_alone(
     assert io.cell_data_path(experiment, "B03").exists()
     assert io.cell_data_path(experiment, "C02").exists()
     assert list(Path(experiment.base_dir).rglob("*.partial")) == []
+
+
+def test_a_stray_label_copy_is_not_read_as_a_round(experiment: Experiment) -> None:
+    _ready(experiment)
+    labels = imread(io.label_path(experiment, "B02", 0))
+    io.write_tiff(
+        Path(experiment.segmented) / "B02" / "labels_B02_round_000 - Copy.tif",
+        np.where(labels == 1, labels, 0).astype(labels.dtype),
+    )
+
+    measured(experiment, "B02")
+
+    assert sorted(_cell_data(experiment, "B02").index) == [1, 2, 3, 4]

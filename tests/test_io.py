@@ -4,7 +4,8 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from builders import aligned, converted, measured, segmented
+from builders import REMOVED_NUCLEUS, aligned, converted, measured, segmented
+from tifffile import imread
 
 from fouri import io, status
 from fouri.config import Experiment
@@ -104,3 +105,28 @@ def test_a_half_written_cell_data_file_does_not_count_as_measured(experiment: Ex
         state = status.step_status(experiment, Step.MEASURE, ["B02"])["B02"].state
 
     assert state is State.NOT_STARTED
+
+
+def test_a_stray_label_copy_is_not_read_as_a_round(experiment: Experiment) -> None:
+    segmented(experiment, "B02")
+    labels = imread(io.label_path(experiment, "B02", 0))
+    io.write_tiff(Path(experiment.segmented) / "B02" / "labels_B02_round_000 - Copy.tif", np.zeros_like(labels))
+
+    found = io.label_paths(experiment.segmented, "B02")
+    anchor = io.read_labels(experiment.segmented, "B02", [0])[0]
+
+    assert found == [io.label_path(experiment, "B02", round_index) for round_index in range(3)]
+    np.testing.assert_array_equal(anchor, labels)
+
+
+def test_read_labels_reads_rounds_by_name(experiment: Experiment) -> None:
+    segmented(experiment, "B02", rounds=[1, 2])
+    round_1 = imread(io.label_path(experiment, "B02", 1))
+    round_2 = np.where(round_1 == REMOVED_NUCLEUS, 0, round_1).astype(round_1.dtype)
+    io.write_tiff(io.label_path(experiment, "B02", 2), round_2)
+
+    read = io.read_labels(experiment.segmented, "B02", [1, 2])
+
+    np.testing.assert_array_equal(read, np.stack([round_1, round_2]))
+    with pytest.raises(FileNotFoundError):
+        io.read_labels(experiment.segmented, "B02", [0])

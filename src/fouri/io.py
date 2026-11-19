@@ -2,8 +2,9 @@
 
 import os
 import pickle
+import re
 import sys
-from collections.abc import Generator, Mapping
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -146,13 +147,18 @@ def read_nd2(path: str | Path) -> npt.NDArray:
     return image
 
 
-def label_paths(labels_path, well):
+def label_paths(labels_path: str | Path, well: str) -> list[Path]:
+    name_pattern = rf"labels_{re.escape(well)}_round_[0-9]{{3}}\.tif"
     folder = Path(labels_path) / well
-    return sorted(pth for pth in folder.iterdir() if pth.suffix in (".tiff", ".tif"))
+    return sorted(path for path in folder.iterdir() if re.fullmatch(name_pattern, path.name))
+
+
+def label_file_name(well: str, round_index: int) -> str:
+    return f"labels_{well}_round_{round_index:03d}.tif"
 
 
 def label_path(exp: Experiment, well: str, round_index: int) -> Path:
-    return Path(exp.segmented) / well / f"labels_{well}_round_{round_index:03d}.tif"
+    return Path(exp.segmented) / well / label_file_name(well, round_index)
 
 
 def original_label_path(exp: Experiment, well: str, round_index: int) -> Path:
@@ -160,14 +166,20 @@ def original_label_path(exp: Experiment, well: str, round_index: int) -> Path:
     return p.parent / "cellpose_original" / p.name
 
 
-def read_labels(labels_path, well, indices=None):
-    """Stack of a well's label images (sorted by file name).
+def read_labels(labels_path: str | Path, well: str, indices: Sequence[int] | None = None):
+    """@TODO."""
+    labels_path = Path(labels_path)
+    if indices is None:
+        paths = label_paths(labels_path, well)
 
-    ``indices`` picks specific images, e.g. [anchor, moving] in notebook 03.
-    """
-    paths = label_paths(labels_path, well)
-    if indices is not None:
-        paths = [paths[int(i)] for i in indices]
+    else:
+        paths = []
+        for round_idx in indices:
+            path = labels_path / well / label_file_name(well, round_idx)
+            if not path.exists():
+                raise FileNotFoundError(f"Well {well}, round {round_idx}: could not find label file.")
+            paths.append(path)
+
     return np.array([imread(pth) for pth in paths])
 
 
