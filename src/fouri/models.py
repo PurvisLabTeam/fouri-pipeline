@@ -69,11 +69,29 @@ def _read_kept_model(directory: Path) -> KeptModel:
     created = dt.datetime.fromisoformat(model["created"])
     experiment_key = model["experiment_key"]
     wells = model["wells"]
+    config = model["config"]
+    squares = model["squares"]
+    n_epochs = model["n_epochs"]
 
     if not isinstance(experiment_key, str):
         raise TypeError(
             f"{directory / 'model.json'} contains an invalid type for key 'experiment_key': "
-            f"Expected str, got {type(experiment_key)}"
+            f"expected str, got {type(experiment_key)}."
+        )
+    if not isinstance(config, str):
+        raise TypeError(
+            f"{directory / 'model.json'} contains an invalid type for key 'config': expected str, got {type(config)}."
+        )
+    if not isinstance(squares, int) or isinstance(squares, bool):
+        raise TypeError(
+            f"{directory / 'model.json'} contains an invalid type for key 'squares': "
+            f"expected int, got {type(squares)}."
+        )
+
+    if not isinstance(n_epochs, int) or isinstance(n_epochs, bool):
+        raise TypeError(
+            f"{directory / 'model.json'} contains an invalid type for key 'n_epochs': "
+            f"expected int, got {type(n_epochs)}."
         )
 
     wells_checks = (

@@ -130,6 +130,13 @@ def finetune_cellpose(exp: Experiment, n_epochs: int = 100, wells: Sequence[str]
         train_data.extend(image[square.rows, square.columns].copy() for square in grouped_squares)
         train_labels.extend(label[square.rows, square.columns].copy() for square in grouped_squares)
 
+    if models_dir().exists():
+        to_remove = [d for d in models_dir().iterdir() if d.name.endswith(".partial")]
+        for directory in to_remove:
+            shutil.rmtree(directory)
+        if to_remove:
+            say(f"Removed unfinished model(s): {', '.join(d.name for d in to_remove)}.")
+
     created = dt.datetime.now().replace(microsecond=0)
     created_name = f"{created:%Y%m%dT%H%M%S}"
     final_dir = models_dir() / created_name
