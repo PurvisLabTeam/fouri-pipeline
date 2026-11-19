@@ -3,7 +3,6 @@ from __future__ import annotations
 import contextlib
 import copy
 import io
-import json
 import math
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -11,15 +10,13 @@ from typing import Any
 
 import anndata as ad
 import h5py
-import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
 from anndata.io import read_elem
 
 from fouri.adata import is_current_subsample
 from fouri.app.cells import CONDITION_JOIN
-from fouri.app.state import open_experiment
-from fouri.config import Experiment, save_config
+from fouri.app.state import save_app_value
+from fouri.config import Experiment
 from fouri.embedding import EMBED_MEM_PER_WORKER, Method, Run
 from fouri.embedding_setup import _whole
 from fouri.io import adata_path
@@ -30,7 +27,6 @@ RECORDS = "embeddings"
 SUBSAMPLE = "subsample"
 ORIGINAL, COMBAT = "original", "combat"
 VALUES_NAMES = {ORIGINAL: "Original", COMBAT: "ComBat-corrected"}
-SHORTEST, LONGEST = 0.2, 3.0
 
 OLD_08 = [
     "R0_DNA_total_nuc_protein",
@@ -169,12 +165,7 @@ def time_text(seconds: float) -> str:
 
 
 def save_setup(exp: Experiment, setup: Mapping[str, Any]) -> Experiment:
-    with open(exp.config_path, encoding="utf-8") as file:
-        config = json.load(file)
-    app = config.get("app")
-    config["app"] = {**(app if isinstance(app, dict) else {}), "embedding": copy.deepcopy(dict(setup))}
-    save_config(config, exp.config_path)
-    return open_experiment(exp.config_path)
+    return save_app_value(exp, "embedding", copy.deepcopy(dict(setup)))
 
 
 def _blank(value: object) -> bool:
@@ -263,22 +254,3 @@ def record_rows(adata: ad.AnnData, key: str) -> list[tuple[str, str]]:
         ("Features used", _joined(f"{feature} {float(score):.3f}" for feature, score in used)),
     ]
     return rows
-
-
-def _kept(value: float) -> float:
-    return min(max(float(value), SHORTEST), LONGEST)
-
-
-def box_shape(fig: go.Figure, x: float, y: float, z: float) -> go.Figure:
-    fig.update_layout(scene_aspectmode="manual", scene_aspectratio={"x": _kept(x), "y": _kept(y), "z": _kept(z)})
-    return fig
-
-
-def data_proportions(adata: ad.AnnData, key: str) -> tuple[float, float, float]:
-    coords = np.asarray(adata.obsm[key], dtype=np.float64)
-    spread = np.nanmax(coords, axis=0) - np.nanmin(coords, axis=0)
-    longest = float(spread.max())
-    if not longest > 0:
-        return (1.0, 1.0, 1.0)
-    x, y, z = (_kept(length / longest) for length in spread[:3])
-    return (x, y, z)

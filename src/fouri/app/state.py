@@ -6,6 +6,7 @@ browser tab.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -14,10 +15,11 @@ from nicegui import app
 
 from fouri.app.gpu import check_gpu
 from fouri.app.runner import Run
-from fouri.config import Experiment, load_config
+from fouri.config import Experiment, load_config, save_config
 
 LAST_EXPERIMENT = "last_experiment"  # key in NiceGUI's general storage, kept in the user's own app-data
 POLL_SECONDS = 0.25  # how often the run's progress is read
+APP_NOT_READ = "experiment.json's app entry can't be read; nothing was saved."
 
 
 @dataclass
@@ -76,6 +78,17 @@ def open_experiment(path: str | Path) -> Experiment:
     STATE.experiment = experiment
     app.storage.general[LAST_EXPERIMENT] = experiment.config_path
     return experiment
+
+
+def save_app_value(exp: Experiment, key: str, value: Any) -> Experiment:
+    with open(exp.config_path, encoding="utf-8") as file:
+        config = json.load(file)
+    app_value = config.get("app")
+    if app_value is not None and not isinstance(app_value, dict):
+        raise ValueError(APP_NOT_READ)
+    config["app"] = {**(app_value or {}), key: value}
+    save_config(config, exp.config_path)
+    return open_experiment(exp.config_path)
 
 
 def kept_choices(page: str) -> dict[str, Any]:

@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
 import pandas as pd
 
 from fouri.app.cells import Cells, blank_as_missing
-from fouri.app.state import open_experiment
-from fouri.config import Experiment, save_config
+from fouri.app.state import save_app_value
+from fouri.config import Experiment
 from fouri.filters import apply_filters, keep, saved_filters
 from fouri.labels import saved_labels
 
@@ -51,12 +50,7 @@ def kept_cells(cells: Cells, exp: Experiment) -> tuple[pd.Series | None, str | N
 
 
 def _save_app_key(exp: Experiment, key: str, rules: Sequence[Mapping[str, Any]]) -> Experiment:
-    with open(exp.config_path, encoding="utf-8") as file:
-        config = json.load(file)
-    app = config.get("app")
-    config["app"] = {**(app if isinstance(app, dict) else {}), key: [dict(rule) for rule in rules]}
-    save_config(config, exp.config_path)
-    return open_experiment(exp.config_path)
+    return save_app_value(exp, key, [dict(rule) for rule in rules])
 
 
 def save_filters(exp: Experiment, rules: Sequence[Mapping[str, Any]]) -> Experiment:

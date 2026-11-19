@@ -10,13 +10,12 @@ import plotly.graph_objects as go
 from nicegui import run, ui
 from nicegui.events import ValueChangeEventArguments
 
+from fouri.app.batch_figures import adjustment_figure, classifier_figure, shares_figure, violin_figure
 from fouri.app.batches import (
     DEFAULT_BATCH,
     LiveNumbers,
     SavedCorrection,
-    adjustment_figure,
     batch_choices,
-    classifier_figure,
     keep_choices,
     live_numbers,
     matches,
@@ -24,8 +23,6 @@ from fouri.app.batches import (
     saved_batch_setup,
     saved_correction,
     setup_words,
-    shares_figure,
-    violin_figure,
 )
 from fouri.app.cells import Cells, load_cells
 from fouri.app.shell import empty_state, page_frame

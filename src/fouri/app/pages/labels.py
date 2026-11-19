@@ -21,16 +21,13 @@ from fouri.app.cells import Cells, load_cells
 from fouri.app.dialogs import ask
 from fouri.app.embeddings import sample_names, sample_number
 from fouri.app.figures import cells_line
+from fouri.app.gate_figures import NO_CLASS, class_color, gate_figure, plot_ranges
 from fouri.app.gates import (
     FREEHAND,
-    NO_CLASS,
     RECTANGLE,
     SPLITS,
     area,
-    class_color,
     drawn_points,
-    gate_figure,
-    plot_ranges,
     plotted,
     split_gates,
     to_drawn,

@@ -14,15 +14,12 @@ from nicegui import run, ui
 from nicegui.events import ValueChangeEventArguments
 
 from fouri.app.cells import CONDITION, Cells, add_groups, load_cells
+from fouri.app.embedding_figures import LONGEST, SHORTEST, box_shape, data_proportions
 from fouri.app.embeddings import (
     COMBAT,
     DEFAULT_SETUP,
-    LONGEST,
     ORIGINAL,
     RECORDS,
-    SHORTEST,
-    box_shape,
-    data_proportions,
     embedding_keys,
     embedding_names,
     read_number,
