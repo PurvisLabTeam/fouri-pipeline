@@ -4,6 +4,7 @@ import json
 import os
 import platform
 import shutil
+from collections.abc import Iterable
 
 from .metadata import normalize_well, plate_sort_key, to_sample_id
 from .report import say
@@ -66,14 +67,14 @@ class Experiment:
             out[well] = m
         return out
 
-    def pick_wells(self, wells=None):
+    def pick_wells(self, wells: str | Iterable[str] | None = None) -> list[str]:
         """Return the wells a step works on, in plate order: every well when ``wells`` is None.
 
         Names are normalized ('c2' -> 'C02') and repeats dropped. Raises ValueError for a name
         that isn't a well, or a well that isn't in this experiment.
         """
         if wells is None:
-            return self.well_list
+            wells = self.well_list
         if isinstance(wells, str):
             wells = [wells]
         chosen = {normalize_well(well) for well in wells}
@@ -226,6 +227,8 @@ def save_config(config, path):
 
     The file it replaces, if there is one, is copied to ``experiment.json.bak`` beside it first.
     """
+    from .io import written_whole
+
     config = dict(config)
     config["well_list"] = sorted(config.get("well_list", []), key=plate_sort_key)
     meta = config.get("well_metadata") or {}
@@ -233,7 +236,7 @@ def save_config(config, path):
     config_path = config_path_for(path)
     if os.path.exists(config_path):
         shutil.copyfile(config_path, config_path + ".bak")
-    with open(config_path, "w", encoding="utf-8") as f:
+    with written_whole(config_path) as partial, open(partial, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
         f.write("\n")
     return config_path
