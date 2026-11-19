@@ -40,7 +40,6 @@ dev = [
     "pandas-stubs>=3.1.0.261029",
     "pyqt6-webengine==6.11.* ; sys_platform == 'linux'",
     "pytest>=9.2.0",
-    "pytest-sugar>=1.1.1",
     "pytest-xdist>=3.8.0",
     "ruff>=0.17.3",
     "scipy-stubs>=1.18.1.1",

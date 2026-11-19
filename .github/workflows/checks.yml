@@ -24,4 +24,4 @@ jobs:
       - run: uv run ruff check src tests
       - run: uv run ruff format --check src tests
       - run: uv run mypy
-      - run: uv run pytest -m "not gpu" -n 0
+      - run: uv run pytest -m "not gpu" -n 0 --tb=short
