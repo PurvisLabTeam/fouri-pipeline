@@ -46,6 +46,7 @@ class BaseViewer(abc.ABC):
 
     _close_guard: _CloseGuard
     _self_close: bool
+    asks_on_round_switch: bool = False
 
     def __init__(self, exp: Experiment, well: str, round_name: str | None = None) -> None:
         self.exp = exp
@@ -120,6 +121,19 @@ class BaseViewer(abc.ABC):
         if round_name is not None and round_name not in choices:
             refused = round_name
             round_name = choices[0]
+        current = getattr(self, "round_name", None)
+        target = round_name if round_name is not None else current if current in choices else choices[0]
+        previous = (self.well, self.round_table, self.round_names, self.round_name) if hasattr(self, "well") else None
+        try:
+            self._enter_well(well, round_table, choices, target)
+        except Exception:
+            if previous is not None:
+                self._enter_well(*previous)
+            raise
+        if refused is not None:
+            self.prompt(f"{refused} is not a recognized round for {well}. Opened {round_name} instead.")
+
+    def _enter_well(self, well: str, round_table: pd.DataFrame, choices: list[str], round_name: str) -> None:
         self._load_well(well, round_table)
         self.well = well
         self.round_table = round_table
@@ -129,12 +143,7 @@ class BaseViewer(abc.ABC):
             self.round_picker.choices = choices
 
         self._set_quiet(self.well_picker, well)
-
-        current = getattr(self, "round_name", None)
-        target = round_name if round_name is not None else current if current in choices else choices[0]
-        self.show_round(target)
-        if refused is not None:
-            self.prompt(f"{refused} is not a recognized round for {well}. Opened {round_name} instead.")
+        self.show_round(round_name)
 
     def show_round(self, round_name: str) -> None:
         self._load_round(round_name)
@@ -158,6 +167,9 @@ class BaseViewer(abc.ABC):
             picker.value = value
 
     def _on_round_picked(self, round_name: str) -> None:
+        if self.asks_on_round_switch and not self._may_leave():
+            self._set_quiet(self.round_picker, self.round_name)
+            return
         try:
             self.show_round(round_name)
         except (FileNotFoundError, ValueError) as error:

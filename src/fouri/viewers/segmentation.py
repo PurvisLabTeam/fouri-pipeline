@@ -174,12 +174,19 @@ class SegmentationViewer(BaseViewer):
             round_index, _ = self._round_info(round_name)
             path = io.label_path(self.exp, self.well, round_index)
             original = io.original_label_path(self.exp, self.well, round_index)
-            if path.exists() and not original.exists():
+            made_original = path.exists() and not original.exists()
+            if made_original:
                 original.parent.mkdir(parents=True, exist_ok=True)
                 with io.written_whole(original) as partial:
                     shutil.copyfile(path, partial)
+            try:
+                io.write_tiff(path, np.asarray(self.masks[round_name].data))
+            except Exception:
+                if made_original:
+                    original.unlink(missing_ok=True)
+                raise
+            if made_original:
                 kept.append(round_name)
-            io.write_tiff(path, np.asarray(self.masks[round_name].data))
             self.changed.discard(round_name)
             (anchor if round_index == self.exp.anchor_round else others).append(round_name)
 
@@ -209,6 +216,7 @@ class SegmentationViewer(BaseViewer):
         layer = self.masks.get(self.round_name)
         if layer is not None:
             layer.undo()
+            self.changed.add(self.round_name)
             self._show_selection(layer)
 
     def _unsaved_rounds(self) -> list[str]:

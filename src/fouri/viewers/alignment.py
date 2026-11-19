@@ -31,6 +31,7 @@ KEY_FIT = "Shift+F"
 
 class AlignmentViewer(BaseViewer):
     title = "Hand alignment"
+    asks_on_round_switch = True
 
     anchor_layer: Image
     anchor_clicks: Points
@@ -42,6 +43,7 @@ class AlignmentViewer(BaseViewer):
     round_labels: npt.NDArray[Any]
     round_centers: npt.NDArray[np.float64]
     fitted_pairs: int
+    unsaved_fit: bool
     min_spread: float
     start_from: RadioButtons
 
@@ -76,6 +78,7 @@ class AlignmentViewer(BaseViewer):
         self.round_layer.affine = matrix
         self.round_clicks.affine = matrix
         self.fitted_pairs = complete_pairs
+        self.unsaved_fit = True
 
         message = (
             f"{complete_pairs} pairs fitted, cells are {mismatch:.1f} pixels apart on average. "
@@ -108,9 +111,14 @@ class AlignmentViewer(BaseViewer):
         save_manual_transform(
             self.exp, self.well, self.round_index, np.asarray(self.round_layer.affine, dtype=np.float64)
         )
+        self.unsaved_fit = False
         self._wait_for(next_layer, f"Saved the fit from {self.fitted_pairs} pairs of cells. {next_click}")
 
+    def _unsaved_rounds(self) -> list[str]:
+        return [self.round_name] if self.unsaved_fit else []
+
     def _build_layers(self) -> None:
+        self.unsaved_fit = False
         clicks = {"size": 40, "canvas_size_limits": (12, 30), "ndim": 2}
         # 1 x 1 placeholders until _load_well and _load_round put a well's images in
         placeholder = np.zeros((1, 1), dtype=bool)
@@ -179,6 +187,7 @@ class AlignmentViewer(BaseViewer):
             first_message = f"{round_name} has no saved alignment yet, so it starts unaligned. " + first_message
 
         self.fitted_pairs = 0
+        self.unsaved_fit = False
         self.round_index = round_index
         self.round_labels = round_labels
         self.round_centers = round_centers

@@ -372,10 +372,9 @@ class ArtifactViewer(BaseViewer):
             }
             mask_path = io.mask_path(self.exp, self.well, round_.index)
             mask_path.parent.mkdir(parents=True, exist_ok=True)
-            with (
-                io.written_whole(io.mask_record_path(self.exp, self.well, round_.index)) as partial,
-                open(partial, "w", encoding="utf-8") as fh,
-            ):
+            record_path = io.mask_record_path(self.exp, self.well, round_.index)
+            previous = record_path.read_bytes() if record_path.exists() else None
+            with io.written_whole(record_path) as partial, open(partial, "w", encoding="utf-8") as fh:
                 json.dump(record, fh, indent=2)
             arrays = {
                 f"{prefix}{signal}": array
@@ -385,7 +384,11 @@ class ArtifactViewer(BaseViewer):
                     ("outlines_", np.asarray(channel.artifacts.data, dtype=np.uint16)),
                 )
             }
-            io.write_npz(mask_path, arrays)
+            try:
+                io.write_npz(mask_path, arrays)
+            except Exception:
+                _put_back(record_path, previous)
+                raise
             self.changed.discard(round_name)
             if round_name in self.moved:
                 self.saved_covered[round_name] = _covered(self.moved[round_name], finals.values())
@@ -838,6 +841,14 @@ def _read_masks(
     return _Masks(
         outlines=outline_arrays, finals=final_arrays, channel_values=channel_values, artifact_values=artifact_values
     )
+
+
+def _put_back(path: Path, previous: bytes | None) -> None:
+    if previous is None:
+        path.unlink(missing_ok=True)
+        return
+    with io.written_whole(path) as partial:
+        partial.write_bytes(previous)
 
 
 def _present(data: npt.NDArray[Any]) -> set[int]:
