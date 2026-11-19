@@ -49,24 +49,30 @@ and is the Dock icon of the app opened from the bundle; `fouri.app.main` sets no
 
 ## Experiment page
 
-- New experiment (`fouri.app.wells.new_config`) writes experiment.json in a results folder, which it creates
-  when missing: every well with ND2 files, no metadata, `DEFAULT_CONDITION_COLUMNS`, `anchor_round` 0, the
-  folder's name as `experiment_key` and the paths written as the page writes them (below). It refuses a
-  folder that already has an experiment.json, an ND2 folder with no well's files, or an info_exp.csv that
+- New experiment (`fouri.app.wells.new_config`) writes experiment.json in a results folder, which it creates when
+  missing: every well with ND2 files, each with `sample_ID` 1 and no other metadata, `DEFAULT_CONDITION_COLUMNS`,
+  `anchor_round` 0, the folder's name as `experiment_key` and the paths written as the page writes them (below). It
+  refuses a folder that already has an experiment.json, an ND2 folder with no well's files, or an info_exp.csv that
   can't be read.
 - The details card (`wells.save_details`) writes `experiment_key`, `experiment_name`, `cell_type`, `passage`,
-  `date_completed` and `notes`. The wells card (`wells.save_wells`) writes
-  `well_list`, `well_metadata` (`metadata.table_to_config`) and `condition_columns`, and is refused while
-  `check_metadata` finds an error. The standard three keep their Condition ticks whatever their values; an
-  added column with no value in any well is saved in neither. With no ND2 files found, wells can be removed
-  but not added, and the two ND2 checks are skipped. Import CSV replaces only the CSV's own columns for
-  the wells it lists.
-- The page never changes a sample ID already set, only one typed in its table or imported (a whole number
-  above 0; a cleared one counts as none). On Save, `wells.fill_sample_ids` gives a well with none the ID of
-  the first well in plate order with the same values in the condition columns, else one more than the
-  largest ID, in plate order.
-- The app's Experiment page (`config_to_save` in `fouri/app/pages/experiment.py`, with `path_entry` in
-  `fouri/app/wells.py`) writes the results folder
+  `date_completed` and `notes`. The wells card (`wells.save_wells`) writes `well_list`, `well_metadata`
+  (`metadata.table_to_config`) and `condition_columns`, and is refused while `check_metadata` finds an error or the
+  table lists a well twice (`B02 is listed twice.`). The standard three keep their Condition ticks whatever their
+  values; an added column with no value in any well is saved in neither. With no ND2 files found, wells can be removed
+  but not added, and the two ND2 checks are skipped. Import CSV replaces only the CSV's own columns for the wells it
+  lists.
+- The page keeps every sample ID already set, except one held by wells of two or more conditions (values in the
+  condition columns): on Save the ID stays with the wells of the condition first in plate order and is cleared on
+  the others (`wells.split_wells` names them). A sample ID may be typed in the table or imported (a whole number
+  above 0; a cleared one counts as none). On Save, `wells.fill_sample_ids` gives each well with none, in plate
+  order, the ID of the first well with the same condition, else one more than the largest ID in use; after the
+  write a notification names the wells whose ID was split off (`Sample IDs changed: B09, C02, whose condition
+  differs from the other wells with their ID.`).
+- The derived-features section's Save refuses a name ending in `_covered` and a measured column's name, those
+  `features.measured_columns` gives from the round tables whether or not a well is measured, as Build cell table
+  does.
+- The app's Experiment page (`config_to_save` and `path_entry` in `fouri/app/wells.py`; `config_to_save` reads
+  experiment.json again before the paths card's keys are written over it) writes the results folder
   to the key it is read from on that PC (`mac_base_dir` on non-Windows if set, else `base_dir`), left out
   only when the same folder would be read without it (the folder holding the config, with no other key to
   take over: on non-Windows `mac_base_dir` stays while `base_dir` is set), and the ND2 folder and info_exp.csv as
@@ -78,6 +84,13 @@ and is the Dock icon of the app opened from the bundle; `fouri.app.main` sets no
   directory holding the file sought (`pick_file`'s `name`: experiment.json beside experiment.json, info_exp.csv
   beside each info_exp.csv box, matched without regard to case, the exact spelling first) selects that file; any
   other directory, typed or clicked, is listed. Import CSV seeks no name.
+
+## Run page
+
+- Before a run whose Convert images step has changed wells among those chosen (`fouri.preprocess.changed_wells`),
+  the Run page shows a question naming each well's changed rounds, its hand-edited rounds and the outputs to
+  delete, `This can't be undone.` in bold red, and Cancel and Delete and reconvert; Cancel starts no step, and
+  Delete and reconvert starts the run with Convert images' `reconvert_changed` true.
 
 ## Choices kept between pages
 
@@ -98,3 +111,10 @@ of the app begins with none.
 - Batch effects: Batch, Biology to keep and Log-transform intensities, written on every change; on return the page
   starts from the kept values before the saved set-up, a batch no longer offered falling back to `well` and a Biology to keep
   column no longer offered dropped.
+
+## Saves of app keys
+
+The Saves of the filters, the labels, the batch set-up and the embedding set-up write through
+`fouri.app.state.save_app_value(exp, key, value)`, which reads experiment.json again, sets the one key under `app`
+and saves through `save_config`; an `app` value that is not a mapping is refused with no write
+(`experiment.json's app entry can't be read; nothing was saved.`).

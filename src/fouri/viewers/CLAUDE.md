@@ -10,14 +10,17 @@ Read with the root `CLAUDE.md` when a file under `src/fouri/viewers/` is read.
   `save`, `undo`, `_extra_keys`), and may fill `_extra_shortcuts` (lines added to the shortcut list),
   `_start_round` (the round to open on when none is asked for; the first round offered by default) and
   `_unsaved_rounds` (the rounds with unsaved edits; none by default). Before a well switch (arrows, pad or
-  dropdown) and before its window closes, the base frame asks Save, Discard or Cancel when `_unsaved_rounds`
-  names any, naming them; a round switch asks nothing. After Save or Discard on closing, the editor closes the
-  window itself, so napari's own close question doesn't follow (napari's Ctrl+W and Ctrl+Q still ask theirs
-  first). `alignment.AlignmentViewer` checks Align rounds' transforms and aligns rounds by hand: it starts each
-  round from its saved transform or from none, clicks snap to cell centers, Fit (Shift+F) needs 3 pairs with
-  two clicks a third of the image apart. A failed well or round switch leaves the old one on screen and puts
-  the reason in the prompt; a round the viewer doesn't offer (the anchor, or one the well lacks) opens its first
-  round instead, with the reason in the prompt. `segmentation.SegmentationViewer` checks and corrects the
+  dropdown) and before its window closes, the base frame asks Save, Discard or Cancel when `_unsaved_rounds` names any,
+  naming them; a round switch shows no question, except in a viewer with `asks_on_round_switch` set (the alignment
+  viewer). After Save or Discard on closing, the editor closes the window itself, so napari's own close question
+  doesn't follow (napari's Ctrl+W and Ctrl+Q still ask theirs first). `alignment.AlignmentViewer` checks Align rounds'
+  transforms and aligns rounds by hand: it starts each round from its saved transform or from none, clicks snap to cell
+  centers, Fit (Shift+F) needs 3 pairs with two clicks a third of the image apart. A Fit made since the round's last
+  Save or load and not saved counts the round shown as unsaved (`unsaved_fit`), so a well switch, a round switch and
+  closing the window show the Save, Discard or Cancel question; Cancel keeps the Fit, and Discard drops the Fit. A
+  failed well or round switch leaves the old one on screen and puts the reason in the prompt; a round the viewer
+  doesn't offer (the anchor, or one the well lacks) opens its first round instead, with the reason in the prompt.
+  `segmentation.SegmentationViewer` checks and corrects the
   segmentation masks of every round, opening on the anchor: each of the round's channels is an image layer in
   magma (`R2 DNA`), DNA shown to start and the signals shown kept across round and well switches, under the
   round's masks drawn as cyan and green outlines (`R2 masks`, one Labels layer per round, each with its own Undo,
@@ -26,8 +29,10 @@ Read with the root `CLAUDE.md` when a file under `src/fouri/viewers/` is read.
   `selected cells` layer; a drag pans, and Escape or a click on the background clears the selection (in the
   paint, fill and polygon tools Escape stays napari's own). Delete deletes the selected cells, Shift+M merges them into the first one's
   number when they form one group touching at a side or a corner, Shift+N paints a new cell with the next free
-  number, and the brush and eraser widen and trim cells. Save writes every round edited through `io.write_tiff`,
-  first keeping each one's Cellpose original. `artifacts.ArtifactViewer` is the editor for painting artifact masks by
+  number, and the brush and eraser widen and trim cells. An undo marks the round as edited, after a Save included,
+  so Save writes the round again and leaving shows the question. Save writes every round edited through
+  `io.write_tiff`, first keeping each one's Cellpose original; when the write fails, a Cellpose original copied by
+  that Save is removed and the error is shown. `artifacts.ArtifactViewer` is the editor for painting artifact masks by
   hand on every round of the well, opening on the anchor: per channel of the round shown, an image layer in magma (`R2 CyclinD1`),
   the painted artifacts (`R2 CyclinD1 artifacts`, one number per artifact; one Labels layer and one Undo history per
   channel of each round, emptied when a well opens) and the final mask drawn as a 2 px outline (`R2 CyclinD1 grown`).
@@ -47,7 +52,8 @@ Read with the root `CLAUDE.md` when a file under `src/fouri/viewers/` is read.
   transform for a round, anchor labels, or usable masks files in another round, the line gives the reason in place of
   the count. Save writes every round edited: the `.json` with `edited` true, each channel's spread and pad as its file
   had them and each artifact's under `artifacts`, then the `.npz` with `outlines_` and `final_` per channel, both
-  through `io.written_whole`; Find artifacts never replaces such a round. A round with an `.npz` lacking outlines for a
+  through `io.written_whole`; when the `.npz` write fails, the round's previous `.json` is written back, or the new
+  one removed when the round had none, and the error is shown. Find artifacts never replaces such a round. A round with an `.npz` lacking outlines for a
   channel or holding an array of another shape, or with an unreadable `.json`, is refused and never written over. The
   panel is docked as its Qt widget (`panel.native`): napari
   resets a docked magicgui panel's dropdowns whenever a layer is added, removed or renamed, which would empty

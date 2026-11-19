@@ -2,6 +2,7 @@
 paths:
   - "src/fouri/batch.py"
   - "src/fouri/app/batches.py"
+  - "src/fouri/app/batch_figures.py"
   - "src/fouri/app/pages/batch.py"
 ---
 
@@ -16,6 +17,9 @@ on the included cells (every cell when the table has no `included` column).
   `well`), or any `.obs` column. `condition_labels` joins the `keep` columns' values with ` · `; `keep=None` means
   `default_keep(exp)`, the condition columns with a value in at least one well, and an empty `keep` puts every cell in one condition,
   `all cells`. A batch or keep column `.obs` lacks is refused.
+- Blank values: a cell whose well has no value in the batch column or in a kept condition column is left out of the
+  metrics and the correction, with no corrected value; the step's messages and the page name those wells with their
+  count of cells, and `.uns["batch_effects"]["blank_wells"]` records each well with its count.
 - Used conditions: a condition with cells in two or more batches is used (`used_conditions`); the others are
   excluded from the metrics and the correction and named with their cell counts. Batches linked through used
   conditions form groups (`batch_groups`); with more than one group, each group is corrected on its own and the
@@ -50,8 +54,8 @@ on the included cells (every cell when the table has no `included` column).
   same way, without a message.
 - Warnings, the correction continuing: a condition whose share of one batch's cells is under half its share of
   another's (`uneven_conditions`); a before classifier score at most `NEAR_CHANCE` (0.05) above chance.
-- Refusals, before any write: no two batches share a condition (`why_not_combat`); a subsample holding a cell
-  (well, label) the cell table lacks, as made from an earlier cell table; a cell (well, label) or `.X` feature of
+- Refusals, before any write: no two batches share a condition (`why_not_combat`); a subsample cut from another cell
+  table, or holding no id (`fouri.adata.check_subsample`); a cell (well, label) or `.X` feature of
   `standard_adata.h5ad` that `fullest_df.csv` lacks, as from two Build cell table runs.
 - Output: `layers["combat"]` (float64, empty for excluded cells and excluded conditions) and
   `.uns["batch_effects"]` in `standard_adata.h5ad`; the same layer, matched by well and label, in

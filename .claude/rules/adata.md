@@ -16,9 +16,11 @@ Loaded with the root `CLAUDE.md` when a file matching `paths` is read.
   the SD coming out 0, which values not stored exactly in binary miss (the pre-refactor notebooks dropped such
   columns silently, judged over every cell: an earlier experiment lost all 22 `_nuc_cyto_ratio` features to a
   few cells with a ring mean of 0). An excluded cell may hold an empty value in `.X`; a table with no
-  `included` column counts every cell as included. `.var` = kind (channel, shape,
-  derived), round, signal, measure and acquisition from the round tables (a value differing between wells
-  left empty and named); `.uns` = setup-form details, condition columns, derived formulas, plate, microscope,
-  round tables. It saves `fullest_df.csv` (no row-number column) and `standard_adata.h5ad`, then removes
-  `layers["combat"]` from `standard_adata_sub.h5ad` when that file holds one, through `io.written_whole`, every
-  other part of the file unchanged.
+  `included` column counts every cell as included. `.var` = kind (channel, shape, derived), round, signal, measure and
+  acquisition from the round tables of the wells the table holds (a value differing between wells left empty and
+  named); `.uns` = the experiment's details (the Experiment page's details card), condition columns, derived formulas,
+  plate (every well of `well_list`), microscope and round tables (both from the wells the table holds), and
+  `cell_table`, the build's id (`{"id": <uuid4 hex>}`). It writes `fullest_df.csv` (no row-number column) and
+  `standard_adata.h5ad` each under its `.partial` name and renames both only after both writes end cleanly, so a
+  failure leaves both as they were; it then removes `layers["combat"]` from `standard_adata_sub.h5ad` when that file
+  holds one, through `io.written_whole`, every other part of the file unchanged.

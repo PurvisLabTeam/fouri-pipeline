@@ -1,7 +1,7 @@
 ---
 paths:
   - "src/fouri/{filters,labels,features,plots,run}.py"
-  - "src/fouri/app/{rules,gates}.py"
+  - "src/fouri/app/{rules,gates,gate_figures}.py"
   - "src/fouri/app/pages/{filters,labels}.py"
   - "tests/test_{filters,labels,run}.py"
 ---
@@ -38,8 +38,11 @@ labels with one column.
   returns `included` (true where every rule keeps the cell) and each rule's count of the cells it leaves out on
   its own, whatever the others do. Build cell table refuses, before writing anything, a name no saved filter
   has, a feature the table lacks, or a rule that can't be applied (unknown kind, missing field, bad bounds,
-  `per_sample` without `sample_ID`); it says each rule's count and the total kept. With no names every cell is
-  included and nothing is said about filters.
+  `per_sample` without a `sample_ID` column or while a measured well has no sample ID, the message naming neither
+  the wells nor the filter); it says each rule's count and the total kept. With no names every cell is included and
+  nothing is said about filters. `fouri.app.rules.kept_cells` returns the per-sample refusal as for any rule it
+  cannot apply; the Filters page shows the refusal on that rule, and Explore states that the filter can't be
+  applied.
 - Then Build cell table applies the saved labels named in its `labels` setting (`fouri.labels`) to every cell,
   included or not, each as a column named as the label's `column`: a category with the classes in saved order,
   every one listed even with no cell in it, and no value for a cell in no class. `label_cells` splits a

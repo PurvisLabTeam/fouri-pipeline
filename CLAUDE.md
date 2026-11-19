@@ -36,13 +36,29 @@ uv run pytest -m 'not slow and not gpu'  # the quick tests; -m slow for the ones
 uv run python -m fouri.run measure --config ~/data/4i_local_test/experiment.json --wells B02 --settings '{"overwrite": true}'
 # the same with the settings in a YAML or JSON file, and one setting replaced on the command line
 uv run python -m fouri.run measure --config experiment.json --wells B02 --settings-file measure.yaml ring_width=8
+# list the outputs of the wells whose rounds changed in info_exp.csv; --force deletes them and converts the wells again
+uv run python -m fouri.run reconvert --config experiment.json --wells B02 --dry-run
+uv run python -m fouri.run reconvert --config experiment.json --wells B02 --force
 ```
 
 `--settings` takes a step's settings as a JSON object and `--settings-file` as a YAML or JSON file; giving both is
 refused. Each `key=value` argument in any position, a `--wells` value holding `=` included, replaces one setting,
 with the value read as YAML (`8`, `true`, `[B02, B09]`), and the run record holds the merged settings. The Embedding
 step given no `runs` makes the runs of the experiment's saved set-up (`app.embedding`), each setting given replacing
-the set-up's.
+the set-up's. `--settings` that is not a JSON object is refused with exit code 2. `fouri.run.check_settings` refuses,
+before the started line, a setting the step does not take, a required setting missing, and a value whose type differs
+from the default's: a `true`/`false` default takes only `true` or `false`, a whole-number default a whole number, a
+decimal default a whole or decimal number, a text default (a `StrEnum` included) any text, a tuple default a list; a
+setting defaulting to `None`, or with no default, takes any value.
+
+`reconvert` lists each changed well among `--wells` (every well when left out) with its changed rounds and the
+outputs a reconversion deletes. `--dry-run` exits 0; with neither option the command deletes no file and exits 2;
+`--force` runs Convert images through `run_step` with `reconvert_changed` true on those wells, so the run record holds
+the run, and exits with the step's code.
+
+`.github/workflows/checks.yml`, the workflow `Checks`, runs on every pull request and every push to `main`, on Ubuntu,
+Windows and macOS with `fail-fast` off and uv's cache off: `uv sync --locked`, `uv run ruff check src tests`,
+`uv run ruff format --check src tests`, `uv run mypy` and `uv run pytest -m "not gpu" -n 0 --tb=short`.
 
 Tests are pytest under `tests/`, on a made-up three-well experiment (`tests/builders.py` writes what each
 step would have, `tests/conftest.py` the fixture); they cover only mistakes that would lose or miscount data
@@ -62,8 +78,8 @@ Every step opens the experiment with `load_config`; every folder and the well li
 `fouri.config.Experiment` it returns.
 The app's Experiment page starts an experiment and saves, each with its own Save, its paths and anchor round,
 the details, the wells with their metadata and condition columns, and the derived features; each Save writes
-the file through `save_config`, which keeps the previous version as `experiment.json.bak`, and writes only its
-own keys, every other key as it was.
+the file through `save_config`, which copies the previous version to `experiment.json.bak` and writes the new one
+through `io.written_whole`; each Save writes only its own keys, every other key as it was.
 The page's rules are in `src/fouri/app/CLAUDE.md`.
 
 - `base_dir` is `mac_base_dir` on non-Windows if set, else `base_dir`, else the folder holding the config.
@@ -89,7 +105,7 @@ the writing and the reading side, so change them together.
 | Step | Writes | Read by |
 |------|--------|---------|
 | Convert images | `output_df/round_table_{well}.csv`: one row per round × channel listed in `info_exp.csv`, with its ND2 file, acquisition settings, `is_align_channel` and `raw_file_name`. `output_images/{well}/Round_{round_name}_well{well}_{signal}.tif` (the `raw_file_name`): every channel of every round, cropped to the smallest image, with an OME header (pixel size, wavelengths, exposure); 0.3–0.9 GB per well | table: Segment nuclei, Align rounds, hand alignment, Measure cells, Find artifacts; images: Segment nuclei (the `is_align_channel` ones), Measure cells (all), Find artifacts (the image size from each header) |
-| Segment nuclei | `segmented/{well}/labels_{well}_round_{NNN}.tif` (Cellpose-SAM, or the kept fine-tuned model named in Segment nuclei's `model` setting). The segmentation editor saves over these, and the first time it saves a round keeps the file as Cellpose left it in `segmented/{well}/cellpose_original/` under the same name; a round with a file there is hand-edited | Align rounds, hand alignment, Measure cells (anchor round only) |
+| Segment nuclei | `segmented/{well}/labels_{well}_round_{NNN}.tif` (Cellpose-SAM, or the kept fine-tuned model named in Segment nuclei's `model` setting). The segmentation editor saves over these, and the first time it saves a round keeps the file as Cellpose left it in `segmented/{well}/cellpose_original/` under the same name; a round with a file there is hand-edited; `io.label_paths` lists only files named `labels_{well}_round_NNN.tif`, in round order, and `io.read_labels` reads each round index by that name, a file of another name (`labels_B02_round_000 - Copy.tif`) passed over | Align rounds, hand alignment, Measure cells (anchor round only) |
 | Align rounds | `output_df/tmat_{well}.npy`: rigid transforms (rounds × 3 × 3) indexed by `round_index`, identity for the anchor; found on the outlines at half size by default (`downscale_factor` 2: within 0.27 px of full size on the local wells, 4× faster) | hand alignment, Measure cells |
 | Hand alignment (alignment viewer) | replaces one entry of `tmat_{well}.npy` per saved round with a hand alignment: matching cells clicked in the alignment viewer (`fouri.viewers.AlignmentViewer`); creates the file if Align rounds never ran | Measure cells |
 | Find artifacts | `masks/{well}/masks_{well}_round_{NNN}.npz` (`fouri.artifacts.find_artifacts`; the step `artifacts` in `fouri.run`, Find artifacts on the Run page): `final_{signal}` (true or false per pixel) and `outlines_{signal}` (numbered objects, 0 for none) for every channel in the round's round table, in the shape of the round's images; `masks_{well}_round_{NNN}.json` beside the `.npz`: `edited` and, per signal, `spread` and `pad`. Until the artifact U-Net is retrained, the step is a stub: every mask empty, `spread` and `pad` 0, `edited` false; `fouri.artifacts.round_masks` is the one function the U-Net replaces. The mask editor (`fouri.viewers.artifacts.ArtifactViewer`, Review in napari) writes the same two files for each saved round, with `edited` true and, per signal, each artifact's own `spread` and `pad` under `artifacts` (`{"1": {"spread": 3, "pad": 5}}`); Find artifacts never replaces such a round | Measure cells (`final_{signal}`); the mask editor (both files) |
@@ -121,7 +137,9 @@ The transforms file is only read and written through `fouri.io.load_transforms` 
 alignment wrote before the switch to `.npy`, so older experiments still align without rerunning Align rounds. A
 round nobody has aligned is stored as a 3 × 3 matrix of NaN (the identity at the anchor):
 `align.save_manual_transform` creates the file that way when a round is aligned by hand before Align rounds has
-run, and `measure_well` refuses a well with any NaN round, naming the rounds.
+run, and `measure_well` refuses a well with any NaN round, naming the rounds. `measure_well` also refuses, as Align
+rounds does, a well whose saved transforms hold fewer rounds than its round table or a matrix other than the identity
+at `anchor_round` (saved for another anchor); the other wells are measured.
 
 Convert images, Segment nuclei, Align rounds, Find artifacts and Measure cells only create outputs that are
 missing, unless their `overwrite` setting (false by default) is `True`. Done means done for the rounds
@@ -129,6 +147,14 @@ missing, unless their `overwrite` setting (false by default) is `True`. Done mea
 ones. Each step's skip
 and refuse rules, and `fouri.status`, which applies them for the Status page, are in
 `.claude/rules/skip-rules.md`.
+
+A converted well is changed when a round its round table holds is now named otherwise, placed elsewhere, given other
+channels or signals, or no longer listed in `info_exp.csv`; a round added at the end does not count
+(`fouri.preprocess.changed_wells`: a `ChangedWell` per changed well, with its changed rounds, its hand-edited rounds
+and the outputs that exist among its round table, images directory, labels directory with the Cellpose originals,
+transforms, masks directory and cell data). Convert images refuses each changed well alone, Overwrite on or off,
+unless its `reconvert_changed` setting is true, which deletes those outputs, naming them, and converts the well again.
+The Run page shows a question first (`src/fouri/app/CLAUDE.md`); `reconvert` does the same on the command line.
 
 Nothing tracks what an output was made from, so after a hand alignment or a new Segment nuclei run, Measure cells
 needs `overwrite=True`.
@@ -138,6 +164,13 @@ Every output a step writes goes through `io.written_whole`: it is written to its
 file stays as it was. Readers match exact names or the `.tif` suffix, so a `.partial` left by a killed process is
 never read. `save_transforms` hands `numpy.save` an open file, since it adds `.npy` to any other name.
 Every step takes `wells=` (checked and put in plate order by `Experiment.pick_wells`); `None` means every well.
+
+Build cell table writes `fullest_df.csv` and `standard_adata.h5ad` each under its `.partial` name and renames both
+only after both writes end cleanly, so a failure leaves both files as they were. Each build writes a new id, a uuid4
+hex string, to `.uns["cell_table"]["id"]` of `standard_adata.h5ad`; Embedding's `subsample` copies the id to
+`.uns["subsample"]["cell_table"]` and refuses a table without one. Embedding reusing a subsample, Batch effects and
+Export call `fouri.adata.check_subsample`, which refuses a table without an id (Build cell table again) and a
+subsample whose id differs or is missing (Embedding again with Overwrite).
 
 ## Fine-tuning Cellpose
 
@@ -159,7 +192,8 @@ Each fine-tuned model is kept until deleted, in `models/cellpose/<name>` under t
 (`io.app_data_dir`: `%LOCALAPPDATA%\4i Pipeline` on Windows, `~/.local/share/4i Pipeline` elsewhere; NiceGUI's
 storage is its `nicegui` directory, `fouri.app.storage_dir`), the name being the creation time in ISO's compact
 form, `20261117T204206`. The directory is written as `<name>.partial`, renamed when training ends cleanly and
-removed on any failure or Stop; a name already in use, kept or `.partial`, refuses the step before training. The
+removed on any failure or Stop; before training, every `.partial` directory left under `models/cellpose` is removed,
+each named, and a name whose kept directory exists refuses the step with `FileExistsError`, no directory made. The
 directory holds Cellpose's file `models/model` (1.2 GB) and `model.json`: `created` (ISO time), `experiment_key`,
 `config` (the experiment.json path), `wells` (each well with the rounds its squares come from), `squares` (the count
 found) and `n_epochs`. `fouri.models.kept_models` returns the readable kept models, newest first, and the names of
@@ -180,7 +214,8 @@ counts the corrected regions saved (`fouri.app.finetuning.corrected_regions`: th
 in every well, a well whose round table is missing or predates `raw_file_name` passed over) and names each well's
 rounds that hold them. The page lists the kept models with their created time, experiment key and wells, and the
 left-out line of the Run page's Model row. Delete asks, then removes the model's directory whole through
-`fouri.app.finetuning.delete_model`, which raises `FileNotFoundError`, removing nothing, for a name holding a path
+`fouri.app.finetuning.delete_model`, which raises `FileNotFoundError`, removing nothing, for an empty name, `.` or
+`..`, a name that is not a directory's own name inside `models/cellpose` (a name with a drive), a name holding a path
 separator, a name ending in `.partial`, or a directory without `model.json`; Delete is disabled while a run is going.
 
 ## Inputs, naming and couplings
@@ -189,7 +224,8 @@ separator, a name ending in `.partial`, or a directory without `model.json`; Del
   `round_name` whatever its header (`myRound` in existing files); every other column is an ND2 optical
   configuration name and its cell is the signal (antibody) in that round, empty if unused. Every channel
   in an ND2 file needs a column. Convert images finds the round folder in `data/` by the substring
-  `Round_{round_name}_` and the file by `Well{well}_` and the `.nd2` suffix.
+  `Round_{round_name}_` and the file by `Well{well}_` and the `.nd2` suffix. A round whose name matches two round
+  directories, or two ND2 files of the well, is refused, naming both.
 - Convert images' `align_signal` setting (default `"DNA"`) marks each round's alignment channel as
   `is_align_channel`; `round_table` refuses a well unless every round has exactly one. Segment nuclei segments
   those channels, listed in round order by `fouri.io.alignment_paths`. `round_table` also refuses a round that
@@ -198,46 +234,56 @@ separator, a name ending in `.partial`, or a directory without `model.json`; Del
   signal)`, e.g. `R0_pRB_nuc_mean`, `_ring_mean`, `_total_nuc_protein`, `_nuc_cyto_ratio` and `_covered`;
   plus the anchor's shape columns from skimage's `regionprops` (`axis_major_length`, … with `area` renamed
   `nuc_area` and `ring_area`). `metadata.channel_names` builds its suggestions with the same `feature_prefix`.
-- Cells are outlined once, on the anchor round's segmentation (`exp.anchor_round`, so Align rounds, the
-  hand alignment and Measure cells cannot disagree). `fouri.measure.measure_well` moves those outlines and
-  their rings into each other round with `align.move_to_round` (inverse of the round's transform, nearest
-  pixel, cv2; `move_to_anchor` goes the other way), blanks pixels where every channel of the round is 0 (no image
-  data in the montage), and measures Convert images' TIFFs. A cell is dropped if its nucleus or ring, in any round,
-  falls outside the image or on such a blank area, or within `edge_margin` px of one (Measure cells' setting, 1 by
-  default; 0 drops only cells that reach a blank area): each round's has-data area is moved into the anchor's frame,
-  the areas are combined, and the result is eroded `edge_margin` times (3 × 3). `measure_wells` refuses a negative
-  margin before measuring any well. `measure_well` returns the count with its path and `measure_wells` prints it per
-  well. Cells with no ring are dropped by the inner joins. Per channel of each round, `measure_well` writes
+- Cells are outlined once, on the anchor round's segmentation (`exp.anchor_round`, so Align rounds, the hand alignment
+  and Measure cells cannot disagree). `fouri.measure.measure_well` moves those outlines and their rings into each other
+  round with `align.move_to_round` (inverse of the round's transform, nearest pixel, cv2; `move_to_anchor` goes the
+  other way), blanks pixels where every channel of the round is 0 (no image data in the montage), and measures Convert
+  images' TIFFs. A cell is dropped if its nucleus or ring, in any round, falls outside the image or on such a blank
+  area, or within `edge_margin` px of one (Measure cells' setting, 1 by default; 0 drops only cells that reach a blank
+  area or the image's edge): each round's has-data area, the image's outermost rows and columns excluded, is moved into
+  the anchor's frame, the areas are combined, and the result is eroded `edge_margin` times (3 × 3), the area outside
+  the image counting as no data. Cells with no ring are dropped by the inner joins. `measure_well` returns its path
+  with one count of the cells dropped, from every nucleus in the anchor's labels: those `clear_border` removes, those
+  the edge rule drops and those with no ring; `measure_wells` states the count per well. `measure_wells` refuses,
+  before measuring any well, a negative margin and ring settings that make no ring (`ring_width` below 1, `ring_gap`
+  below 0, or `ring_gap` not below `ring_width`). A well left with no cell is refused, at every margin, and no cell
+  data is written for it; the other wells are measured. Per channel of each round, `measure_well` writes
   `{prefix}_covered`: true when the channel's `final_{signal}` mask, read by `fouri.artifacts.final_masks`, shares a
   pixel with the cell's nucleus or ring as moved into that round's frame. A round with no `.npz` is uncovered: every
-  cover column of the round is false. A well is refused, naming the round, when a round's `.npz` lacks
-  `final_{signal}` for a channel of the round table or holds a mask of another shape than the round's images; the
-  other wells are measured.
+  cover column of the round is false. A well is refused, naming the round, when a round's `.npz` lacks `final_{signal}`
+  for a channel of the round table or holds a mask of another shape than the round's images; the other wells are
+  measured.
 - Cytoplasmic rings come from `fouri.rings.make_rings(labels, width, gap)` (Measure cells'
   `ring_width`/`ring_gap` settings, 6 and 1): a pixel joins a ring only if exactly one nucleus lies within
   `width`, so pixels two cells could claim are dropped. cv2 dilate/erode, identical to the original skimage version.
 
 ## Metadata and Build cell table
 
-- `sample_ID` is filled by the app's Experiment page, only for the wells with none (`wells.fill_sample_ids`,
-  in `src/fouri/app/CLAUDE.md`).
-- `features.build_fullest_df` joins each well's CSV (via `io.cell_data_path`, dropping an old `Unnamed: 0`
-  column if present) with its `well_metadata`; `treatment_time` is renamed
-  `treatment time` in `fullest_df` and `adata.obs` (`_OBS_NAMES`), the name the pre-refactor notebooks used.
-  `sample_ID` stays a category of numbers (Embedding selects samples with `isin([1, 2, …])`), other metadata
-  text.
+- New experiment gives every well `sample_ID` 1; the Save of the Experiment page's wells card splits an ID held by
+  wells of two or more conditions and fills the wells with none (`wells.fill_sample_ids`, in
+  `src/fouri/app/CLAUDE.md`).
+- `features.build_fullest_df(exp, wells)` joins the CSV of each well given, in the order given (via
+  `io.cell_data_path`, dropping an old `Unnamed: 0` column if present) with its `well_metadata`; `treatment_time` is
+  renamed `treatment time` in `fullest_df` and `adata.obs` (`_OBS_NAMES`), the name the pre-refactor notebooks used.
+  `sample_ID` stays a category of numbers (Embedding selects samples with `isin([1, 2, …])`), other metadata text.
 - `derived_features` are `pandas.eval` formulas applied in order, so one may use an earlier one; a formula
   naming a missing column is skipped with a printed message rather than raising, and any other error stops
   Build cell table. The app's Experiment page checks them the same way (`fouri.app.derived.check_formulas`) on
   `Cells.base`, the measured wells' cells as `build_fullest_df` joins them, and refuses to save a row that would
-  stop Build cell table, a blank row, a name used twice, a measured column's name or a cell-page group's.
-- Build cell table (`run.build_cell_table(exp, filters=(), labels=())`) removes, after the derived features,
-  every cell covered in any channel (`fouri.artifacts.remove_covered`; an empty cover value, in cell data from
-  before cover columns, counts as uncovered), states the count, 0 included, and drops every `_covered` column.
-  The saved filters named in the `filters` setting are then applied to the cells left, so a filter may use a
-  derived feature, and the result is added as the column `included`; the saved labels named in the `labels`
-  setting are applied to every cell left, included or not, one column per label. How each rule is computed and
-  what Build cell table refuses are in `.claude/rules/filters-labels.md`.
+  stop Build cell table, a blank row, a name used twice, a name ending in `_covered`, a measured column's name (from
+  the round tables, whether or not a well is measured) or a cell-page group's.
+- Build cell table (`run.build_cell_table(exp, filters=(), labels=())`) builds from the measured wells
+  (`fouri.status.measured_wells`: those whose Measure cells status is complete, as the cell pages choose them): before
+  the per-well cell counts it states how many of the experiment's wells it built from and names the wells not measured
+  yet, and with no well measured it refuses before reading any cell data. It refuses, before writing, a derived feature
+  named with the suffix `_covered` or as a measured column (`features.measured_columns`), and a label named twice in
+  `labels`. It removes, after the derived features, every cell covered in any channel
+  (`fouri.artifacts.remove_covered`; an empty cover value, in cell data from before cover columns, counts as
+  uncovered), states the count, 0 included, and drops every `_covered` column. The saved filters named in the `filters`
+  setting are then applied to the cells left, so a filter may use a derived feature, and the result is added as the
+  column `included`; the saved labels named in the `labels` setting are applied to every cell left, included or not,
+  one column per label. How each rule is computed and what Build cell table refuses are in
+  `.claude/rules/filters-labels.md`.
 - `fouri.adata.build_adata(exp, fullest_df, labels=())` builds the AnnData and saves `fullest_df.csv` and
   `standard_adata.h5ad`; what `.obs`, `.X`, `.var` and `.uns` hold, and which columns `.X` drops, are in
   `.claude/rules/adata.md`.

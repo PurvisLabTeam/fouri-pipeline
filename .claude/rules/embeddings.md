@@ -1,7 +1,7 @@
 ---
 paths:
   - "src/fouri/{embedding,embedding_setup,plots,run}.py"
-  - "src/fouri/app/embeddings.py"
+  - "src/fouri/app/{embeddings,embedding_figures}.py"
   - "src/fouri/app/pages/{embedding,run}.py"
   - "tests/test_embedding.py"
 ---
@@ -32,7 +32,9 @@ run unticked, is refused there; runs given, an empty list included, are passed a
 The view tab shows a Corrected values switch with Color by marker when the subsample holds `layers["combat"]`;
 choosing an embedding sets the switch to whether the record's `values` is `combat`, and with the switch on the
 markers are colored by their ComBat-corrected z-score (`plot_embedding`'s `layer`). The record lists Values,
-Original or ComBat-corrected (Original for a record without `values`).
+Original or ComBat-corrected (Original for a record without `values`). The view tab notes, above an embedding, that
+the subsample holding it was cut from an earlier cell table (`fouri.adata.is_current_subsample`): `Made from an
+earlier cell table. Run Embedding with Overwrite to update it.`
 
 ## fouri.embedding
 
@@ -41,7 +43,11 @@ Original or ComBat-corrected (Original for a record without `values`).
 - `subsample(exp, cells_per_sample=2000, seed=42)`: sketchKH kernel herding grouped by `sample_ID`, on the
   included cells of `standard_adata.h5ad` (every cell when it has no `included` column); a sample the filters
   left with no included cell is refused, by name, before anything is sketched or written; lowered to the
-  smallest sample's count of included cells (sketch would do it silently), recorded in `.uns["subsample"]`. Every feature stays in `.X`, so an embedding can be colored by any measurement.
+  smallest sample's count of included cells (sketch would do it silently), recorded in `.uns["subsample"]`, with the
+  cell table's id in `.uns["subsample"]["cell_table"]`; a table without an id is refused. `run.make_embeddings`
+  reusing a subsample, Batch effects and Export refuse one cut from another cell table or holding no id
+  (`fouri.adata.check_subsample`), the message naming Embedding with Overwrite. Every feature stays in `.X`, so an
+  embedding can be colored by any measurement.
   The cells selected keep their rows of `layers["combat"]` when Batch effects has run.
 - `values`, taken by `rank_features`, `embed`, `embed_grid` and, after `seed`, `run.make_embeddings`: `original`
   reads `.X`, `combat` reads `layers["combat"]`, written by Batch effects (`.claude/rules/batch-effects.md`); any
@@ -60,14 +66,13 @@ Original or ComBat-corrected (Original for a record without `values`).
   thread (`threadpoolctl`): PHATE's coordinates otherwise shift with the thread count, mainly on its third
   axis, and a seeded UMAP runs on one core anyway. `phate` and `umap` are imported inside it.
 - `make_runs(method, dims, top_n, settings)` builds a `Run` (method, dims, top_n, settings) per combination;
-  `embed_grid(exp, runs, picked, *, samples, ranking_k, seed, n_workers, values)` ranks once, runs every `Run`
-  side by side with `parallel_map` on its top-ranked picked features, and saves each under
-  `X_{method}_{dims}d_top{n}_{setting}{value}…` (settings sorted), the name `run_key(run)` gives, which the
-  app's set-up tab also uses, so the set-up, the Run page and `embed_grid` agree. The same run with the same picked
-  features, samples, ranking k, seed and values replaces its embedding (the result is identical; a record without
-  `values` counts as `original`); other inputs get `_2`, `_3`. `.uns["embeddings"][key]` records method, dims,
-  top_n, settings, picked, the samples actually used, ranking_k, seed, values, and the features used with their
-  scores.
+  `embed_grid(exp, runs, picked, *, samples, ranking_k, seed, n_workers, values)` ranks once, runs every `Run` side by
+  side with `parallel_map` on its top-ranked picked features, and saves each under
+  `X_{method}_{dims}d_top{n}_{setting}{value}…` (settings sorted), the name `run_key(run)` gives, which the app's
+  set-up tab also uses, so the set-up, the Run page and `embed_grid` agree. The same run with the same picked features,
+  samples, ranking k, seed and values replaces its embedding (the result is identical; a record without `values` counts
+  as `original`); other inputs get `_2`, `_3`. `.uns["embeddings"][key]` records method, dims, top_n, settings, picked,
+  the samples with at least one embedded cell, ranking_k, seed, values, and the features used with their scores.
 - `plots.plot_embedding(adata, key, color_by, *, title=None, layer=None)`: plotly, 2D (WebGL) or 3D; a
   measurement or a number column on a Viridis scale from the 1st to the 99th percentile, a text or category column
   one trace and color per group (`GROUP_COLORS`, the app's). With `layer`, `color_by` must be a measurement and is
