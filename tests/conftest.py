@@ -16,6 +16,8 @@ from fouri.config import Experiment
 
 NICEGUI_STORAGE = Path(tempfile.mkdtemp(prefix="fouri-tests-nicegui-"))
 os.environ["NICEGUI_STORAGE_PATH"] = str(NICEGUI_STORAGE)
+NAPARI_SETTINGS = Path(tempfile.mkdtemp(prefix="fouri-tests-napari-"))
+os.environ["NAPARI_CONFIG"] = str(NAPARI_SETTINGS / "settings.yaml")
 
 
 def pytest_xdist_auto_num_workers(config):
@@ -30,6 +32,7 @@ def pytest_xdist_auto_num_workers(config):
 
 def pytest_unconfigure(config: pytest.Config) -> None:
     shutil.rmtree(NICEGUI_STORAGE, ignore_errors=True)
+    shutil.rmtree(NAPARI_SETTINGS, ignore_errors=True)
 
 
 @pytest.fixture
