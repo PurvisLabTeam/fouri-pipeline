@@ -57,6 +57,13 @@ FOUR_WELLS = {
     },
 }
 
+SWAPPED_INFO = """\
+myRound,DAPI,Cy3,Cy5
+R0,DNA,pRB,RB
+R2,DNA,CyclinA2,EdU
+R1,DNA,cMyc,
+"""
+
 ND2_FOLDER = "Round_{round_name}_made_up"
 ND2_FILE = "Well{well}_ChannelDAPI,Cy3,Cy5_Seq0000.nd2"
 
@@ -470,3 +477,15 @@ def cellpose_modules() -> dict[str, ModuleType]:
         "cellpose.train": train,
         "cellpose.transforms": transforms,
     }
+
+
+def with_info(exp: Experiment, text: str) -> None:
+    Path(exp.info_file).write_text(text, encoding="utf-8")
+
+
+def well_outputs(exp: Experiment, well: str) -> dict[Path, bytes]:
+    files = [io.round_table_path(exp, well), io.tmat_path(exp, well, ".npy"), io.cell_data_path(exp, well)]
+    for folder in (exp.output_images, exp.segmented, exp.masks):
+        if (Path(folder) / well).exists():
+            files.extend(path for path in (Path(folder) / well).rglob("*") if path.is_file())
+    return {path: path.read_bytes() for path in files if path.exists()}

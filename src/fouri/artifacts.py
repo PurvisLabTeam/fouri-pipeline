@@ -234,7 +234,7 @@ def _write_round(
     exp: Experiment, well: str, round_index: int, masks: dict[str, tuple[npt.NDArray[np.bool], npt.NDArray[np.uint16]]]
 ) -> bool:
     record_path = io.mask_record_path(exp, well, round_index)
-    edited = _is_mask_edited(record_path)
+    edited = is_mask_edited(record_path)
     if edited:
         return False
 
@@ -258,7 +258,7 @@ def _write_round(
     return True
 
 
-def _is_mask_edited(mask_record_path: Path) -> bool:
+def is_mask_edited(mask_record_path: Path) -> bool:
     edited = json.loads(mask_record_path.read_text(encoding="utf-8"))["edited"] if mask_record_path.exists() else False
     if not isinstance(edited, bool):
         raise ValueError(f"Expected a boolean value under 'edited' in file: {mask_record_path.name}. Got '{edited}'.")
@@ -287,7 +287,7 @@ def _plan_wells(exp: Experiment, overwrite: bool = False, wells: Sequence[str] |
                 record_path = io.mask_record_path(exp, well, rnd_idx)
                 mask_path = io.mask_path(exp, well, rnd_idx)
 
-                edited = _is_mask_edited(record_path)
+                edited = is_mask_edited(record_path)
 
                 # e.g. {'DNA': Path(...)}
                 out_paths = {

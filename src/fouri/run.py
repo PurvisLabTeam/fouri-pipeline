@@ -37,6 +37,8 @@ from fouri import report
 from fouri.config import Experiment, load_config
 from fouri.io import adata_sub_path, run_record_path
 from fouri.parallel import error_in_words
+from fouri.preprocess import changed_wells
+from fouri.report import say
 from fouri.status import WELL_STEPS, Step
 
 STEP_NAMES = {
@@ -52,6 +54,30 @@ STEP_NAMES = {
     Step.FINETUNE: "Fine-tune Cellpose",
 }
 EXIT_CODES = {"done": 0, "failed": 1, "stopped": 3}
+
+
+def reconvert(config: str | Path, wells: Sequence[str] | None, *, dry_run: bool, force: bool) -> int:
+    """@TODO."""
+    exp = load_config(Path(config), announce=False)
+    changed = changed_wells(exp, wells)
+    if changed == []:
+        say("No well's rounds have changed in info_exp.csv.")
+        return 0
+    if force:
+        outcome = run_step(
+            Step.CONVERT, config, wells=[well.well for well in changed], settings={"reconvert_changed": True}
+        )
+        return EXIT_CODES[outcome]
+    for well in changed:
+        say(
+            f"{well.well} ({', '.join(well.rounds)} changed): "
+            f"{', '.join(f'{o.parent.name}/{o.name}' for o in well.outputs)}"
+        )
+    if dry_run:
+        return 0
+
+    say("Nothing deleted. Run again with --force to delete these and convert the well(s) again.")
+    return 2
 
 
 def build_cell_table(exp: Experiment, filters: Sequence[str] = (), labels: Sequence[str] = ()) -> None:
@@ -296,6 +322,30 @@ def run_step(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+
+    if argv and argv[0] == "reconvert":
+        reconvert_parser = argparse.ArgumentParser(
+            prog="python -m fouri.run reconvert",
+            description="List or reconvert the wells whose rounds changed in info_exp.csv.",
+        )
+        reconvert_parser.add_argument("--config", required=True, help="the experiment's experiment.json")
+        reconvert_parser.add_argument("--wells", nargs="*", help="wells to check; every well if left out")
+        group = reconvert_parser.add_mutually_exclusive_group()
+        group.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="list the changed wells that would be deleted without deleting anything.",
+        )
+        group.add_argument(
+            "--force", action="store_true", help="delete the changed wells' outputs and reconvert them."
+        )
+        reconvert_args = reconvert_parser.parse_args(argv[1:])
+        return reconvert(
+            reconvert_args.config, reconvert_args.wells, dry_run=reconvert_args.dry_run, force=reconvert_args.force
+        )
+
     parser = argparse.ArgumentParser(prog="python -m fouri.run", description="Run one 4i pipeline step.")
     parser.add_argument("step", choices=[s.value for s in Step])
     parser.add_argument(

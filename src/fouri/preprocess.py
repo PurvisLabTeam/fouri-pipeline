@@ -3,19 +3,24 @@
 from __future__ import annotations
 
 import functools
+import shutil
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
 import tifffile
 
+from fouri.artifacts import is_mask_edited
 from fouri.config import Experiment
 from fouri.io import (
+    cell_data_path,
     label_path,
     mask_paths,
+    mask_record_path,
     nd2_metadata,
     original_label_path,
     read_info_file,
@@ -23,11 +28,75 @@ from fouri.io import (
     read_round_table,
     round_table_path,
     save_round_table,
+    tmat_path,
     write_npz,
     write_tiff,
 )
 from fouri.parallel import Failed, check_results, parallel_map
 from fouri.report import say, say_skipped
+
+
+@dataclass(frozen=True)
+class ChangedWell:
+    well: str
+    rounds: list[str]
+    hand_edited: list[str]
+    outputs: list[Path]
+
+
+def changed_wells(exp: Experiment, wells: Sequence[str] | None = None) -> list[ChangedWell]:
+    """@TODO."""
+    wells = exp.pick_wells(wells)
+    table = read_info_file(exp)
+    listed: dict[int, tuple[str, dict[str, str]]] = {}
+    for row_index, row in table.iterrows():
+        channel_signals = {
+            str(col).strip(): stripped
+            for col, cell in row.items()
+            if col != "round_name" and not pd.isna(cell) and (stripped := str(cell).strip())
+        }
+        listed[cast(int, row_index)] = (str(row["round_name"]), channel_signals)
+
+    changed = []
+    for well in wells:
+        rtable_path = round_table_path(exp, well)
+        if not rtable_path.exists():
+            continue
+        round_info = read_round_table(exp, well)
+        saved: dict[int, tuple[str, dict[str, str]]] = {}
+        for idx, rows in round_info.groupby("round_index"):
+            rname = str(rows["round_name"].iloc[0])
+            channel_signals = {
+                str(channel): str(signal) for channel, signal in zip(rows["channel_name"], rows["signal"], strict=True)
+            }
+            saved[cast(int, idx)] = (rname, channel_signals)
+
+        rounds_changed = {idx: entry[0] for idx, entry in saved.items() if idx not in listed or entry != listed[idx]}
+        if rounds_changed:
+            hand_edited = [
+                round_name
+                for idx, (round_name, _) in saved.items()
+                if original_label_path(exp, well, idx).exists() or is_mask_edited(mask_record_path(exp, well, idx))
+            ]
+            outputs: list[Path] = [
+                rtable_path,
+                Path(exp.output_images) / well,
+                Path(exp.segmented) / well,
+                tmat_path(exp, well, ".npy"),
+                Path(exp.masks) / well,
+                cell_data_path(exp, well),
+            ]
+            outputs = [output for output in outputs if output.exists()]
+            changed.append(
+                ChangedWell(
+                    well=well,
+                    rounds=list(rounds_changed.values()),
+                    hand_edited=hand_edited,
+                    outputs=outputs,
+                )
+            )
+
+    return changed
 
 
 def trim(image: npt.NDArray[Any], width: int, height: int) -> npt.NDArray[Any]:
@@ -82,16 +151,44 @@ def preprocess(
     n_workers: int | None = None,
     overwrite: bool = False,
     wells: Sequence[str] | None = None,
+    reconvert_changed: bool = False,
 ) -> None:
     """Convert every well that has no round table yet (every well with overwrite)."""
     info = read_info_file(exp)
     round_names = info["round_name"].tolist()
 
+    changed = {well.well: well for well in changed_wells(exp, wells)}
     worklist = []
     skipped = []
     added = []
     refused = []
     for well in exp.pick_wells(wells):
+        changed_info = changed.get(well)
+        if changed_info is not None:
+            if not reconvert_changed:
+                refused.append(
+                    Failed(
+                        well,
+                        (
+                            f"Converted rounds no longer match info_exp.csv: rounds {', '.join(changed_info.rounds)} "
+                            "have changed. Convert images again from the Run page and confirm or run python -m "
+                            "fouri.run reconvert."
+                        ),
+                    )
+                )
+                continue
+            for output in changed_info.outputs:
+                if output.is_dir():
+                    shutil.rmtree(output)
+                else:
+                    output.unlink(missing_ok=True)
+            say(
+                f"{well}: rounds changed in info_exp.csv ({', '.join(changed_info.rounds)}). "
+                "Removed its files from: "
+                f"{', '.join(f'{o.parent.name}/{o.name}' for o in changed_info.outputs)} and reconverting..."
+            )
+            worklist.append(well)
+            continue
         round_table = round_table_path(exp, well)
         if overwrite or not round_table.exists():
             worklist.append(well)
@@ -107,15 +204,6 @@ def preprocess(
             worklist.append(well)
             added.append(well)
             continue
-
-        refused.append(
-            Failed(
-                well,
-                f"converted rounds ({', '.join(well_rounds)}) don't match info_exp.csv ({', '.join(round_names)}). "
-                "New rounds can only be added at the end of info_exp.csv; put the rounds back in that order, "
-                "or convert this well again with Overwrite.",
-            )
-        )
 
     if not worklist:
         if refused:

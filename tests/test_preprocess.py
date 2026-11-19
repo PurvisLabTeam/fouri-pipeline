@@ -5,7 +5,20 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from builders import INFO_EXP, ND2_FILE, ND2_FOLDER, converted, hand_edited, masked, raw_files, segmented
+from builders import (
+    INFO_EXP,
+    ND2_FILE,
+    ND2_FOLDER,
+    SWAPPED_INFO,
+    aligned,
+    hand_edited,
+    masked,
+    measured,
+    raw_files,
+    segmented,
+    well_outputs,
+    with_info,
+)
 from tifffile import imread
 
 from fouri import io, preprocess
@@ -27,27 +40,6 @@ def _add_smaller_round(exp: Experiment, monkeypatch: pytest.MonkeyPatch) -> None
     with open(exp.info_file, "a", encoding="utf-8") as fh:
         fh.write("R3,DNA,,\n")
     raw_files(exp, monkeypatch, sizes={"R3": SMALLER})
-
-
-def _files(exp: Experiment) -> dict[Path, bytes]:
-    """Return every file Convert images writes, round tables and images, with its contents."""
-    folders = (Path(exp.output_df), Path(exp.output_images))
-    return {path: path.read_bytes() for folder in folders for path in folder.rglob("*") if path.is_file()}
-
-
-def test_a_well_with_renamed_rounds_is_refused_alone(experiment: Experiment) -> None:
-    for well in ("B02", "B03"):
-        converted(experiment, well)
-    table = io.read_round_table(experiment, "B03")
-    table["round_name"] = table["round_name"].replace({"R1": "R2", "R2": "R1"})  # R0, R2, R1 by round_index
-    io.save_round_table(experiment, "B03", table)
-    before = _files(experiment)
-
-    with pytest.raises(StepFailed) as raised:
-        preprocess.preprocess(experiment, wells=["B02", "B03"])
-
-    assert raised.value.failed == ["B03"]
-    assert _files(experiment) == before
 
 
 def test_a_smaller_crop_trims_the_cellpose_originals(experiment: Experiment, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -188,3 +180,110 @@ def test_each_channel_is_written_to_its_own_file(experiment: Experiment, monkeyp
         nd2 = preprocess.read_nd2(Path(str(row.dir)) / str(row.sub_dir) / str(row.file))
         written = imread(Path(experiment.output_images) / "B02" / str(row.raw_file_name))
         np.testing.assert_array_equal(written, nd2[int(row.channel_in_file)])
+
+
+CHANGES = [
+    pytest.param(INFO_EXP.replace("R1,DNA,cMyc,", "R7,DNA,cMyc,"), id="round-renamed"),
+    pytest.param(SWAPPED_INFO, id="rounds-swapped"),
+    pytest.param(INFO_EXP.replace("R2,DNA,CyclinA2,EdU\n", ""), id="round-removed"),
+    pytest.param(INFO_EXP.replace("R1,DNA,cMyc,", "R1,DNA,p21,"), id="signal-changed"),
+]
+
+
+def _fully_processed(exp: Experiment, monkeypatch: pytest.MonkeyPatch, well: str) -> None:
+    raw_files(exp, monkeypatch)
+    preprocess.preprocess(exp, wells=[well])
+    segmented(exp, well)
+    hand_edited(exp, well, [0])
+    aligned(exp, well)
+    masked(exp, well, 1, {"cMyc": (slice(20, 30), slice(20, 30))}, edited=True)
+    measured(exp, well)
+
+
+def _round_order(exp: Experiment, well: str) -> list[str]:
+    table = io.read_round_table(exp, well)
+    return table.sort_values("round_index")["round_name"].unique().tolist()
+
+
+@pytest.mark.parametrize("overwrite", [False, True], ids=["overwrite-off", "overwrite-on"])
+@pytest.mark.parametrize("info", CHANGES)
+def test_a_changed_well_is_refused_alone_without_reconvert_changed(
+    experiment: Experiment, monkeypatch: pytest.MonkeyPatch, info: str, overwrite: bool
+) -> None:
+    raw_files(experiment, monkeypatch)
+    preprocess.preprocess(experiment, wells=["B02"])
+    segmented(experiment, "B02")
+    aligned(experiment, "B02")
+    before = well_outputs(experiment, "B02")
+    with_info(experiment, info)
+    raw_files(experiment, monkeypatch)
+
+    with pytest.raises(StepFailed) as raised:
+        preprocess.preprocess(experiment, overwrite=overwrite, wells=["B02", "B03"])
+
+    assert raised.value.failed == ["B02"]
+    assert well_outputs(experiment, "B02") == before
+    assert io.round_table_path(experiment, "B03").exists()
+
+
+def test_a_round_added_at_the_end_is_not_a_change(experiment: Experiment, monkeypatch: pytest.MonkeyPatch) -> None:
+    raw_files(experiment, monkeypatch)
+    preprocess.preprocess(experiment, wells=["B02"])
+    with_info(experiment, INFO_EXP + "R3,DNA,,\n")
+    raw_files(experiment, monkeypatch)
+
+    changed = preprocess.changed_wells(experiment)
+    preprocess.preprocess(experiment, wells=["B02"])
+
+    assert changed == []
+    assert _round_order(experiment, "B02") == ["R0", "R1", "R2", "R3"]
+
+
+@pytest.mark.parametrize("fully", [True, False], ids=["every-output", "converted-and-segmented"])
+def test_changed_wells_names_rounds_hand_edits_and_outputs(
+    experiment: Experiment, monkeypatch: pytest.MonkeyPatch, fully: bool
+) -> None:
+    if fully:
+        _fully_processed(experiment, monkeypatch, "B02")
+    else:
+        raw_files(experiment, monkeypatch)
+        preprocess.preprocess(experiment, wells=["B02"])
+        segmented(experiment, "B02")
+        hand_edited(experiment, "B02", [0])
+    with_info(experiment, SWAPPED_INFO)
+
+    changed = preprocess.changed_wells(experiment)
+
+    outputs = [
+        io.round_table_path(experiment, "B02"),
+        Path(experiment.output_images) / "B02",
+        Path(experiment.segmented) / "B02",
+        io.tmat_path(experiment, "B02", ".npy"),
+        Path(experiment.masks) / "B02",
+        io.cell_data_path(experiment, "B02"),
+    ]
+    assert changed == [
+        preprocess.ChangedWell(
+            well="B02",
+            rounds=["R1", "R2"],
+            hand_edited=["R0", "R1"] if fully else ["R0"],
+            outputs=outputs if fully else outputs[:3],
+        )
+    ]
+
+
+def test_reconvert_changed_deletes_the_outputs_and_converts_again(
+    experiment: Experiment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fully_processed(experiment, monkeypatch, "B02")
+    with_info(experiment, SWAPPED_INFO)
+
+    preprocess.preprocess(experiment, wells=["B02"], reconvert_changed=True)
+
+    assert _round_order(experiment, "B02") == ["R0", "R2", "R1"]
+    assert not (Path(experiment.segmented) / "B02").exists()
+    assert not io.tmat_path(experiment, "B02", ".npy").exists()
+    assert not (Path(experiment.masks) / "B02").exists()
+    assert not io.cell_data_path(experiment, "B02").exists()
+    table = io.read_round_table(experiment, "B02")
+    assert all((Path(experiment.output_images) / "B02" / str(name)).exists() for name in table["raw_file_name"])

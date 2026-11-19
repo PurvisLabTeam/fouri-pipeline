@@ -12,18 +12,22 @@ import pytest
 from builders import (
     NUCLEUS_SIDE,
     NUCLEUS_STARTS,
+    SWAPPED_INFO,
     aligned,
     converted,
     masked,
     measured,
     measured_values,
+    raw_files,
     segmented,
     subsampled,
+    well_outputs,
     with_filters,
+    with_info,
     with_labels,
 )
 
-from fouri import io, report, run
+from fouri import io, preprocess, report, run
 from fouri.config import Experiment
 from fouri.labels import apply_labels, named_labels
 
@@ -351,3 +355,63 @@ def test_cell_data_without_cover_columns_counts_as_uncovered(experiment: Experim
 
     assert _cells(pd.read_csv(io.fullest_df_path(experiment))) == _every_cell(experiment)
     assert _cells(ad.read_h5ad(io.adata_path(experiment)).obs) == _every_cell(experiment)
+
+
+def _changed_b02(exp: Experiment, monkeypatch: pytest.MonkeyPatch) -> dict[Path, bytes]:
+    raw_files(exp, monkeypatch)
+    preprocess.preprocess(exp, wells=["B02"])
+    segmented(exp, "B02")
+    aligned(exp, "B02")
+    with_info(exp, SWAPPED_INFO)
+    return well_outputs(exp, "B02")
+
+
+def _reconvert(exp: Experiment, *flags: str) -> int:
+    return run.main(["reconvert", "--config", exp.config_path, "--wells", "B02", *flags])
+
+
+def test_reconvert_without_force_lists_and_refuses(experiment: Experiment, monkeypatch: pytest.MonkeyPatch) -> None:
+    before = _changed_b02(experiment, monkeypatch)
+
+    code = _reconvert(experiment)
+
+    assert code == 2
+    assert well_outputs(experiment, "B02") == before
+
+
+def test_reconvert_dry_run_deletes_nothing(experiment: Experiment, monkeypatch: pytest.MonkeyPatch) -> None:
+    before = _changed_b02(experiment, monkeypatch)
+
+    code = _reconvert(experiment, "--dry-run")
+
+    assert code == 0
+    assert well_outputs(experiment, "B02") == before
+
+
+def test_reconvert_with_force_records_convert_images(experiment: Experiment, monkeypatch: pytest.MonkeyPatch) -> None:
+    _changed_b02(experiment, monkeypatch)
+
+    code = _reconvert(experiment, "--force")
+
+    lines = Path(io.run_record_path(experiment)).read_text(encoding="utf-8").splitlines()
+    started = next(entry for entry in map(json.loads, lines) if entry["event"] == "started")
+    assert code == 0
+    assert started["step"] == "convert"
+    assert started["wells"] == ["B02"]
+    assert started["settings"]["reconvert_changed"] is True
+    assert not (Path(experiment.segmented) / "B02").exists()
+
+
+@pytest.mark.parametrize("flags", [(), ("--dry-run",), ("--force",)], ids=["no-flag", "dry-run", "force"])
+def test_reconvert_with_no_changed_well_runs_nothing(
+    experiment: Experiment, monkeypatch: pytest.MonkeyPatch, flags: tuple[str, ...]
+) -> None:
+    raw_files(experiment, monkeypatch)
+    preprocess.preprocess(experiment, wells=["B02"])
+    record = io.run_record_path(experiment)
+    before = record.read_bytes() if record.exists() else None
+
+    code = _reconvert(experiment, *flags)
+
+    assert code == 0
+    assert (record.read_bytes() if record.exists() else None) == before
