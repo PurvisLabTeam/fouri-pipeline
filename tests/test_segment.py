@@ -103,3 +103,16 @@ def test_a_round_hand_edited_during_an_overwrite_run_is_kept(
 
     assert edited_during_run
     assert _round_files(experiment, "B02", 1) == edited_during_run
+
+
+def test_a_well_without_a_round_table_is_refused_alone(experiment: Experiment, stand_in_cellpose: object) -> None:
+    for well in ("B02", "C02"):
+        converted(experiment, well)
+
+    with pytest.raises(StepFailed) as raised:
+        segment.segment_wells(experiment, wells=["B02", "B03", "C02"])
+
+    assert raised.value.failed == ["B03"]
+    for well in ("B02", "C02"):
+        assert all(io.label_path(experiment, well, round_index).exists() for round_index in range(3))
+    assert not (Path(experiment.segmented) / "B03").exists()

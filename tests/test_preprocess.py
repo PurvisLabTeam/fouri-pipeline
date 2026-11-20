@@ -443,3 +443,37 @@ def test_a_changed_well_is_refused_when_no_other_well_has_work(
 
     assert raised.value.failed == ["B02"]
     assert well_outputs(experiment, "B02") == before
+
+
+def test_an_unreadable_mask_record_counts_as_hand_edited(
+    experiment: Experiment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    raw_files(experiment, monkeypatch)
+    preprocess.preprocess(experiment, wells=["B02"])
+    segmented(experiment, "B02")
+    record = io.mask_record_path(experiment, "B02", 1)
+    record.parent.mkdir(parents=True)
+    record.write_text("{not json", encoding="utf-8")
+    with_info(experiment, SWAPPED_INFO)
+    raw_files(experiment, monkeypatch)
+
+    changed = preprocess.changed_wells(experiment)
+    with pytest.raises(StepFailed) as raised:
+        preprocess.preprocess(experiment, wells=["B02", "B03"])
+
+    assert [(well.well, well.hand_edited) for well in changed] == [("B02", ["R1"])]
+    assert raised.value.failed == ["B02"]
+    assert io.round_table_path(experiment, "B03").exists()
+
+
+def test_a_renamed_mask_copy_is_passed_over_by_the_change_check(
+    experiment: Experiment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fully_processed(experiment, monkeypatch, "B02")
+    mask = io.mask_path(experiment, "B02", 1)
+    (mask.parent / "masks_B02_round_001 - Copy.npz").write_bytes(mask.read_bytes())
+    _old_files(experiment, "B02", keep_new=False)
+
+    changed = preprocess.changed_wells(experiment)
+
+    assert [(well.well, well.hand_edited) for well in changed] == [("B02", ["round 0", "round 1"])]

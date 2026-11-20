@@ -367,3 +367,20 @@ def test_a_well_lacking_a_later_rounds_columns_is_measured_again(experiment: Exp
     measure.measure_wells(experiment, wells=["B02"])
 
     assert "R2_EdU_nuc_mean" in pd.read_csv(path).columns
+
+
+def test_a_well_without_a_round_table_is_refused_alone(experiment: Experiment) -> None:
+    for well in ("B02", "B03"):
+        converted(experiment, well)
+        segmented(experiment, well)
+        aligned(experiment, well)
+    measured(experiment, "B02")
+    io.round_table_path(experiment, "B02").unlink()
+    cells = io.cell_data_path(experiment, "B02").read_bytes()
+
+    with pytest.raises(StepFailed) as raised:
+        measure.measure_wells(experiment, wells=["B02", "B03"])
+
+    assert raised.value.failed == ["B02"]
+    assert io.cell_data_path(experiment, "B03").exists()
+    assert io.cell_data_path(experiment, "B02").read_bytes() == cells

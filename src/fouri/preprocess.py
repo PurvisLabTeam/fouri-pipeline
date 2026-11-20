@@ -9,6 +9,7 @@ file for a well. `changed_wells` finds the converted wells whose rounds no longe
 from __future__ import annotations
 
 import functools
+import re
 import shutil
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -73,9 +74,17 @@ class ChangedWell:
 
 
 def _hand_edited(exp: Experiment, well: str, round_index: int) -> bool:
-    return original_label_path(exp, well, round_index).exists() or is_mask_edited(
-        mask_record_path(exp, well, round_index)
-    )
+    if original_label_path(exp, well, round_index).exists():
+        return True
+    try:
+        return is_mask_edited(mask_record_path(exp, well, round_index))
+    except (OSError, ValueError, KeyError, TypeError):
+        return True
+
+
+def _round_indices(paths: Sequence[Path], prefix: str, suffix: str) -> set[int]:
+    pattern = rf"{re.escape(prefix)}_round_([0-9]{{3}}){re.escape(suffix)}"
+    return {int(match.group(1)) for path in paths if (match := re.fullmatch(pattern, path.name))}
 
 
 def changed_wells(exp: Experiment, wells: Sequence[str] | None = None) -> list[ChangedWell]:
@@ -85,8 +94,7 @@ def changed_wells(exp: Experiment, wells: Sequence[str] | None = None) -> list[C
     from the round at the same 0-based index in `info_exp.csv`, or when `info_exp.csv` does not
     have a round at that index. A round added at the end of `info_exp.csv` is not a change. A well
     without a round table file is changed when the `df_<well>.pkl` file exists. A well with neither
-    file is not changed. Reads the mask records of each changed well with `is_mask_edited`, which
-    raises for a record that is not valid JSON or does not have an `edited` of true or false.
+    file is not changed. A round whose mask record cannot be read counts as hand-edited.
 
     Parameters
     ----------
@@ -133,11 +141,11 @@ def changed_wells(exp: Experiment, wells: Sequence[str] | None = None) -> list[C
         elif old_table_path.exists():
             rounds_changed = [round_name for round_name, _ in listed.values()]
             masks_dir = Path(exp.masks) / well
-            round_files = [
-                *label_paths(exp.segmented, well),
-                *(mask_paths(exp.masks, well) if masks_dir.is_dir() else []),
-            ]
-            indices = sorted({int(path.stem[-3:]) for path in round_files})
+            masks = mask_paths(exp.masks, well) if masks_dir.is_dir() else []
+            indices = sorted(
+                _round_indices(label_paths(exp.segmented, well), f"labels_{well}", ".tif")
+                | _round_indices(masks, f"masks_{well}", ".npz")
+            )
             hand_edited = [f"round {idx}" for idx in indices if _hand_edited(exp, well, idx)]
         else:
             continue

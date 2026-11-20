@@ -66,9 +66,12 @@ def segment_wells(
     with the next well. After the last well, `check_results` raises `StepFailed` naming the failed
     wells. `Stopped` from a progress bar ends the step. The label files already written are kept.
 
+    A chosen well without a round table is refused, recorded as failed, and excluded from the work.
+    The other wells are segmented.
+
     `Experiment.pick_wells` raises `ValueError` for a well not in `well_list`. `FileNotFoundError`
     is raised before any well is segmented when `model` is not the name of a kept model
-    (`model_path`) or a chosen well does not have a round table (`alignment_paths`).
+    (`model_path`).
 
     Parameters
     ----------
@@ -103,8 +106,13 @@ def segment_wells(
     worklist = {}
     skipped = []
     hand_edited = []
+    refused: list[Failed] = []
     for well in exp.pick_wells(wells):
-        paths = alignment_paths(exp, well)
+        try:
+            paths = alignment_paths(exp, well)
+        except FileNotFoundError as error:
+            refused.append(Failed(well, str(error)))
+            continue
         edited = [index for index in range(len(paths)) if original_label_path(exp, well, index).exists()]
         well_work = tuple(
             (round_index, image_path, label)
@@ -125,6 +133,8 @@ def segment_wells(
         say(f"Edited by hand, so kept even with Overwrite: {', '.join(hand_edited)}.")
 
     if not worklist:
+        if refused:
+            check_results(refused, unit="well")
         say("Every round already has labels, nothing to segment. To overwrite them from scratch, use overwrite=True")
         return
 
@@ -160,7 +170,7 @@ def segment_wells(
     if cp_model.device.type != "cuda" and not allow_cpu:
         raise RuntimeError(f"Cellpose is running on {cp_model.device}, not the GPU.")
 
-    outcomes: list[str | Failed] = []  # each well's name, or its Failed
+    outcomes: list[str | Failed] = [*refused]  # each well's name, or its Failed
     not_written: defaultdict[str, list[int]] = defaultdict(list)
     for well, work in progress(worklist.items(), desc="Overall Progress", unit="well", total=len(worklist)):
         try:

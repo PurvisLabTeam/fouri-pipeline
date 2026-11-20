@@ -69,9 +69,10 @@ def measure_wells(
     `StepFailed` naming the failed wells, or `Stopped` when the step is stopped before every well's
     job is submitted.
 
-    `Experiment.pick_wells` raises `ValueError` for a well not in `well_list`. With `overwrite`
-    False, `read_round_table` raises `FileNotFoundError` for a well with a cell data file and
-    without a round table, before any well is measured.
+    With `overwrite` False, a well with a cell data file and without a round table is refused,
+    recorded as failed, and excluded from the work. The other wells are measured.
+
+    `Experiment.pick_wells` raises `ValueError` for a well not in `well_list`.
 
     Parameters
     ----------
@@ -115,12 +116,24 @@ def measure_wells(
         raise ValueError(f"Edge margin must be >= 0. Got {edge_margin}")
 
     chosen = exp.pick_wells(wells)
-    worklist = [well for well in chosen if overwrite or not _is_measured(exp, well)]
+    worklist = []
+    refused: list[Failed] = []
+    for well in chosen:
+        try:
+            if overwrite or not _is_measured(exp, well):
+                worklist.append(well)
+        except FileNotFoundError as error:
+            refused.append(Failed(well, str(error)))
     if not worklist:
+        if refused:
+            check_results(refused, unit="well")
         say("Every well already has cell data, nothing to measure. To overwrite it from scratch, use overwrite=True")
         return []
 
-    say_skipped(done="measured", skipped=[well for well in chosen if well not in worklist])
+    refused_wells = {failure.item for failure in refused}
+    say_skipped(
+        done="measured", skipped=[well for well in chosen if well not in worklist and well not in refused_wells]
+    )
     remeasured = [well for well in worklist if not overwrite and cell_data_path(exp, well).exists()]
     for well in remeasured:
         say(f"{well}: cell data has no columns for some rounds, measuring again.")
@@ -143,7 +156,7 @@ def measure_wells(
         if n_cells_lost > 0:
             say(f"{well}: {n_cells_lost} cell(s) dropped.")
 
-    check_results(results, unit="well")
+    check_results([*refused, *results], unit="well")
 
     return paths
 
