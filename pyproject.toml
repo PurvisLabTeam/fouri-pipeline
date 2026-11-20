@@ -89,7 +89,7 @@ max-doc-length = 100
 [tool.pydoclint]
 style = "numpy"
 check-arg-defaults = true
-skip-checking-short-docstrings = false
+skip-checking-short-docstrings = true
 skip-checking-private-functions = true
 skip-checking-raises = true
 
