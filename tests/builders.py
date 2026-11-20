@@ -149,7 +149,7 @@ def converted(exp: Experiment, well: str, rounds: int | None = None, *, per_cell
             excitation, emission, exposure = ACQUISITION[channel]
             rows.append(
                 {
-                    "dir": exp.data_dir,
+                    "dir": str(exp.data_dir),
                     "sub_dir": ND2_FOLDER.format(round_name=round_name),
                     "file": ND2_FILE.format(well=well),
                     "round_name": round_name,

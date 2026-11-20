@@ -375,7 +375,7 @@ def _changed_b02(exp: Experiment, monkeypatch: pytest.MonkeyPatch) -> dict[Path,
 
 
 def _reconvert(exp: Experiment, *flags: str) -> int:
-    return run.main(["reconvert", "--config", exp.config_path, "--wells", "B02", *flags])
+    return run.main(["reconvert", "--config", str(exp.config_path), "--wells", "B02", *flags])
 
 
 def test_reconvert_without_force_lists_and_refuses(experiment: Experiment, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -636,7 +636,7 @@ def test_a_wells_setting_given_is_used(
     settings_file.write_text("overwrite: true\nwells: [B03]\n", encoding="utf-8")
     given = [str(settings_file) if part == "<settings file>" else part for part in arguments]
 
-    code = run.main(["artifacts", "--config", experiment.config_path, *given])
+    code = run.main(["artifacts", "--config", str(experiment.config_path), *given])
 
     started = next(entry for entry in _record_entries(experiment) if entry["event"] == "started")
     written = {well: [io.mask_path(experiment, well, r).exists() for r in range(3)] for well in experiment.well_list}
@@ -826,7 +826,7 @@ def test_command_line_refusals(
         assert argv[argv.index("--settings-file") + 1] == str(files["<yaml>"])
     else:
         given = [str(files[part]) if part in files else part for part in arguments[1:]]
-        argv = [arguments[0], "--config", experiment.config_path, *given]
+        argv = [arguments[0], "--config", str(experiment.config_path), *given]
 
     exit_code = _exit_code(argv)
 

@@ -76,7 +76,7 @@ def config_to_save(exp: Experiment, *, data: str, info_file: str, results: str, 
     key = _results_key(config)
     config[key] = base_dir
     without = {name: value for name, value in config.items() if name != key}
-    if same_path(Experiment(without, exp.config_path).base_dir, base_dir):
+    if same_path(str(Experiment(without, exp.config_path).base_dir), base_dir):
         config = without
     paths = dict(config.get("paths") or {})
     for name, value in (("data", data), ("info_file", info_file)):

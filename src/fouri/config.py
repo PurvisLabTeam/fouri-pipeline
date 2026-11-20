@@ -53,26 +53,26 @@ class Experiment:
     ----------
     config : dict[str, Any]
         The parsed contents of `experiment.json`.
-    config_path : str
+    config_path : Path
         The absolute path of the `experiment.json` file.
-    base_dir : str
+    base_dir : Path
         The base directory.
-    paths : dict[str, str]
+    paths : dict[str, Path]
         The path of each data directory, keyed by the names in `DEFAULT_PATHS`.
     """
 
     config: dict[str, Any]
-    config_path: str
-    base_dir: str
-    paths: dict[str, str]
+    config_path: Path
+    base_dir: Path
+    paths: dict[str, Path]
 
     def __init__(self, config: dict[str, Any], config_path: str | Path) -> None:
         self.config = config
-        self.config_path = os.path.abspath(config_path)
+        self.config_path = Path(os.path.abspath(config_path))
         self.base_dir = _resolve_base_dir(config, self.config_path)
         overrides = config.get("paths") or {}
         self.paths = {
-            name: os.path.normpath(os.path.join(self.base_dir, overrides.get(name) or default))
+            name: Path(os.path.normpath(self.base_dir / (overrides.get(name) or default)))
             for name, default in DEFAULT_PATHS.items()
         }
 
@@ -186,42 +186,42 @@ class Experiment:
 
     # -- folders --------------------------------------------------------------
     @property
-    def info_file(self) -> str:
+    def info_file(self) -> Path:
         """The path to the `info_exp.csv` file."""
         return self.paths["info_file"]
 
     @property
-    def data_dir(self) -> str:
+    def data_dir(self) -> Path:
         """The path to the directory of raw ND2 files (`data`)."""
         return self.paths["data"]
 
     @property
-    def output_df(self) -> str:
+    def output_df(self) -> Path:
         """The path to the directory of round tables and transforms (`output_df`)."""
         return self.paths["output_df"]
 
     @property
-    def output_images(self) -> str:
+    def output_images(self) -> Path:
         """The path to the directory of converted TIFF images (`output_images`)."""
         return self.paths["output_images"]
 
     @property
-    def segmented(self) -> str:
+    def segmented(self) -> Path:
         """The path to the directory of label (segmentation mask) files (`segmented`)."""
         return self.paths["segmented"]
 
     @property
-    def masks(self) -> str:
+    def masks(self) -> Path:
         """The path to the directory of artifact mask files (`masks`)."""
         return self.paths["masks"]
 
     @property
-    def cell_data(self) -> str:
+    def cell_data(self) -> Path:
         """The path to the directory of per-well cell measurement tables (`cell_data`)."""
         return self.paths["cell_data"]
 
     @property
-    def exports(self) -> str:
+    def exports(self) -> Path:
         """The path to the directory of exported cell tables (`exports`)."""
         return self.paths["exports"]
 
@@ -241,23 +241,23 @@ class Experiment:
 
     def __repr__(self) -> str:
         """Return the experiment key, base directory, and well count as text."""
-        return f"Experiment({self.key!r}, base_dir={self.base_dir!r}, {len(self.well_list)} wells)"
+        return f"Experiment({self.key!r}, base_dir={str(self.base_dir)!r}, {len(self.well_list)} wells)"
 
 
-def _resolve_base_dir(config: dict[str, Any], config_path: str) -> str:
+def _resolve_base_dir(config: dict[str, Any], config_path: Path) -> Path:
     """Return the base directory from `mac_base_dir`, `base_dir`, or `config_path`'s directory."""
     if platform.system() != "Windows" and (config.get("mac_base_dir") or "").strip():
-        return os.path.normpath(config["mac_base_dir"].strip())
+        return Path(os.path.normpath(config["mac_base_dir"].strip()))
     if (config.get("base_dir") or "").strip():
-        return os.path.normpath(config["base_dir"].strip())
-    return os.path.dirname(config_path)
+        return Path(os.path.normpath(config["base_dir"].strip()))
+    return config_path.parent
 
 
-def config_path_for(path: str | Path) -> str:
+def config_path_for(path: str | Path) -> Path:
     """Return the `experiment.json` path for a file or an experiment directory, `~` expanded."""
-    path = os.path.expanduser(str(path))
-    if os.path.isdir(path):
-        return os.path.join(path, CONFIG_NAME)
+    path = Path(path).expanduser()
+    if path.is_dir():
+        return path / CONFIG_NAME
     return path
 
 
@@ -282,7 +282,7 @@ def load_config(path: str | Path, announce: bool = True) -> Experiment:
         If the `experiment.json` file does not exist.
     """
     config_path = config_path_for(path)
-    if not os.path.exists(config_path):
+    if not config_path.exists():
         raise FileNotFoundError(f"No experiment.json at {config_path}.")
     with open(config_path, encoding="utf-8") as f:
         config = json.load(f)
@@ -298,14 +298,14 @@ def announce_experiment(exp: Experiment) -> None:
     say(f"  config:   {exp.config_path}")
     say(f"  base_dir: {exp.base_dir}")
     say(f"  wells:    {len(exp.well_list)}")
-    if not os.path.isdir(exp.base_dir):
+    if not exp.base_dir.is_dir():
         say(f"  WARNING: base_dir does not exist: {exp.base_dir}")
     for name in ("data", "info_file"):
-        if not os.path.exists(exp.paths[name]):
+        if not exp.paths[name].exists():
             say(f"  WARNING: {name} not found: {exp.paths[name]}")
 
 
-def save_config(config: dict[str, Any], path: str | Path) -> str:
+def save_config(config: dict[str, Any], path: str | Path) -> Path:
     """Write a config to an `experiment.json` file.
 
     Sorts `well_list` by plate row, then by column. Drops the `well_metadata` entries of wells not
@@ -321,7 +321,7 @@ def save_config(config: dict[str, Any], path: str | Path) -> str:
 
     Returns
     -------
-    str
+    Path
         The path of the file written.
 
     Notes
@@ -335,8 +335,8 @@ def save_config(config: dict[str, Any], path: str | Path) -> str:
     meta = config.get("well_metadata") or {}
     config["well_metadata"] = {w: meta[w] for w in config["well_list"] if w in meta}
     config_path = config_path_for(path)
-    if os.path.exists(config_path):
-        shutil.copyfile(config_path, config_path + ".bak")
+    if config_path.exists():
+        shutil.copyfile(config_path, config_path.with_name(config_path.name + ".bak"))
     with written_whole(config_path) as partial, open(partial, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
         f.write("\n")

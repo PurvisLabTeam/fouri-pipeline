@@ -183,5 +183,5 @@ def test_path_entry_writes_paths_relative_to_base_dir(tmp_path: Path) -> None:
     in_folder = Experiment(
         {"paths": {"data": path_entry(inside, base, "data")}}, os.path.join(base, "experiment.json")
     )
-    assert with_base_dir.data_dir == inside
-    assert in_folder.data_dir == inside
+    assert with_base_dir.data_dir == Path(inside)
+    assert in_folder.data_dir == Path(inside)

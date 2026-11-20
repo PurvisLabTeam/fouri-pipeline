@@ -73,10 +73,10 @@ def stop_run() -> None:
 def open_experiment(path: str | Path) -> Experiment:
     """Load an experiment.json or its folder as the open experiment, and record the path as last."""
     experiment = load_config(path, announce=False)
-    if STATE.experiment is None or STATE.experiment.config_path != experiment.config_path:
+    if STATE.experiment is None or str(STATE.experiment.config_path) != str(experiment.config_path):
         STATE.kept.clear()
     STATE.experiment = experiment
-    app.storage.general[LAST_EXPERIMENT] = experiment.config_path
+    app.storage.general[LAST_EXPERIMENT] = str(experiment.config_path)
     return experiment
 
 

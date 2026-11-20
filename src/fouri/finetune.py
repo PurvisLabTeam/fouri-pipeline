@@ -172,7 +172,7 @@ def finetune_cellpose(exp: Experiment, n_epochs: int = 100, wells: Sequence[str]
         model_json = {
             "created": created.isoformat(),
             "experiment_key": exp.key,
-            "config": exp.config_path,
+            "config": str(exp.config_path),
             "wells": trained,
             "squares": len(squares),
             "n_epochs": n_epochs,

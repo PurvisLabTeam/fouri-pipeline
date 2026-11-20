@@ -167,7 +167,7 @@ def _path_row(label: str, value: str, hint: str) -> tuple[ui.input, ui.button]:
 
 
 def _show_open_path(box: ui.input) -> None:
-    box.value = STATE.experiment.config_path if STATE.experiment is not None else ""
+    box.value = str(STATE.experiment.config_path) if STATE.experiment is not None else ""
 
 
 def _open(path: str | Path, box: ui.input) -> None:
@@ -279,7 +279,7 @@ class _Row:
 
 class _Derived:
     def __init__(self) -> None:
-        self.config_path = ""
+        self.config_path: Path | None = None
         self.rows: list[_Row] = []
         self.selected: _Row | None = None
         self.info: pd.DataFrame | None = None
@@ -472,7 +472,7 @@ class _Derived:
         self._draw_rows()
         self._update_search()
 
-    def _suggest(self, info_file: str) -> None:
+    def _suggest(self, info_file: Path) -> None:
         names = {row.name for row in self.rows}
         for spec in default_derived_features(info_file):
             if spec["name"] not in names:
@@ -502,6 +502,8 @@ class _Derived:
         return ""
 
     def _save(self) -> None:
+        if self.config_path is None:
+            return
         refusal = self._refusal()
         if refusal:
             ui.notify(refusal, type="negative")
@@ -616,7 +618,7 @@ async def _new_experiment() -> None:
 
 class _Details:
     def __init__(self) -> None:
-        self.config_path = ""
+        self.config_path: Path | None = None
         self.values: dict[str, str] = {}
 
     def show(self, exp: Experiment) -> None:
@@ -653,7 +655,7 @@ class _Details:
 
 class _Wells:
     def __init__(self) -> None:
-        self.config_path = ""
+        self.config_path: Path | None = None
         self.exp: Experiment | None = None
         self.rows: list[dict[str, Any]] = []
         self.columns: list[str] = []
@@ -1060,7 +1062,7 @@ def _content(derived: _Derived, details: _Details, wells: _Wells) -> None:
             ).bind_visibility_from(STATE, "experiment", backward=_has_name)
             with ui.row().classes("w-full items-end no-wrap gap-2"):
                 config_box = (
-                    ui.input("experiment.json", value=exp.config_path if exp else "")
+                    ui.input("experiment.json", value=str(exp.config_path) if exp else "")
                     .classes("grow")
                     .tooltip("Wells, conditions and settings")
                 )
@@ -1072,14 +1074,14 @@ def _content(derived: _Derived, details: _Details, wells: _Wells) -> None:
                 return
 
             data_box, browse = _path_row(
-                "Raw images (ND2 folder)", exp.data_dir, "One folder per round, as saved by the microscope"
+                "Raw images (ND2 folder)", str(exp.data_dir), "One folder per round, as saved by the microscope"
             )
             browse.on_click(lambda: _browse_folder(data_box))
             info_box, browse = _path_row(
-                "Round list (info_exp.csv)", exp.info_file, "The antibody in each channel of each round"
+                "Round list (info_exp.csv)", str(exp.info_file), "The antibody in each channel of each round"
             )
             browse.on_click(lambda: _browse_csv(info_box))
-            results_box, browse = _path_row("Results folder", exp.base_dir, "Output folder for every step")
+            results_box, browse = _path_row("Results folder", str(exp.base_dir), "Output folder for every step")
             browse.on_click(lambda: _browse_folder(results_box))
 
             rounds, problem = _read_rounds(exp)

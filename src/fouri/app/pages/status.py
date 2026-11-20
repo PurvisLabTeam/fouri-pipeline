@@ -105,4 +105,4 @@ def status_page() -> None:
                 ui.label("No experiment open.")
                 ui.link("Open one on the Experiment page.", "/")
             return
-        _content(exp.config_path)
+        _content(str(exp.config_path))
