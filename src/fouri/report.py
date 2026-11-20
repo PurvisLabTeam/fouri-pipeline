@@ -1,14 +1,17 @@
-"""Messages and progress bars, printed as usual or written to the app's progress file.
+"""Messages and progress bars, printed to the terminal or written to the app's progress file.
 
-By default ``say`` prints and ``progress`` draws a tqdm bar. When the app starts a step it first
-calls ``report_to(path)``: from then on every message, and every bar opened, moved and closed,
-is written as one JSON line to that file, which the app's page reads as the step runs. The step
-program ends with ``finished``. Only the main process reports; worker processes print nothing.
+`say` prints a message and `progress` draws a tqdm bar. After `report_to(path)`, each message and
+each bar's opening, progress, and closing are written to `path` as JSON lines instead. A bar
+writes a `move` line at most every `MOVE_EVERY` seconds, and when the bar reaches its total. A
+step run by the app ends the file with `finished`.
 
-To stop a step, the app creates the file ``stop_path(progress file)``; the next time a bar moves it
-raises ``Stopped``. Outputs are written whole or not at all, so a stopped step leaves no half files.
+The app stops a step by creating the file `stop_path(path)`. The next `move` line a bar writes
+after that raises `Stopped`.
 
-The lines look like this::
+Notes
+-----
+The lines of the progress file, `bar` being the bar's number and `parent` the number of the bar
+open around it:
 
     {"time": 1731189000.12, "event": "message", "text": "B02: 90 cell(s) dropped."}
     {"time": ..., "event": "bar", "action": "open", "bar": 2, "parent": 1, "desc": "Segmenting B02",
@@ -39,12 +42,25 @@ _bar_ids = itertools.count(1)
 MOVE_EVERY = 0.25  # seconds between two "move" lines of one bar
 
 
-class Stopped(Exception):  # noqa: N818 (it reads as what happened)
-    """The app asked the step to stop."""
+class Stopped(Exception):  # noqa: N818
+    """Exception raised when the app stops a step."""
 
 
 class StepFailed(RuntimeError):  # noqa: N818
-    """Some items of a step failed."""
+    """Exception raised when items of a step failed, with the names of the failed items.
+
+    Parameters
+    ----------
+    message : str
+        The message stated for the step, naming each failed item.
+    failed : Sequence[str]
+        The names of the failed items.
+
+    Attributes
+    ----------
+    failed : list[str]
+        The names of the failed items.
+    """
 
     failed: list[str]
 
@@ -54,13 +70,13 @@ class StepFailed(RuntimeError):  # noqa: N818
 
 
 def stop_path(progress_file: str | Path) -> Path:
-    """Return the file the app creates to stop a step that reports to ``progress_file``."""
+    """Return the stop file for a progress file: the same path with `.stop` appended to the name."""
     progress_file = Path(progress_file)
     return progress_file.with_name(progress_file.name + ".stop")
 
 
 def report_to(path: str | Path | None) -> None:
-    """Write messages and bars to ``path`` as JSON lines from now on; None goes back to printing."""
+    """Write messages and bars to `path` as JSON lines from now on. None falls back to printing."""
     global _target, _stop
     _target = None if path is None else Path(path)
     _stop = None if path is None else stop_path(path)
@@ -76,6 +92,7 @@ def _write(event: dict[str, Any]) -> None:
 
 
 def say(text: str) -> None:
+    """Print a message, or write the message to the progress file after `report_to`."""
     if _target is None:
         tqdm.write(text)
     else:
@@ -83,13 +100,14 @@ def say(text: str) -> None:
 
 
 def say_skipped(done: str, skipped: list[str]) -> None:
+    """Report the items skipped as already done, and how to redo them, unless `skipped` is empty."""
     if not skipped:
         return
     say(f"Skipped, already {done}: {', '.join(skipped)}. To redo them, run with overwrite=True")
 
 
 def finished(outcome: Literal["done", "failed", "stopped"], *, failed: Sequence[str] = (), error: str = "") -> None:
-    """Write the step's last line: how it ended, the items that failed, the error if any."""
+    """Write the last line of the progress file: the outcome, the failed items, and the error."""
     _write({"event": "finished", "outcome": outcome, "failed": list(failed), "error": error})
 
 
@@ -173,6 +191,29 @@ def progress(
     total: float | None = None,
     leave: bool = True,
 ) -> tqdm[Any]:
+    """Open a progress bar, drawn by tqdm or written to the progress file after `report_to`.
+
+    Iterating the bar iterates `items` and moves the bar. After `report_to`, the bar writes `open`,
+    `move`, and `close` lines instead of drawing, nested under the bar open when it is created.
+
+    Parameters
+    ----------
+    items : Iterable[Any] | None, default=None
+        The items to iterate with the bar. None for a bar moved by `update`.
+    desc : str | None, default=None
+        The label of the bar.
+    unit : str, default="it"
+        The noun for one step of the bar (e.g., `well`).
+    total : float | None, default=None
+        The number of steps at completion. None for the length of `items`, when `items` has one.
+    leave : bool, default=True
+        Whether a drawn bar stays on screen when closed.
+
+    Returns
+    -------
+    tqdm[Any]
+        The bar, closed at the end of a `with` block or of the iteration.
+    """
     if _target is None:
         return tqdm(items, desc=desc, total=total, leave=leave, unit=unit)
     return _FileBar(items, desc=desc, total=total, leave=leave, unit=unit)
