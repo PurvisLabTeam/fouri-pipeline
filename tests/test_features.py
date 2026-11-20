@@ -1,6 +1,6 @@
 import pandas as pd
 import pytest
-from builders import aligned, converted, measured, segmented, varied_cell_data
+from builders import aligned, converted, measured, segmented, varied_cell_data, with_metadata
 
 from fouri import features, io
 from fouri.config import Experiment
@@ -74,3 +74,12 @@ def test_measured_columns_come_from_the_round_tables(experiment: Experiment) -> 
 
     assert unconverted == []
     assert set(features.measured_columns(experiment)) == written
+
+
+def test_reserved_names_hold_measured_metadata_and_table_columns(experiment: Experiment) -> None:
+    exp = with_metadata(experiment, "C02", dose="10nM")
+    unconverted = features.reserved_names(exp)
+    converted(exp, "B02")
+
+    assert unconverted == {"sample_ID", "treatment", "treatment time", "dose", "well", "label", "included"}
+    assert features.reserved_names(exp) == unconverted | set(features.measured_columns(exp))

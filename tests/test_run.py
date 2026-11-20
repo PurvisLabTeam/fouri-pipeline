@@ -838,3 +838,106 @@ def test_command_line_refusals(
         assert [entry["event"] for entry in entries] == ["started", "ended"]
         assert entries[0]["settings"] == recorded
         assert entries[0]["wells"] == ["B02"]
+
+
+@pytest.mark.parametrize("name", ["treatment", "sample_ID", "well", "label", "included"])
+def test_a_derived_feature_named_as_a_reserved_name_is_refused(experiment: Experiment, name: str) -> None:
+    varied_cell_data(experiment)
+    exp = with_derived(experiment, [{"name": name, "formula": "nuc_area * 2"}])
+
+    with pytest.raises(ValueError):
+        run.build_cell_table(exp)
+
+    assert _table_files(exp) == {}
+
+
+HELD_BY_UNMEASURED_WELLS = [
+    pytest.param("dose", {"C02": {"dose": "10nM"}}, id="dose"),
+    pytest.param("sample_ID", {"B02": {"sample_ID": None}, "B03": {"sample_ID": None}}, id="sample-id"),
+]
+
+
+@pytest.mark.parametrize(("column", "changes"), HELD_BY_UNMEASURED_WELLS)
+def test_a_metadata_column_held_only_by_unmeasured_wells_is_kept_empty(
+    experiment: Experiment, column: str, changes: dict[str, dict[str, Any]]
+) -> None:
+    varied_cell_data(experiment, ["B02", "B03"])
+    exp = experiment
+    for well, values in changes.items():
+        exp = with_metadata(exp, well, **values)
+
+    run.build_cell_table(exp)
+
+    table = pd.read_csv(io.fullest_df_path(exp))
+    obs = ad.read_h5ad(io.adata_path(exp)).obs
+    assert _cells(table) == sorted((well, label) for well in ("B02", "B03") for label in range(1, 5))
+    assert column in table.columns
+    assert table[column].isna().all()
+    assert obs[column].isna().all()
+
+
+@pytest.mark.parametrize("held_open", ["csv", "h5ad"])
+def test_a_failed_replacement_of_either_file_leaves_both_as_they_were(
+    experiment: Experiment, monkeypatch: pytest.MonkeyPatch, held_open: str
+) -> None:
+    varied_cell_data(experiment)
+    run.build_cell_table(experiment)
+    before = _table_files(experiment)
+    listing = sorted(Path(experiment.base_dir).iterdir())
+    measured_values(experiment, "B02", "nuc_area", [41.0, 42.0, 43.0, 44.0])
+    locked = io.fullest_df_path(experiment) if held_open == "csv" else io.adata_path(experiment)
+    replace = Path.replace
+
+    def refused_while_open(self: Path, target: str | Path) -> Path:
+        if Path(self) == locked or Path(target) == locked:
+            raise PermissionError(13, "The process cannot access the file", str(locked))
+        return replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", refused_while_open)
+
+    with pytest.raises(OSError):
+        run.build_cell_table(experiment)
+
+    assert _table_files(experiment) == before
+    assert sorted(Path(experiment.base_dir).iterdir()) == listing
+
+
+def _stand_in(monkeypatch: pytest.MonkeyPatch, module: str, name: str) -> None:
+    def reached(*args: Any, **kwargs: Any) -> Any:
+        pytest.fail(f"{module}.{name} was called before the refusal")
+
+    monkeypatch.setattr(f"{module}.{name}", reached)
+    monkeypatch.setattr(run, name, reached, raising=False)
+
+
+def test_a_label_named_twice_is_refused_before_anndata_is_reached(
+    experiment: Experiment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    varied_cell_data(experiment)
+    exp = with_labels(experiment, [SIZE_LABEL])
+    _stand_in(monkeypatch, "fouri.adata", "build_adata")
+
+    with pytest.raises(ValueError):
+        run.build_cell_table(exp, labels=["size", "size"])
+
+
+def test_a_covered_derived_name_is_refused_before_any_cell_is_removed(
+    experiment: Experiment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    varied_cell_data(experiment)
+    exp = with_derived(experiment, [{"name": "pRB_covered", "formula": "R0_pRB_nuc_mean / R0_RB_nuc_mean"}])
+    _stand_in(monkeypatch, "fouri.artifacts", "remove_covered")
+
+    with pytest.raises(ValueError):
+        run.build_cell_table(exp)
+
+
+def test_no_measured_well_is_refused_before_any_cell_data_is_read(
+    experiment: Experiment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    varied_cell_data(experiment, ["B02"])
+    _without_round(experiment, "B02", "R2")
+    _stand_in(monkeypatch, "fouri.features", "build_fullest_df")
+
+    with pytest.raises(ValueError):
+        run.build_cell_table(experiment)

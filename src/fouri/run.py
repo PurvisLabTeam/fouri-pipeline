@@ -91,20 +91,21 @@ def build_cell_table(exp: Experiment, filters: Sequence[str] = (), labels: Seque
 
     from fouri.adata import build_adata
     from fouri.artifacts import remove_covered
-    from fouri.features import add_derived_features, build_fullest_df, measured_columns
+    from fouri.features import add_derived_features, build_fullest_df, reserved_names
     from fouri.filters import apply_filters, named_filters
     from fouri.labels import apply_labels, named_labels
 
-    measured = set(measured_columns(exp))
-    clashed_names = [
-        feature["name"]
-        for feature in exp.derived_features
-        if feature["name"].endswith("_covered") or feature["name"] in measured
-    ]
+    covered_names = [feature["name"] for feature in exp.derived_features if feature["name"].endswith("_covered")]
+    if covered_names:
+        raise ValueError(
+            f"Invalid derived feature names found: {', '.join(covered_names)}. "
+            "Please use derived feature names that do not end in '_covered' and that don't clash with existing ones."
+        )
+    reserved = reserved_names(exp)
+    clashed_names = [feature["name"] for feature in exp.derived_features if feature["name"] in reserved]
     if clashed_names:
         raise ValueError(
-            f"Invalid derived feature names found: {', '.join(clashed_names)}. "
-            "Please use derived feature names that do not end in '_covered' and that don't clash with existing ones."
+            "\n".join(f"{name}: the cell table already has a column with this name." for name in clashed_names)
         )
     wells_measured, wells_unmeasured = measured_wells(exp)
     if not wells_measured:

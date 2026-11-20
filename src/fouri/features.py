@@ -74,6 +74,10 @@ def measured_columns(exp: Experiment) -> list[str]:
     return sorted(dict.fromkeys(measured))
 
 
+def reserved_names(exp: Experiment) -> set[str]:
+    return {*measured_columns(exp), *metadata_obs_columns(exp), "sample_ID", "well", "label", "included"}
+
+
 def build_fullest_df(exp: Experiment, wells: Sequence[str]) -> pd.DataFrame:
     """Concatenate every well's cell_data CSV and add its metadata from the config."""
     frames = []
@@ -89,6 +93,9 @@ def build_fullest_df(exp: Experiment, wells: Sequence[str]) -> pd.DataFrame:
         say(f"Well {well}: {len(frames[-1]):,} cells")
     fullest_df = pd.concat(frames, ignore_index=True)
     say(f"{len(fullest_df):,} cells in {len(frames)} wells")
+    for column in metadata_obs_columns(exp):
+        if column not in fullest_df.columns:
+            fullest_df[column] = np.nan
     fullest_df = fullest_df.drop(columns="Unnamed: 0", errors="ignore")
     fullest_df = fullest_df.astype({col: str for col in metadata_obs_columns(exp) if col != "sample_ID"})
     fullest_df["sample_ID"] = fullest_df["sample_ID"].astype("category")

@@ -2,6 +2,7 @@
 
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 import anndata as ad
@@ -79,9 +80,16 @@ def build_adata(exp: Experiment, fullest_df: pd.DataFrame, labels: Sequence[str]
 
     df_path = fullest_df_path(exp)
     ad_path = adata_path(exp)
-    with written_whole(df_path) as partial_df, written_whole(ad_path) as partial_adata:
+    partial_df = df_path.with_name(f"{df_path.name}.partial")
+    partial_adata = ad_path.with_name(f"{ad_path.name}.partial")
+    try:
         fullest_df.to_csv(partial_df, index=False)
         adata.write_h5ad(partial_adata)
+    except BaseException:
+        partial_df.unlink(missing_ok=True)
+        partial_adata.unlink(missing_ok=True)
+        raise
+    _replace_together(partial_df, df_path, partial_adata, ad_path)
 
     adata_sub = adata_sub_path(exp)
     if adata_sub.exists():
@@ -92,6 +100,42 @@ def build_adata(exp: Experiment, fullest_df: pd.DataFrame, labels: Sequence[str]
                 sub.write_h5ad(partial)
     say(f"Saved {adata.n_obs:,} cells and {adata.n_vars} features to {adata_path(exp)}")
     return adata
+
+
+def _not_replaced(path: Path, error: OSError) -> OSError:
+    return OSError(
+        f"Could not replace {path.name}: {error}. Close any program that has it open and run Build cell table "
+        "again; both files are as they were."
+    )
+
+
+def _replace_together(partial_df: Path, df_path: Path, partial_adata: Path, ad_path: Path) -> None:
+    previous_df = df_path.with_name(f"{df_path.name}.previous")
+    had_df = df_path.exists()
+    try:
+        if had_df:
+            Path.replace(df_path, previous_df)
+        try:
+            Path.replace(partial_df, df_path)
+        except OSError:
+            if had_df:
+                Path.replace(previous_df, df_path)
+            raise
+    except OSError as error:
+        partial_df.unlink(missing_ok=True)
+        partial_adata.unlink(missing_ok=True)
+        raise _not_replaced(df_path, error) from error
+
+    try:
+        Path.replace(partial_adata, ad_path)
+    except OSError as error:
+        if had_df:
+            Path.replace(previous_df, df_path)
+        else:
+            df_path.unlink()
+        partial_adata.unlink(missing_ok=True)
+        raise _not_replaced(ad_path, error) from error
+    previous_df.unlink(missing_ok=True)
 
 
 def _feature_table(exp: Experiment, features: Iterable[str], round_tables: pd.DataFrame) -> pd.DataFrame:
