@@ -1,4 +1,9 @@
-"""Helpers for parallel processing in the notebooks."""
+"""Parallel execution of per-item jobs in spawned processes.
+
+`parallel_map` runs a function over items in a process pool and returns each outcome in item
+order. `check_results` reports the failed items and ends the step. `worker_count` sets how many
+processes run at the same time on the current PC.
+"""
 
 import math
 import os
@@ -21,7 +26,16 @@ MIN_CPU_FREE = 2  # Minimum number of cpus to keep available to the OS
 
 @dataclass(frozen=True)
 class Failed:
-    """An item whose job raised an error."""
+    """A failed item, recorded with the error that its job raised.
+
+    Attributes
+    ----------
+    item : str
+        The item's name.
+    error : str
+        The error as a message (`error_in_words`). A fixed message when the worker process stopped
+        unexpectedly.
+    """
 
     item: str
     error: str
@@ -29,7 +43,13 @@ class Failed:
 
 @dataclass(frozen=True)
 class Dropped:
-    """An item that did not start because a run was manually stopped."""
+    """A dropped item, left unstarted when the step was stopped.
+
+    Attributes
+    ----------
+    item : str
+        The item's name.
+    """
 
     item: str
 
@@ -42,9 +62,25 @@ class _Bottleneck(StrEnum):
 
 
 def check_results(results: Sequence[object], *, unit: str) -> None:
-    """Say which items failed.
+    """Report each failed item, then end the step if any item failed or was dropped.
 
-    Raise Stopped if any were dropped, otherwise StepFailed if any failed.
+    Each failure is reported with the item's name and full error. The `StepFailed` message names
+    each failed item once, with the first sentence of each distinct error in parentheses. A result
+    other than `Failed` or `Dropped` counts as finished.
+
+    Parameters
+    ----------
+    results : Sequence[object]
+        The outcomes returned by `parallel_map`.
+    unit : str
+        The item noun used in the messages (e.g., `well`).
+
+    Raises
+    ------
+    Stopped
+        If any item was dropped.
+    StepFailed
+        If no item was dropped and any item failed. `StepFailed.failed` lists the failed items.
     """
     reasons: dict[str, list[str]] = {}  # each failed item's distinct reasons, in order
     dropped = []
@@ -84,11 +120,35 @@ def parallel_map[T, R](
     mem_per_worker: float = MEM_PER_WORKER,
     names: Sequence[str] | None = None,
 ) -> list[R | Failed | Dropped]:
-    """Run ``function`` over ``items`` in spawned processes; return each outcome in item order.
+    """Run `function` over `items` in spawned processes and return each outcome in item order.
 
-    An item whose job raised comes back as a ``Failed``. When a bar raises ``Stopped``, the items
-    no worker has taken yet come back as ``Dropped``, and the ones running finish first. ``names``
-    names each item in these; without it an item's name is ``str(item)``. @TODO.
+    At most `n_workers` jobs run at the same time. The next item is submitted when a running job
+    ends. A job that raised gives a `Failed`. When the progress bar raises `Stopped`, no further job
+    is submitted, the running jobs finish, and each unsubmitted item gives a `Dropped`. When a
+    worker process stops unexpectedly, every unfinished item gives a `Failed`. An empty `items`
+    returns an empty list without starting a pool.
+
+    Parameters
+    ----------
+    function : Callable[[T], R]
+        The job to run on each item. Must be a top-level function or a `functools.partial` of one.
+    items : Sequence[T]
+        The items to process, one job each.
+    desc : str
+        The label of the progress bar.
+    unit : str
+        The item noun used in the progress bar and the messages (e.g., `well`).
+    n_workers : int | None, default=None
+        The number of worker processes, capped at the number of items. None for `worker_count`.
+    mem_per_worker : float, default=MEM_PER_WORKER
+        The memory per worker in bytes, passed to `worker_count` when `n_workers` is None.
+    names : Sequence[str] | None, default=None
+        The name of each item in `Failed` and `Dropped`, in item order. None for `str(item)`.
+
+    Returns
+    -------
+    list[R | Failed | Dropped]
+        For each item, in item order: the job's return value, a `Failed`, or a `Dropped`.
     """
     if not items:
         return []
@@ -138,13 +198,51 @@ def parallel_map[T, R](
 
 
 def error_in_words(error: BaseException) -> str:
-    """Return an error as a message: fouri's own as written, anything else with its class name."""
+    """Return an error as text for a message.
+
+    Parameters
+    ----------
+    error : BaseException
+        The error raised by a job.
+
+    Returns
+    -------
+    str
+        The error's own message for a `ValueError`, `RuntimeError`, or `FileNotFoundError`. For any
+        other error, the class name, a colon, and the message (e.g., `KeyError: 'well'`).
+    """
     if isinstance(error, (ValueError, RuntimeError, FileNotFoundError)):
         return str(error)
     return f"{type(error).__name__}: {error}"
 
 
-def worker_count(min_count=1, max_count=None, mem_per_worker: float = MEM_PER_WORKER, unit: str = "well"):
+def worker_count(
+    min_count: int = 1, max_count: int | None = None, mem_per_worker: float = MEM_PER_WORKER, unit: str = "well"
+) -> int:
+    """Return the number of worker processes for the current PC, and report the limiting factor.
+
+    The count is the smaller of two limits: the physical cores minus `MIN_CPU_FREE`, and the
+    available memory minus `MEM_MIN_FREE`, divided by `mem_per_worker` and rounded down. When the
+    physical count is unknown, the logical core count is used. A count below `min_count` is raised
+    to `min_count`, with a warning that the step runs slower. A count above `max_count` is lowered
+    to `max_count`, even below `min_count`.
+
+    Parameters
+    ----------
+    min_count : int, default=1
+        The count used when the cores or memory allow fewer.
+    max_count : int | None, default=None
+        The cap on the count, usually the number of items. None, 0, or a negative value for no cap.
+    mem_per_worker : float, default=MEM_PER_WORKER
+        The memory per worker process in bytes.
+    unit : str, default="well"
+        The item noun used in the message (e.g., `well`).
+
+    Returns
+    -------
+    int
+        The number of worker processes.
+    """
     mem_available = psutil.virtual_memory().available
     cores = physical if (physical := psutil.cpu_count(logical=False)) is not None else os.cpu_count() or 1
 
