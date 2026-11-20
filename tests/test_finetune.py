@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
@@ -56,6 +57,15 @@ def _kept_model(folder: Path, name: str) -> None:
     (directory / "model.json").write_text(json.dumps(MODEL_JSON), encoding="utf-8")
 
 
+HOUR = 3600
+
+
+def _aged(folder: Path) -> None:
+    then = time.time() - 25 * HOUR
+    for path in [*folder.rglob("*"), folder]:
+        os.utime(path, (then, then))
+
+
 def _files(folder: Path) -> dict[Path, bytes]:
     return {path.relative_to(folder): path.read_bytes() for path in folder.rglob("*") if path.is_file()}
 
@@ -83,6 +93,7 @@ def test_leftover_partial_directories_are_removed_before_training(
     leftover = models_folder / LEFTOVER
     (leftover / "models").mkdir(parents=True)
     (leftover / "models" / "model").write_bytes(b"unfinished model")
+    _aged(leftover)
     train = stand_in_cellpose["cellpose.train"]
     stand_in_train_seg = train.train_seg
     present: list[bool] = []
@@ -200,3 +211,22 @@ def test_training_squares_cut_one_matching_window_per_corrected_region(
         assert np.array_equal(saved[matches[0][0]][_window(matches[0])], cut_labels)
         cut.append(matches[0])
     assert sorted(cut) == WINDOWS
+
+
+def test_a_partial_changed_within_a_day_is_kept(
+    experiment: Experiment, stand_in_cellpose: dict[str, ModuleType], models_folder: Path
+) -> None:
+    _hand_edited_well(experiment)
+    leftover = models_folder / LEFTOVER
+    (leftover / "models").mkdir(parents=True)
+    (leftover / "models" / "model").write_bytes(b"model another run is training")
+    (leftover / "models" / "checkpoint").write_bytes(b"written an hour ago")
+    _aged(leftover)
+    an_hour_ago = time.time() - HOUR
+    os.utime(leftover / "models" / "checkpoint", (an_hour_ago, an_hour_ago))
+    before = _files(leftover)
+
+    kept = finetune.finetune_cellpose(experiment, n_epochs=1, wells=["B02"])
+
+    assert _files(leftover) == before
+    assert [model.path for model in models.kept_models()[0]] == [kept / "models" / "model"]

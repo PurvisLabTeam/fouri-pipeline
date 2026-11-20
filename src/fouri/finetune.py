@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from tqdm.auto import tqdm
 
 SQUARE_SIZE: Final[int] = 300
+LEFTOVER_AGE: Final[dt.timedelta] = dt.timedelta(hours=24)
 
 
 @dataclass(frozen=True)
@@ -131,7 +132,18 @@ def finetune_cellpose(exp: Experiment, n_epochs: int = 100, wells: Sequence[str]
         train_labels.extend(label[square.rows, square.columns].copy() for square in grouped_squares)
 
     if models_dir().exists():
-        to_remove = [d for d in models_dir().iterdir() if d.name.endswith(".partial")]
+        leftovers = [d for d in models_dir().iterdir() if d.name.endswith(".partial")]
+        cutoff = (dt.datetime.now() - LEFTOVER_AGE).timestamp()
+        to_remove = []
+        for directory in leftovers:
+            newest = max(path.stat().st_mtime for path in [directory, *directory.rglob("*")])
+            if newest > cutoff:
+                say(
+                    f"Kept {directory.name}: changed less than a day ago, so another fine-tune may still be "
+                    "writing it."
+                )
+            else:
+                to_remove.append(directory)
         for directory in to_remove:
             shutil.rmtree(directory)
         if to_remove:
