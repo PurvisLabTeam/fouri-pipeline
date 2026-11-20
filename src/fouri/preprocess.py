@@ -154,6 +154,7 @@ def convert_well(exp: Experiment, well: str, align_signal: str = "DNA", overwrit
     round_table_pth = round_table_path(exp, well)
     rounds_idx = table["round_index"].unique()
     to_write = table
+    cut_to: tuple[int, int] | None = None
     if round_table_pth.exists():
         existing_round_table = read_round_table(exp, well)
         existing_dims = (
@@ -164,19 +165,7 @@ def convert_well(exp: Experiment, well: str, align_signal: str = "DNA", overwrit
         if existing_dims == dims and not overwrite:
             to_write = table[~table["round_name"].isin(existing_round_table["round_name"])]
         elif existing_dims != dims:
-            if (Path(exp.masks) / well).exists():
-                for path in mask_paths(exp.masks, well):
-                    with np.load(path) as fh:
-                        masks = {name: trim(arr, dims[0], dims[1]) for name, arr in fh.items()}
-                    write_npz(path, masks)
-
-            labels_to_trim: list[Path] = []
-            labels_to_trim.extend(path for idx in rounds_idx if (path := label_path(exp, well, idx)).exists())
-            labels_to_trim.extend(path for idx in rounds_idx if (path := original_label_path(exp, well, idx)).exists())
-            for path in labels_to_trim:
-                label = tifffile.imread(path)
-                trimmed = trim(label, dims[0], dims[1])
-                write_tiff(path, trimmed)
+            cut_to = dims
 
     output_images = Path(exp.output_images) / well
     output_images.mkdir(parents=True, exist_ok=True)
@@ -187,6 +176,21 @@ def convert_well(exp: Experiment, well: str, align_signal: str = "DNA", overwrit
             channel = image[int(row["channel_in_file"])]
             channel = trim(channel, width=int(row["width_min"]), height=int(row["height_min"]))
             write_tiff(output_images / str(row["raw_file_name"]), channel, metadata=_ome_metadata(row))
+
+    if cut_to is not None:
+        width, height = cut_to
+        if (Path(exp.masks) / well).exists():
+            for path in mask_paths(exp.masks, well):
+                with np.load(path) as fh:
+                    masks = {name: trim(arr, width, height) for name, arr in fh.items()}
+                write_npz(path, masks)
+
+        labels_to_trim: list[Path] = []
+        labels_to_trim.extend(path for idx in rounds_idx if (path := label_path(exp, well, idx)).exists())
+        labels_to_trim.extend(path for idx in rounds_idx if (path := original_label_path(exp, well, idx)).exists())
+        for path in labels_to_trim:
+            label = tifffile.imread(path)
+            write_tiff(path, trim(label, width, height))
 
     save_round_table(exp, well, table)
 
@@ -324,6 +328,14 @@ def _round_rows(exp: Experiment, well: str, round_index: int, round_info: pd.Ser
         raise ValueError(f"Multiple ND2 files match {round_name}: {', '.join(f.name for f in fpaths)}")
     fpath = fpaths[0]
     metadata = nd2_metadata(fpath)
+    channel_names = [channel.name for channel in metadata.channels]
+    for column, cell in round_info.items():
+        listed_signal = "" if pd.isna(cell) else str(cell).strip()
+        if column != "round_name" and listed_signal and column not in channel_names:
+            raise ValueError(
+                f"{round_name} lists {listed_signal} under {column}, but the ND2 file of {round_name} for well {well} "
+                f"has no {column} channel (it has {', '.join(channel_names)})."
+            )
     shared = {
         "dir": str(exp.data_dir),
         "sub_dir": subdir.name,

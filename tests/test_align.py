@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 import numpy.typing as npt
 import pytest
-from builders import aligned, converted, in_process_map, segmented
+from builders import aligned, converted, in_process_map, measured, segmented
 from tifffile import imread
 
 from fouri import align, io
@@ -314,3 +314,31 @@ def test_overwrite_with_every_round_failing_keeps_hand_alignments(experiment: Ex
         align.find_transforms(experiment, overwrite=True, wells=["B02"])
 
     np.testing.assert_array_equal(io.load_transforms(experiment, "B02"), hand)
+
+
+def test_a_well_without_a_round_table_is_refused_alone(experiment: Experiment) -> None:
+    converted(experiment, "B02")
+    segmented(experiment, "B02")
+    segmented(experiment, "B03")
+
+    with pytest.raises(StepFailed) as raised:
+        align.find_transforms(experiment, wells=["B02", "B03"])
+
+    assert np.isfinite(io.load_transforms(experiment, "B02")).all()
+    assert not io.tmat_path(experiment, "B03", ".npy").exists()
+    assert raised.value.failed == ["B03"]
+
+
+def test_overwrite_after_an_anchor_change_writes_the_identity_at_the_anchor(experiment: Experiment) -> None:
+    converted(experiment, "B02")
+    segmented(experiment, "B02")
+    io.save_transforms(experiment, "B02", np.stack([np.eye(3), _shift(1.5, -0.5), np.eye(3)]))
+    exp = _with_anchor(experiment, 1)
+
+    align.find_transforms(exp, overwrite=True, wells=["B02"])
+    measured(exp, "B02")
+
+    transforms = io.load_transforms(exp, "B02")
+    np.testing.assert_array_equal(transforms[1], np.eye(3))
+    assert np.isfinite(transforms).all()
+    assert io.cell_data_path(exp, "B02").exists()

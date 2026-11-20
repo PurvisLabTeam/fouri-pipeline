@@ -1,5 +1,6 @@
 """Convert images refuses only the well whose converted rounds no longer match info_exp.csv."""
 
+import dataclasses
 import pickle
 from collections.abc import Callable
 from pathlib import Path
@@ -348,3 +349,97 @@ def test_reconverting_deletes_the_old_pkl_files(
     assert _round_order(experiment, "B02") == (["R0", "R2", "R1"] if keep_new else ["R0", "R1", "R2"])
     table = io.read_round_table(experiment, "B02")
     assert all((Path(experiment.output_images) / "B02" / str(name)).exists() for name in table["raw_file_name"])
+
+
+WITH_FITC = """\
+myRound,DAPI,Cy3,Cy5,FITC
+R0,DNA,pRB,RB,
+R1,DNA,cMyc,,p21
+R2,DNA,CyclinA2,EdU,
+"""
+
+
+def _fitc_in_r1_except(exp: Experiment, monkeypatch: pytest.MonkeyPatch, well: str) -> None:
+    nd2_metadata = preprocess.nd2_metadata
+    read_nd2 = preprocess.read_nd2
+
+    def has_fitc(path: str | Path) -> bool:
+        return Path(path).parent.name.startswith("Round_R1_") and not Path(path).name.startswith(f"Well{well}_")
+
+    def metadata(path: str | Path) -> io.ND2Metadata:
+        found = nd2_metadata(path)
+        if not has_fitc(path):
+            return found
+        return dataclasses.replace(found, channels=[*found.channels, io.ChannelMetadata("FITC", 488.0, 520.0, 150.0)])
+
+    def image(path: str | Path) -> np.ndarray:
+        stack = read_nd2(path)
+        return np.concatenate([stack, stack[:1]]) if has_fitc(path) else stack
+
+    monkeypatch.setattr(preprocess, "nd2_metadata", metadata)
+    monkeypatch.setattr(preprocess, "read_nd2", image)
+
+
+def test_a_signal_under_a_configuration_the_nd2_lacks_refuses_the_well(
+    experiment: Experiment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with_info(experiment, WITH_FITC)
+    raw_files(experiment, monkeypatch)
+    _fitc_in_r1_except(experiment, monkeypatch, "B02")
+
+    with pytest.raises(StepFailed) as raised:
+        preprocess.preprocess(experiment, wells=["B02", "B03"])
+
+    assert raised.value.failed == ["B02"]
+    assert _nothing_converted(experiment, "B02")
+    table = io.read_round_table(experiment, "B03")
+    assert table.loc[table["round_name"] == "R1", "signal"].tolist() == ["DNA", "cMyc", "p21"]
+    assert preprocess.changed_wells(experiment) == []
+
+
+def _hand_work(exp: Experiment, well: str) -> dict[Path, bytes]:
+    folders = [Path(exp.segmented) / well, Path(exp.masks) / well]
+    return {path: path.read_bytes() for folder in folders for path in folder.rglob("*") if path.is_file()}
+
+
+def test_an_unreadable_new_round_leaves_the_hand_work_uncut(
+    experiment: Experiment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _convert_segment_and_edit(experiment, monkeypatch)
+    masked(experiment, "B02", 0, MASKED)
+    _add_smaller_round(experiment, monkeypatch)
+    read_nd2 = preprocess.read_nd2
+
+    def unreadable(path: str | Path) -> np.ndarray:
+        if Path(path).parent.name.startswith("Round_R3_"):
+            raise OSError("the ND2 file is truncated")
+        return read_nd2(path)
+
+    monkeypatch.setattr(preprocess, "read_nd2", unreadable)
+    hand_work = _hand_work(experiment, "B02")
+    table = io.round_table_path(experiment, "B02").read_bytes()
+
+    with pytest.raises(StepFailed) as raised:
+        preprocess.preprocess(experiment, wells=["B02"])
+
+    assert raised.value.failed == ["B02"]
+    assert _hand_work(experiment, "B02") == hand_work
+    assert io.round_table_path(experiment, "B02").read_bytes() == table
+
+
+def test_a_changed_well_is_refused_when_no_other_well_has_work(
+    experiment: Experiment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    raw_files(experiment, monkeypatch)
+    preprocess.preprocess(experiment, wells=["B02"])
+    segmented(experiment, "B02")
+    aligned(experiment, "B02")
+    before = well_outputs(experiment, "B02")
+    with_info(experiment, SWAPPED_INFO)
+    raw_files(experiment, monkeypatch)
+
+    with pytest.raises(StepFailed) as raised:
+        preprocess.preprocess(experiment, wells=["B02"])
+
+    assert raised.value.failed == ["B02"]
+    assert well_outputs(experiment, "B02") == before

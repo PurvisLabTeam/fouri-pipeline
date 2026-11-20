@@ -95,7 +95,11 @@ def find_transforms(
     refused: list[Failed] = []  # wells set up wrongly, each with the first check it fails
     for well in exp.pick_wells(wells):
         labels = label_paths(exp.segmented, well)
-        df = read_round_table(exp, well)
+        try:
+            df = read_round_table(exp, well)
+        except FileNotFoundError as error:
+            refused.append(Failed(well, str(error)))
+            continue
 
         rounds_df = df["round_index"].unique()
         expected_paths = [label_path(exp, well, index) for index in rounds_df]
@@ -223,6 +227,7 @@ def find_transforms(
         written = _unaligned(len(planned[well]), anchor_round)
         current_rows = current[: len(written)]
         written[: len(current_rows)] = current_rows
+        written[anchor_round] = np.eye(3)
         for rnd, matrix in rounds.items():
             if np.array_equal(written[rnd], planned[well][rnd], equal_nan=True):
                 written[rnd] = matrix
