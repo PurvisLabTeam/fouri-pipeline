@@ -169,18 +169,23 @@ def make_embeddings(
     """
     import anndata as ad
 
-    from fouri.embedding import Method, Run, embed_grid, subsample
+    from fouri.embedding import Method, Run, check_ranking, check_runs, cut_subsample, embed_grid, write_subsample
 
-    if overwrite or not adata_sub_path(exp).exists():
-        subsample(exp, cells_per_sample=cells_per_sample, seed=subsample_seed)
-    else:
-        table_uns = ad.read_h5ad(adata_path(exp)).uns
-        subsample_uns = ad.read_h5ad(adata_sub_path(exp)).uns
-        check_subsample(table_uns, subsample_uns)
-        report.say("Using the existing subsample. To subsample again, use overwrite=True")
     grid = [
         Run(Method(run["method"]), int(run["dims"]), int(run["top_n"]), dict(run.get("settings", {}))) for run in runs
     ]
+    cut = overwrite or not adata_sub_path(exp).exists()
+    if cut:
+        subsampled = cut_subsample(exp, cells_per_sample=cells_per_sample, seed=subsample_seed)
+    else:
+        table_uns = ad.read_h5ad(adata_path(exp)).uns
+        subsampled = ad.read_h5ad(adata_sub_path(exp))
+        check_subsample(table_uns, subsampled.uns)
+        report.say("Using the existing subsample. To subsample again, use overwrite=True")
+    check_ranking(subsampled, picked, samples, ranking_k, values)
+    check_runs(grid, picked)
+    if cut:
+        write_subsample(exp, subsampled)
     return embed_grid(
         exp, grid, picked, samples=samples, ranking_k=ranking_k, seed=seed, n_workers=n_workers, values=values
     )

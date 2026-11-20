@@ -84,6 +84,7 @@ NONE_TICKED = "No embeddings ticked."
 CANT_READ = "The saved set-up can't be read: {reason} Save to replace it."
 RANKING_FAILED = "Can't rank the features: {error}"
 K_TITLE = "Neighbors (k) for the ranking"
+K_TOO_LARGE = "ranking_k must be 4 or more and below the number of cells ranked ({cells:,}); got {k}."
 TOP_N_TITLE = "Top N"
 RANKING_COLUMNS = [
     {"name": "place", "label": "Place", "field": "place", "align": "right"},
@@ -674,7 +675,15 @@ class _SetupTab:
             return PICK_FEATURE
         if not self.picked_samples:
             return PICK_SAMPLE
-        return self.k_error
+        return self.k_problem()
+
+    def k_problem(self) -> str | None:
+        if self.k_error is not None:
+            return self.k_error
+        cells = self.cell_count()
+        if self.k is not None and self.k >= cells:
+            return K_TOO_LARGE.format(cells=cells, k=self.k)
+        return None
 
     async def rank(self) -> None:
         if self.adata is None:
@@ -737,8 +746,9 @@ class _SetupTab:
             return PICK_FEATURE
         if not self.picked_samples:
             return PICK_SAMPLE
-        if self.k_error is not None:
-            return self.k_error
+        k_problem = self.k_problem()
+        if k_problem is not None:
+            return k_problem
         for box in [self.top_n, *(box for method in Method for box in self.boxes[method])]:
             if box.refusal is not None:
                 return box.refusal

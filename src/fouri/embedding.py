@@ -21,6 +21,7 @@ from fouri.parallel import Dropped, Failed, check_results, parallel_map
 from fouri.report import say
 
 EMBED_MEM_PER_WORKER = 3e9
+MIN_RANKING_K = 4
 
 
 class Method(StrEnum):
@@ -29,6 +30,19 @@ class Method(StrEnum):
 
 
 def subsample(exp: Experiment, cells_per_sample: int = 2000, seed: int = 42) -> ad.AnnData:
+    subsampled = cut_subsample(exp, cells_per_sample=cells_per_sample, seed=seed)
+    write_subsample(exp, subsampled)
+    return subsampled
+
+
+def write_subsample(exp: Experiment, subsampled: ad.AnnData) -> None:
+    with written_whole(adata_sub_path(exp)) as partial:
+        subsampled.write_h5ad(partial)
+    samples = subsampled.obs["sample_ID"].nunique()
+    say(f"Wrote subsampled dataframe with {samples} samples and {subsampled.n_obs:,} cells.")
+
+
+def cut_subsample(exp: Experiment, cells_per_sample: int = 2000, seed: int = 42) -> ad.AnnData:
     rpath = adata_path(exp)
     adata = ad.read_h5ad(rpath)
     adata_id = adata.uns.get("cell_table", {}).get("id")
@@ -59,10 +73,33 @@ def subsample(exp: Experiment, cells_per_sample: int = 2000, seed: int = 42) -> 
         "cells_per_sample": cells_per_sample,
         "seed": seed,
     }
-    with written_whole(adata_sub_path(exp)) as partial:
-        subsampled.write_h5ad(partial)
-    say(f"Wrote subsampled dataframe with {len(cells_per_sample_actual)} samples and {subsampled.n_obs:,} cells.")
     return subsampled
+
+
+def check_ranking(
+    adata: ad.AnnData, features: Sequence[str], samples: Sequence[int] | None, k: int, values: str
+) -> None:
+    matrix = _values(adata, values)
+    _check_features(adata, features)
+    if values == "combat":
+        _check_corrected(adata, samples)
+    chosen = matrix[_sample_mask(adata, samples)]
+    cells = int(_has_values(chosen).sum()) if values == "combat" else len(chosen)
+    if not MIN_RANKING_K <= k < cells:
+        raise ValueError(
+            f"ranking_k must be {MIN_RANKING_K} or more and below the number of cells ranked ({cells}); got {k}."
+        )
+
+
+def check_runs(runs: Sequence["Run"], picked: Sequence[str]) -> None:
+    features = len(set(picked))
+    out_of_range = [run for run in runs if not 1 <= run.top_n <= features]
+    if out_of_range:
+        raise ValueError(
+            f"A run can use 1 to {features} features, but these ask for something else:"
+            + "".join(f"\n{run_key(run)}" for run in out_of_range)
+            + "\n"
+        )
 
 
 def rank_features(
@@ -73,9 +110,7 @@ def rank_features(
     values: str = "original",
 ) -> pd.Series:
     """@TODO."""
-    _check_features(adata, features)
-    if values == "combat":
-        _check_corrected(adata, samples)
+    check_ranking(adata, features, samples, k, values)
     matrix = _values(adata, values)[_sample_mask(adata, samples)]
     if values == "combat":
         matrix = matrix[_has_values(matrix)]
@@ -238,14 +273,7 @@ def embed_grid(
             say(f"Left out, with no corrected values: {left_out:,} cells.")
     picked_set = set(picked)
     order = [feature for feature in ranking.index if feature in picked_set]
-
-    out_of_range = [run for run in runs if not 1 <= run.top_n <= len(order)]
-    if out_of_range:
-        raise ValueError(
-            f"A run can use 1 to {len(order)} features, but these ask for something else:"
-            + "".join(f"\n{run_key(run)}" for run in out_of_range)
-            + "\n"
-        )
+    check_runs(runs, picked)
 
     coordinates = parallel_map(
         function=functools.partial(_embed_job, path=path, samples=samples, seed=seed, values=values),

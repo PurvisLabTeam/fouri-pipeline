@@ -10,7 +10,7 @@ import numpy.typing as npt
 import pandas as pd
 
 from fouri import io
-from fouri.adata import check_subsample
+from fouri.adata import check_subsample, is_current_subsample
 from fouri.config import Experiment
 from fouri.features import metadata_obs_columns
 from fouri.io import adata_sub_path, fullest_df_path
@@ -130,7 +130,7 @@ def condition_shares(conditions: pd.Series, batches: pd.Series) -> pd.DataFrame:
 def uneven_conditions(shares: pd.DataFrame) -> list[tuple[str, str, str]]:
     """@TODO."""
     result = []
-    for condition, column_shares in shares.items():
+    for condition, column_shares in shares.fillna(0.0).items():
         condition = str(condition)
         lowest_batch = str(column_shares.idxmin())
         highest_batch = str(column_shares.idxmax())
@@ -344,13 +344,18 @@ def correct_batches(
 
     subsampled_path = adata_sub_path(exp)
     subsampled: ad.AnnData | None = None
+    stale_subsample = False
     if subsampled_path.exists():
-        subsampled = ad.read_h5ad(subsampled_path)
-        check_subsample(cells.uns, subsampled.uns)
-        sub_obs = cast(pd.DataFrame, subsampled.obs)
-        full_keys = pd.MultiIndex.from_frame(obs[["well", "label"]])
-        sub_keys = pd.MultiIndex.from_frame(sub_obs[["well", "label"]])
-        matching = full_keys.get_indexer(sub_keys)
+        found = ad.read_h5ad(subsampled_path)
+        if cells.uns.get("cell_table", {}).get("id") is None or is_current_subsample(cells.uns, found.uns):
+            check_subsample(cells.uns, found.uns)
+            subsampled = found
+            sub_obs = cast(pd.DataFrame, subsampled.obs)
+            full_keys = pd.MultiIndex.from_frame(obs[["well", "label"]])
+            sub_keys = pd.MultiIndex.from_frame(sub_obs[["well", "label"]])
+            matching = full_keys.get_indexer(sub_keys)
+        else:
+            stale_subsample = True
     var = cast(pd.DataFrame, cells.var)
     log_cols = log_columns(var)
     formulas = cast(pd.DataFrame, cells.uns["derived_features"])
@@ -382,9 +387,10 @@ def correct_batches(
         )
     shares = condition_shares(conditions, batches)
     uneven = uneven_conditions(shares)
+    filled_shares = shares.fillna(0.0)
     for condition, lowest, highest in uneven:
-        low_share = cast(float, shares.loc[lowest, condition])
-        high_share = cast(float, shares.loc[highest, condition])
+        low_share = cast(float, filled_shares.loc[lowest, condition])
+        high_share = cast(float, filled_shares.loc[highest, condition])
         say(
             f"{condition} is {low_share:.0%} of {batch} {lowest}'s cells but "
             f"{high_share:.0%} of {batch} {highest}'s cells. With conditions spread this unevenly, "
@@ -453,6 +459,11 @@ def correct_batches(
         subsampled.layers[io.COMBAT_LAYER] = corrected[matching]
         with io.written_whole(subsampled_path) as partial:
             subsampled.write_h5ad(partial)
+    if stale_subsample:
+        say(
+            f"{subsampled_path.name} was made from an earlier cell table, so its corrected values were not written. "
+            "Run Embedding with Overwrite to make a new subsample."
+        )
 
     message = (
         f"Corrected {mask.sum():,} cells by {batch}{' on log intensities' if log_transformed else ''}"

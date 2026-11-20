@@ -17,7 +17,7 @@ from fouri.adata import is_current_subsample
 from fouri.app.cells import CONDITION_JOIN
 from fouri.app.state import save_app_value
 from fouri.config import Experiment
-from fouri.embedding import EMBED_MEM_PER_WORKER, Method, Run
+from fouri.embedding import EMBED_MEM_PER_WORKER, MIN_RANKING_K, Method, Run
 from fouri.embedding_setup import _whole
 from fouri.io import adata_path
 from fouri.metadata import natural_key, plate_sort_key
@@ -74,7 +74,11 @@ class Rule:
 _WHOLE_1 = Rule("a whole number, 1 or more", "whole numbers, 1 or more", lambda v: _whole(v) and v >= 1)
 RULES: dict[str, Rule] = {
     "top_n": _WHOLE_1,
-    "ranking_k": _WHOLE_1,
+    "ranking_k": Rule(
+        f"a whole number, {MIN_RANKING_K} or more",
+        f"whole numbers, {MIN_RANKING_K} or more",
+        lambda v: _whole(v) and v >= MIN_RANKING_K,
+    ),
     "seed": Rule("a whole number, 0 or more", "whole numbers, 0 or more", lambda v: _whole(v) and v >= 0),
     "knn": _WHOLE_1,
     "n_pca": _WHOLE_1,

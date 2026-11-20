@@ -941,3 +941,36 @@ def test_no_measured_well_is_refused_before_any_cell_data_is_read(
 
     with pytest.raises(ValueError):
         run.build_cell_table(experiment)
+
+
+EMBEDDING_REFUSALS = [
+    pytest.param({"values": "corrected"}, id="unknown-values"),
+    pytest.param({"picked": [*PICKED, "R9_none_nuc_mean"]}, id="feature-not-in-x"),
+    pytest.param({"runs": [{**UMAP_RUN, "method": "tSNE"}]}, id="unknown-method"),
+    pytest.param({"runs": [{**UMAP_RUN, "top_n": 4}]}, id="top-n-too-large"),
+    pytest.param({"values": "combat"}, id="combat-without-a-layer"),
+    pytest.param({"ranking_k": 3}, id="ranking-k-of-3"),
+    pytest.param({"ranking_k": 12}, id="ranking-k-equal-to-the-cells-ranked"),
+]
+
+
+@pytest.mark.parametrize("existing", [True, False], ids=["over-a-subsample", "no-subsample"])
+@pytest.mark.parametrize("change", EMBEDDING_REFUSALS)
+def test_every_embedding_refusal_leaves_the_subsample_unchanged(
+    experiment: Experiment, stand_in_umap: object, change: dict[str, Any], existing: bool
+) -> None:
+    varied_cell_data(experiment)
+    run.build_cell_table(experiment)
+    if existing:
+        subsampled(experiment, list(range(12)), "X_phate_3d_top2_knn5")
+    before = io.adata_sub_path(experiment).read_bytes() if existing else None
+    options: dict[str, Any] = {"runs": [UMAP_RUN], "picked": PICKED, "ranking_k": 5, **change}
+    runs, picked = options.pop("runs"), options.pop("picked")
+
+    with pytest.raises(ValueError):
+        run.make_embeddings(experiment, runs, picked, overwrite=True, **options)
+
+    if existing:
+        assert io.adata_sub_path(experiment).read_bytes() == before
+    else:
+        assert not io.adata_sub_path(experiment).exists()

@@ -341,7 +341,7 @@ class _BatchPage:
                     batch=self.live_batch,
                     lower=lower,
                     higher=higher,
-                    low=cast(float, live.shares.at[lower, condition]),
+                    low=cast(float, live.shares.fillna(0.0).at[lower, condition]),
                     high=cast(float, live.shares.at[higher, condition]),
                 )
             )

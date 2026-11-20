@@ -7,7 +7,7 @@ import anndata as ad
 import numpy as np
 import pandas as pd
 import pytest
-from builders import four_wells, varied_cell_data, with_filters, with_metadata
+from builders import four_wells, measured_values, varied_cell_data, with_filters, with_metadata
 
 from fouri import batch, io, run
 from fouri.config import Experiment
@@ -60,17 +60,18 @@ def test_cells_with_a_blank_batch_are_left_out_and_named(tmp_path: Path) -> None
     assert dict(cells.uns["batch_effects"]["blank_wells"]) == {"C03": 4}
 
 
-def test_batch_effects_refuses_a_subsample_from_another_cell_table(experiment: Experiment) -> None:
+def test_a_stale_subsample_gets_no_layer_and_the_table_is_corrected(experiment: Experiment) -> None:
     exp = _table(experiment)
     subsample(exp)
     exp = with_filters(exp, [SMALL_AREAS])
     run.build_cell_table(exp, filters=[SMALL_AREAS["name"]])
-    before = {path: path.read_bytes() for path in (io.adata_path(exp), io.adata_sub_path(exp))}
+    stale = io.adata_sub_path(exp).read_bytes()
 
-    with pytest.raises(ValueError):
-        batch.correct_batches(exp, "plate column", keep=["treatment"])
+    cells = _correct(exp)
 
-    assert {path: path.read_bytes() for path in before} == before
+    assert io.COMBAT_LAYER in cells.layers
+    assert "batch_effects" in cells.uns
+    assert io.adata_sub_path(exp).read_bytes() == stale
 
 
 def test_every_corrected_row_is_wholly_empty_or_wholly_filled(experiment: Experiment) -> None:
@@ -224,3 +225,46 @@ def test_the_main_file_is_written_before_the_subsample(
     _correct(exp)
 
     assert written == [io.adata_path(exp), io.adata_sub_path(exp)]
+
+
+def test_a_condition_absent_from_one_batch_is_uneven() -> None:
+    conditions = pd.Series(["a", "a", "b", "b", "a", "a", "b", "b", "b", "b"])
+    batches = pd.Series(["1", "1", "1", "1", "2", "2", "2", "2", "3", "3"])
+
+    uneven = batch.uneven_conditions(batch.condition_shares(conditions, batches))
+
+    assert uneven == [("a", "3", "1")]
+
+
+def test_a_cell_missing_from_the_csv_is_refused(experiment: Experiment) -> None:
+    exp = _table(experiment)
+    path = io.fullest_df_path(exp)
+    table = pd.read_csv(path)
+    table.drop(index=table.index[-1]).to_csv(path, index=False)
+    before = io.adata_path(exp).read_bytes()
+
+    with pytest.raises(ValueError):
+        batch.correct_batches(exp, "plate column", keep=["treatment"])
+
+    assert io.adata_path(exp).read_bytes() == before
+
+
+VARIED_MEASURES = ["R0_pRB_ring_mean", "R0_pRB_total_nuc_protein", "R0_pRB_nuc_cyto_ratio"]
+
+
+def test_only_intensity_measures_are_log_transformed(experiment: Experiment) -> None:
+    varied_cell_data(experiment)
+    for index, well in enumerate(experiment.well_list):
+        for offset, column in enumerate(VARIED_MEASURES, start=1):
+            measured_values(experiment, well, column, [100.0 * offset + 7 * (4 * index + cell) for cell in range(4)])
+    run.build_cell_table(experiment)
+
+    cells = _correct(experiment)
+
+    logged = {str(name) for name in cells.uns["batch_effects"]["log_transformed"]}
+    intensities = {
+        str(name) for name in cells.var_names if str(name).endswith(("_nuc_mean", "_ring_mean", "_total_nuc_protein"))
+    }
+    assert {*VARIED_MEASURES, "nuc_area", "pRB_RB_ratio"} <= set(cells.var_names)
+    assert {"R0_pRB_ring_mean", "R0_pRB_total_nuc_protein"} <= logged
+    assert logged == intensities
