@@ -1,4 +1,9 @@
-"""Figures for the pipeline's interactive steps."""
+"""Plotly figures for setting feature thresholds and viewing embeddings.
+
+`plot_threshold_histogram` plots the histogram of a feature with the suggested and the chosen
+cut-offs. `plot_embedding` plots the cells of an embedding, colored by a measurement or a column of
+`.obs`. The font and color constants are shared with the app's other figures.
+"""
 
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -36,37 +41,52 @@ def plot_threshold_histogram(
     x_title: str = "pRB / RB",
     sds: float = DEFAULT_SDS,
 ) -> go.Figure:
-    """Histogram of one feature with the suggested cut-offs and the chosen ones.
+    """Plot the histogram of a feature with the suggested and the chosen cut-offs.
 
-    Bars show the cells within ``sds`` standard deviations of the mean, the same cells the
-    suggestions are worked out from. The figure opens on the stretch where the smoothed
-    curve stays above 1 % of its tallest peak, widened to keep every line on screen;
-    `bins` bars fill that stretch. Double-clicking the plot zooms out to every bar.
+    NaN values are excluded. The bars show the values within `sds` standard deviations of the mean,
+    the values from which the suggested cut-offs are computed (`fouri.features.suggest_cutoffs`).
+    The initial `x` range runs from the lowest to the highest value at which the kernel density
+    estimate of the drawn values is at least 1% of the estimate's maximum
+    (`fouri.features.curve_range`), widened to include every cut-off. `bins` bars of equal width
+    span the initial range. Double-clicking the plot shows every bar.
+
+    The subtitle states the distance between the Otsu and valley cut-offs, the number of drawn cells
+    outside the initial range, and the number of cells beyond `sds` standard deviations. A part that
+    does not apply is omitted.
 
     Parameters
     ----------
-    values : array_like
-        The feature's value in every cell of the sample, e.g. its pRB/RB ratios.
-    cutoffs : sequence of float
-        The cut-offs in use, in the feature's units: one or two values, or none.
-    bins : int
-        Number of bars across the opening view.
-    title : str, optional
-        Figure title; by default the number of cells.
-    x_title : str, optional
-        Label of the x axis. By default "pRB / RB"
-    sds : float, optional
-        How many standard deviations from the mean a cell may lie and still be
-        drawn as a bar and used for suggestions. By default, 3.
+    values : npt.ArrayLike
+        The feature's value for each cell (e.g., pRB/RB ratios).
+    cutoffs : Sequence[float]
+        The chosen cut-offs, in the feature's units. Empty for no chosen cut-off.
+    bins : int, default=256
+        The number of bars across the initial `x` range.
+    title : str | None, default=None
+        The figure title. None or an empty string falls back to the number of cells with a value
+        (e.g., `12,345 cells`).
+    x_title : str, default="pRB / RB"
+        The `x` axis title.
+    sds : float, default=DEFAULT_SDS
+        The number of standard deviations from the mean within which a value is drawn and used for
+        the suggested cut-offs.
 
     Returns
     -------
-    plotly.graph_objects.Figure
-        Each chosen cut-off is its own editable shape, so it can be dragged where the
-        figure is shown in a web page. Each suggestion method is one line trace, so its
-        legend entry shows or hides all of its lines. The band between Otsu and the valley
-        is a trace too, so the cut-offs are the only shapes: a page may make every shape
-        draggable without the band moving.
+    go.Figure
+        The histogram. Each suggestion method is a line trace with a single legend entry. When both
+        the Otsu and valley cut-offs exist, the band between the two cut-offs is a filled trace
+        without a legend entry. Each chosen cut-off is an editable line shape with a legend entry.
+        The chosen cut-offs are the figure's only shapes.
+
+    Raises
+    ------
+    ValueError
+        If `values` does not contain any non-NaN value.
+
+    Notes
+    -----
+    Infinite values are not excluded. An infinite value raises `IndexError`.
     """
     values = np.asarray(values, dtype=np.float64)
     values = values[~np.isnan(values)]
@@ -147,31 +167,55 @@ def plot_threshold_histogram(
 def plot_embedding(
     adata: ad.AnnData, key: str, color_by: str, *, title: str | None = None, layer: str | None = None
 ) -> go.Figure:
-    """One embedding's cells in 2D or 3D, colored by a measurement or a column describing them.
+    """Plot the cells of an embedding, colored by a measurement or a column of `adata.obs`.
 
-    Cells without coordinates (samples the embedding left out) are not drawn. A measurement, or
-    a column of numbers, colors the cells along one scale running from the 1st to the 99th
-    percentile, so a few extreme cells don't wash out the rest; hovering shows the true value. A
-    column of text or categories, such as treatment or sample_ID, gives each group its own
-    color and its own legend entry, which shows or hides it.
+    A 3D embedding is plotted as a 3D scatter plot, with axes of equal length on screen. A 2D
+    embedding is plotted as a WebGL scatter plot. Cells with a NaN coordinate are not drawn.
+    Hovering over a cell shows the cell's value of `color_by`. The figure's `uirevision` is `key`:
+    the zoom and camera position persist across redraws of the same embedding.
+
+    A measurement or a numeric column colors the cells on the `VALUE_SCALE` color scale, from the
+    1st to the 99th percentile of the values. The color bar title is `z-score` for a measurement
+    read from `adata.X`, `corrected z-score` for a measurement read from `layer`, and the column's
+    name for a column. With `layer`, the cells without a value in the layer are drawn first, as a
+    trace named `No corrected value` in `NO_VALUE_COLOR`. The percentiles exclude those cells. A
+    `layer` not in `adata.layers` raises `KeyError`.
+
+    A text or categorical column gives each group a trace with a legend entry. Group colors are
+    assigned from `GROUP_COLORS` in order, cycling when the groups outnumber the colors. The groups
+    of a categorical column are in category order. Other groups are sorted as text.
+
+    The method is read from the embedding's record in `.uns["embeddings"]`. When the record does not
+    contain a method, the first part of `key` after `X_`, uppercased, is used (e.g., `PHATE`). The
+    method names the axes of a 2D embedding.
 
     Parameters
     ----------
-    adata : anndata.AnnData
-        The subsample file: the embedding in ``.obsm``, its record in ``.uns["embeddings"]``.
+    adata : ad.AnnData
+        The cells, with the embedding in `.obsm` and the embedding's record in `.uns["embeddings"]`
+        (e.g., the `standard_adata_sub.h5ad` file).
     key : str
-        The embedding's name in ``.obsm``, e.g. ``"X_phate_3d_top10_knn80"``.
+        The embedding's key in `.obsm` (e.g., `X_phate_3d_top10_knn80`).
     color_by : str
-        A measurement (a name in ``adata.var_names``) or a column of ``adata.obs``.
-    title : str, optional
-        Figure title; by default the embedding's method, dimensions and settings. An empty string
-        leaves the title out.
+        A measurement (a name in `adata.var_names`) or a column of `adata.obs`. A name in both is
+        read as a measurement.
+    title : str | None, default=None
+        The figure title. None falls back to the method, the dimensions, `top_n`, and the settings
+        from the embedding's record. An empty string draws no title.
+    layer : str | None, default=None
+        The layer to read the measurement from (e.g., `combat`). None reads `adata.X`.
 
     Returns
     -------
-    plotly.graph_objects.Figure
-        3D embeddings open with every axis the same length on screen, whatever the spread of the
-        coordinates along it.
+    go.Figure
+        The scatter plot of the embedding's cells.
+
+    Raises
+    ------
+    ValueError
+        If `key` is not in `adata.obsm`. The message lists the embeddings in `adata.obsm`. If
+        `color_by` is neither a measurement nor a column of `adata.obs`. If `layer` is not None and
+        `color_by` is not a measurement.
     """
     if key not in adata.obsm:
         names = "".join(f"{name}\n" for name in adata.obsm)

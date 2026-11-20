@@ -1,4 +1,19 @@
-"""Cellpose segmentation with progress bar over an image's tiles."""
+"""Nucleus segmentation with Cellpose for the Segment nuclei step.
+
+`segment_wells` segments the alignment channel image of each round and writes the label
+(segmentation mask) files. `segment_image` segments a 2D image with a progress bar over the image's
+tiles. `gpu_name` returns the name of CUDA device 0.
+
+Notes
+-----
+A label file is a 2D integer image with the shape of the round's alignment channel image. Background
+pixels are 0. The pixels of each nucleus share one positive integer label.
+
+The segmentation editor saves over a label file. The first time the editor saves a round, the
+label file as Segment nuclei wrote it is kept under the same name in a `cellpose_original`
+directory beside the label files (`fouri.io.original_label_path`): the original Cellpose label
+file. A round with an original Cellpose label file is hand-edited.
+"""
 
 import warnings
 from collections import defaultdict
@@ -17,6 +32,7 @@ from fouri.report import Stopped, progress, say, say_skipped
 
 
 def gpu_name() -> str | None:
+    """Return the name of CUDA device 0, or None when no CUDA GPU is available to PyTorch."""
     import torch
 
     gpu = torch.cuda.is_available()
@@ -34,7 +50,55 @@ def segment_wells(
     overwrite: bool = False,
     wells: Sequence[str] | None = None,
 ) -> None:
-    """Segment all the round images for all wells in the experiment."""
+    """Segment the alignment channel image of each round of the chosen wells with Cellpose.
+
+    Writes the label (segmentation mask) file for each (round, well), as named by `label_path`. A
+    round whose label file exists is skipped unless `overwrite` is True. A hand-edited round (a
+    round with an original Cellpose label file) is never replaced, even when `overwrite` is True.
+    The skipped rounds and the hand-edited rounds are reported separately. Reports and returns
+    before loading Cellpose when no round is left to segment.
+
+    The original Cellpose label file is checked again before each label file is written. A round
+    hand-edited while the step runs is not written. These rounds are reported after the last well.
+
+    Segmentation runs on a CUDA GPU. With `allow_cpu` True, segmentation runs on the CPU when no
+    CUDA GPU is available. A well that raises an error is recorded as failed. Segmentation continues
+    with the next well. After the last well, `check_results` raises `StepFailed` naming the failed
+    wells. `Stopped` from a progress bar ends the step. The label files already written are kept.
+
+    `Experiment.pick_wells` raises `ValueError` for a well not in `well_list`. `FileNotFoundError`
+    is raised before any well is segmented when `model` is not the name of a kept model
+    (`model_path`) or a chosen well does not have a round table (`alignment_paths`).
+
+    Parameters
+    ----------
+    exp : Experiment
+        The Experiment that holds the wells.
+    diameter : float, default=30
+        The expected nucleus diameter in pixels. Cellpose rescales each image by 30 / `diameter`.
+    flow_threshold : float, default=0.4
+        The flow error threshold. Cellpose keeps masks with a flow error below the threshold.
+    cellprob_threshold : float, default=0.0
+        The cell probability threshold. Cellpose includes pixels above the threshold in masks.
+    min_size : int, default=15
+        The minimum mask size in pixels. Cellpose removes smaller masks.
+    model : str | None, default=None
+        The name of a kept fine-tuned Cellpose model, as listed by `fouri.models.kept_models`. None
+        for Cellpose-SAM.
+    allow_cpu : bool, default=False
+        If True, segment on the CPU when no CUDA GPU is available.
+    overwrite : bool, default=False
+        If True, segment rounds whose label file exists, hand-edited rounds excepted.
+    wells : Sequence[str] | None, default=None
+        The wells to segment. None for every well in `well_list`.
+
+    Raises
+    ------
+    RuntimeError
+        If `allow_cpu` is False and no CUDA GPU is available to PyTorch (the message names the
+        probable cause, the PyTorch version, and the CUDA version of the PyTorch build) or the
+        Cellpose model is not on a CUDA device.
+    """
     mod_path = str(model_path(model)) if model is not None else None
     worklist = {}
     skipped = []
@@ -155,10 +219,39 @@ def segment_image(
     min_size: int,
     desc: str | None = None,
 ) -> tuple[npt.NDArray[Any], float | None]:
-    """Segment one 2D image with a Cellpose model, showing a bar over its tiles.
+    """Segment a 2D image with a Cellpose model, with a progress bar over the image's tiles.
 
-    Returns labels and peak gpu memory in GB, or None when the model isn't on
-    the GPU.
+    During segmentation, `cellpose.transforms.make_tiles` is replaced by a wrapper that sets the
+    bar's total to the number of tiles. A forward hook on `model.net` advances the bar by the number
+    of tiles in each batch. The original `make_tiles` is restored and the hook removed when
+    segmentation ends, including when `model.eval` raises. When `cellpose.transforms.make_tiles`
+    does not exist, the image is segmented without the bar, with a `UserWarning`.
+
+    Parameters
+    ----------
+    model : Any
+        A Cellpose `CellposeModel`.
+    im : npt.NDArray[Any]
+        The 2D image to segment.
+    diameter : float
+        The expected nucleus diameter in pixels. Cellpose rescales the image by 30 / `diameter`.
+    flow_threshold : float
+        The flow error threshold. Cellpose keeps masks with a flow error below the threshold.
+    cellprob_threshold : float
+        The cell probability threshold. Cellpose includes pixels above the threshold in masks.
+    min_size : int
+        The minimum mask size in pixels. Cellpose removes smaller masks.
+    desc : str | None, default=None
+        The label of the progress bar.
+
+    Returns
+    -------
+    labels : npt.NDArray[Any]
+        The label (segmentation mask) image. Background pixels are 0. The pixels of each nucleus
+        share one positive integer label.
+    peak_gb : float | None
+        The peak GPU memory reserved by PyTorch during segmentation, in GiB. None when the model is
+        not on a CUDA device or the image is segmented without the bar.
     """
     import torch
     from cellpose import transforms
@@ -186,10 +279,10 @@ def segment_image(
 
     bar = progress(desc=desc, unit="tile", leave=False)
 
-    def count_tiles(module, inputs, output):
+    def count_tiles(module: Any, inputs: tuple[Any, ...], output: Any) -> None:
         bar.update(inputs[0].shape[0])  # must return nothing
 
-    def make_tiles_and_count(*args, **kwargs):
+    def make_tiles_and_count(*args: Any, **kwargs: Any) -> Any:
         result = original_make_tiles(*args, **kwargs)
         bar.reset(len(result[1]))
         return result

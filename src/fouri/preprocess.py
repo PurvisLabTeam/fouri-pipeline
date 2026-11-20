@@ -1,4 +1,10 @@
-"""Build each channel's round table and convert ND2 files to single-channel tiffs."""
+"""Conversion of ND2 files to single-channel TIFF files, with a round table for each well.
+
+`preprocess` is the Convert images step. `round_table` builds the round table for a well from
+`info_exp.csv` and the well's ND2 files. `convert_well` writes the TIFF files and the round table
+file for a well. `changed_wells` finds the converted wells whose rounds no longer match
+`info_exp.csv`.
+"""
 
 from __future__ import annotations
 
@@ -39,6 +45,27 @@ from fouri.report import say, say_skipped
 
 @dataclass(frozen=True)
 class ChangedWell:
+    """A converted well with rounds changed in `info_exp.csv`.
+
+    Attributes
+    ----------
+    well : str
+        The well, zero-padded (e.g., `B02`).
+    rounds : list[str]
+        The names of the changed rounds as listed in the round table, in round order. For a well
+        with a `df_<well>.pkl` file and no round table file, every round in `info_exp.csv`.
+    hand_edited : list[str]
+        The well's hand-edited rounds, changed or not, by name in round order. For a well with a
+        `df_<well>.pkl` file and no round table file, the hand-edited rounds among those with a
+        label file or an artifact mask file, each named `round N`, with `N` the 0-based round index.
+        A round is hand-edited when the round has an original Cellpose label file (`fouri.segment`)
+        or a mask record with `edited` true (`fouri.artifacts`).
+    outputs : list[Path]
+        The well's outputs that exist, ordered as the round table file, the `df_<well>.pkl` file,
+        `<output_images>/<well>`, `<segmented>/<well>`, the transforms files (`.npy`, then `.pkl`),
+        `<masks>/<well>`, and the cell data file.
+    """
+
     well: str
     rounds: list[str]
     hand_edited: list[str]
@@ -54,32 +81,24 @@ def _hand_edited(exp: Experiment, well: str, round_index: int) -> bool:
 def changed_wells(exp: Experiment, wells: Sequence[str] | None = None) -> list[ChangedWell]:
     """Find the converted wells whose rounds no longer match `info_exp.csv`.
 
-    A well is changed when a round of the well's round table is renamed, moved, given other
-    channels or signals, or no longer listed in `info_exp.csv`. A round added at the end of
-    `info_exp.csv` is not a change. A well without a round table file is changed when
-    `df_<well>.pkl` exists. All rounds of such a well are reported changed. Each hand-edited round
-    of such a well is named `round N`, with `N` the 0-based round index. A well with neither file
-    is not reported. Reads mask records with `is_mask_edited`, which raises `ValueError` if a
-    record's `edited` is not true or false.
+    A well is changed when a round of the well's round table differs in name, channels, or signals
+    from the round at the same 0-based index in `info_exp.csv`, or when `info_exp.csv` does not
+    have a round at that index. A round added at the end of `info_exp.csv` is not a change. A well
+    without a round table file is changed when the `df_<well>.pkl` file exists. A well with neither
+    file is not changed. Reads the mask records of each changed well with `is_mask_edited`, which
+    raises for a record that is not valid JSON or does not have an `edited` of true or false.
 
     Parameters
     ----------
     exp : Experiment
         The Experiment that holds the files.
     wells : Sequence[str] | None, default=None
-        The wells to check. None checks every well of the experiment.
+        The wells to check. Must be in `well_list`. None checks every well in `well_list`.
 
     Returns
     -------
     list[ChangedWell]
-        One entry per changed well, in plate order.
-
-    Notes
-    -----
-    A round is hand-edited when the round has an original Cellpose label file or a mask record
-    with `edited` true. The outputs listed are those that exist among the round table file,
-    `df_<well>.pkl`, the well's images directory, labels directory, transforms files (`.npy` and
-    `.pkl`), masks directory, and cell data file.
+        One `ChangedWell` per changed well, sorted by plate row, then by column.
     """
     wells = exp.pick_wells(wells)
     table = read_info_file(exp)
@@ -146,10 +165,40 @@ def changed_wells(exp: Experiment, wells: Sequence[str] | None = None) -> list[C
 
 
 def trim(image: npt.NDArray[Any], width: int, height: int) -> npt.NDArray[Any]:
+    """Crop an image to the first `height` rows and the first `width` columns."""
     return image[:height, :width]
 
 
 def convert_well(exp: Experiment, well: str, align_signal: str = "DNA", overwrite: bool = False) -> None:
+    """Write the TIFF files and the round table file for a single well.
+
+    Builds the round table with `round_table`, whose refusals raise `ValueError` or
+    `FileNotFoundError`. Writes each channel of the round table to
+    `<output_images>/<well>/<raw_file_name>`, cropped to the top-left `width_min` by `height_min`
+    pixels. Without `overwrite`, when a round table file exists with the same crop size (`width_min`
+    and `height_min`), only the rounds not listed in the file are written.
+
+    When the crop size differs from the file's, every round is written. The well's label files,
+    original Cellpose label files, and every array of the well's artifact mask files are cropped to
+    the new size after every TIFF file is written. The mask record files are unchanged. The round
+    table file is written last.
+
+    Parameters
+    ----------
+    exp : Experiment
+        The Experiment that holds the files.
+    well : str
+        The well, zero-padded (e.g., `B02`).
+    align_signal : str, default="DNA"
+        The signal of each round's alignment channel, passed to `round_table`.
+    overwrite : bool, default=False
+        If True, every round is written when the crop size is unchanged.
+
+    Notes
+    -----
+    Each TIFF file holds a single channel, with an OME header holding the pixel size and the
+    channel's acquisition settings (`fouri.io.ND2Metadata`), and the signal as the channel name.
+    """
     table = round_table(exp, well, align_signal)
     round_table_pth = round_table_path(exp, well)
     rounds_idx = table["round_index"].unique()
@@ -203,7 +252,37 @@ def preprocess(
     wells: Sequence[str] | None = None,
     reconvert_changed: bool = False,
 ) -> None:
-    """Convert every well that has no round table yet (every well with overwrite)."""
+    """Convert the ND2 files of the chosen wells to single-channel TIFF files.
+
+    Converts each well with `convert_well`, in spawned processes. A well without a round table file
+    is converted. A well whose round table lists the rounds of `info_exp.csv` is skipped. A well
+    whose round table lists the first rounds of `info_exp.csv` is converted for the rounds added at
+    the end. Without `reconvert_changed`, a changed well, as found by `changed_wells`, is refused
+    regardless of `overwrite`. The refusal message names the changed rounds.
+
+    Reports the wells skipped, the wells with added rounds, and the outputs deleted for each changed
+    well. With no well to convert and no well refused, reports so and returns.
+    `fouri.parallel.check_results` raises `StepFailed` naming each refused and failed well, after
+    the other wells are converted, or `Stopped` when the step is stopped.
+
+    Parameters
+    ----------
+    exp : Experiment
+        The Experiment that holds the files.
+    align_signal : str, default="DNA"
+        The signal of each round's alignment channel. Must be the signal of exactly one channel in
+        each round.
+    n_workers : int | None, default=None
+        The number of worker processes, capped at the number of wells to convert. None for
+        `fouri.parallel.worker_count`.
+    overwrite : bool, default=False
+        If True, every well that is not changed is converted again, with every round written.
+    wells : Sequence[str] | None, default=None
+        The wells to convert. Must be in `well_list`. None for every well in `well_list`.
+    reconvert_changed : bool, default=False
+        If True, the outputs of each changed well (`ChangedWell.outputs`) are deleted, a directory
+        with its contents, before any well is converted. The changed wells are converted again.
+    """
     info = read_info_file(exp)
     round_names = info["round_name"].tolist()
 
@@ -284,6 +363,57 @@ def preprocess(
 
 
 def round_table(exp: Experiment, well: str, align_signal: str = "DNA") -> pd.DataFrame:
+    """Build the round table for a single well from `info_exp.csv` and the well's ND2 files.
+
+    The round table has one row per channel with a signal in each round of `info_exp.csv`, in round
+    order, then in ND2 channel order. A blank value in `info_exp.csv` is a channel without a signal.
+    Each round's directory is the directory in `<data_dir>` whose name contains
+    `Round_<round_name>_`. The round's ND2 file is the file in that directory whose name contains
+    `Well<well>_` and ends in `.nd2`.
+
+    A missing round directory or ND2 file raises `FileNotFoundError`. Two round directories or two
+    ND2 files matching a round raise `ValueError`. A signal listed under a channel that the ND2 file
+    does not contain, or an ND2 channel without a column in `info_exp.csv`, raises `ValueError`.
+
+    Parameters
+    ----------
+    exp : Experiment
+        The Experiment that holds the files.
+    well : str
+        The well, zero-padded (e.g., `B02`).
+    align_signal : str, default="DNA"
+        The signal of each round's alignment channel.
+
+    Returns
+    -------
+    pd.DataFrame
+        The round table as a pandas DataFrame.
+
+    Raises
+    ------
+    ValueError
+        If a round names the same signal twice, or a round does not have exactly one channel with
+        signal `align_signal`. The message names each such round.
+
+    Notes
+    -----
+    The columns of the round table:
+
+    - `dir`, `sub_dir`, and `file`: `<data_dir>`, the round directory's name, and the ND2 file's
+      name.
+    - `round_name` and `round_index`: the round's name and 0-based index in `info_exp.csv`.
+    - `well`: the well.
+    - `width`, `height`, `pixel_size_um`, `objective`, `bit_depth`, and `acquired_at`: the image
+      metadata of the ND2 file (`fouri.io.ND2Metadata`).
+    - `channel_in_file`, `channel_name`, and `signal`: the channel's 0-based index in the ND2 file,
+      the ND2 channel name, and the signal.
+    - `excitation_nm`, `emission_nm`, and `exposure_ms`: the channel's acquisition settings
+      (`fouri.io.ChannelMetadata`).
+    - `raw_file_name`: the converted image's file name,
+      `Round_<round_name>_well<well>_<signal>.tif`.
+    - `width_min` and `height_min`: the smallest image width and height across the well's rounds.
+    - `is_align_channel`: true for the channel with signal `align_signal`.
+    """
     rounds = read_info_file(exp)
     rows = []
     for round_index, (_, round_info) in enumerate(rounds.iterrows()):

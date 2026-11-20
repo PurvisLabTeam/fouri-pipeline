@@ -1,4 +1,28 @@
-"""@TODO."""
+"""Per-cell intensity and shape measurement for the Measure cells step.
+
+`measure_wells` measures the chosen wells in spawned processes. `measure_well` measures the cells of
+a single well and writes the well's cell data file.
+
+Notes
+-----
+The cell data file has one row per cell and no index column. The columns, in order:
+
+- `label`: the nucleus label in the anchor round's label (segmentation mask) image.
+- `nuc_area`, `centroid-0`, `centroid-1`, `orientation`, `axis_major_length`, `axis_minor_length`,
+  and `bbox-0` to `bbox-3`: the nucleus area in pixels and the shape properties from
+  `skimage.measure.regionprops_table`, in the anchor round's pixel coordinates.
+- `<prefix>_nuc_mean`: the mean intensity over the nucleus.
+- `ring_area`: the cytoplasmic ring area in pixels.
+- `<prefix>_ring_mean`: the mean intensity over the ring.
+- `<prefix>_covered`: True when the channel's artifact mask covers a pixel of the nucleus or ring.
+- `<prefix>_total_nuc_protein`: `<prefix>_nuc_mean` times `nuc_area`.
+- `<prefix>_nuc_cyto_ratio`: `<prefix>_nuc_mean` divided by `<prefix>_ring_mean`.
+- `well`: the well, zero-padded (e.g., `B02`).
+
+`<prefix>` is the feature prefix for a signal in a round, from `feature_prefix` (e.g., `R0_pRB`).
+Each `<prefix>` group has one column per channel of each round, in round order, then in the round
+table's row order.
+"""
 
 import functools
 from collections.abc import Sequence
@@ -32,9 +56,54 @@ def measure_wells(
     overwrite: bool = False,
     wells: Sequence[str] | None = None,
 ) -> list[Path]:
-    """Measure every well without cell data (every well with overwrite); return the CSVs written.
+    """Measure the cells of the chosen wells and write a cell data file for each well.
 
-    @TODO.
+    A well whose cell data file has a `<prefix>_nuc_mean` column for every channel of the well's
+    round table is skipped unless `overwrite` is True. A well whose cell data file does not contain
+    all of these columns is measured again for every round, with a message. Reports when no well is
+    left to measure.
+
+    Each well is measured by `measure_well` in a spawned process (`parallel_map`). The number of
+    cells dropped in each well is reported when above 0. A well that raises an error is recorded as
+    failed. The remaining wells are measured. After the last well, `check_results` raises
+    `StepFailed` naming the failed wells, or `Stopped` when the step is stopped before every well's
+    job is submitted.
+
+    `Experiment.pick_wells` raises `ValueError` for a well not in `well_list`. With `overwrite`
+    False, `read_round_table` raises `FileNotFoundError` for a well with a cell data file and
+    without a round table, before any well is measured.
+
+    Parameters
+    ----------
+    exp : Experiment
+        The Experiment that holds the wells.
+    ring_width : int, default=6
+        The reach of each cytoplasmic ring from the nucleus edge, in pixels, passed to `make_rings`.
+        Must be 1 or more.
+    ring_gap : int, default=1
+        The distance from a nucleus, in pixels, within which pixels are excluded from every ring,
+        passed to `make_rings`. Must be 0 or more and less than `ring_width`.
+    edge_margin : int, default=1
+        The margin, in pixels, around pixels without image data within which a cell is dropped. Must
+        be 0 or more.
+    n_workers : int | None, default=None
+        The number of worker processes, capped at the number of wells. None for `worker_count`.
+    overwrite : bool, default=False
+        If True, measure every chosen well, including wells already measured.
+    wells : Sequence[str] | None, default=None
+        The wells to measure. None for every well in `well_list`.
+
+    Returns
+    -------
+    list[Path]
+        The paths of the cell data files written, sorted by plate row, then by column. Empty if no
+        well is left to measure.
+
+    Raises
+    ------
+    ValueError
+        If `ring_width` is below 1, `ring_gap` is below 0, `ring_gap` is not below `ring_width`, or
+        `edge_margin` is below 0. The check runs before any well is measured.
     """
     if ring_width < 1:
         raise ValueError(f"Ring width must be >= 1. Got {ring_width}")
@@ -95,6 +164,64 @@ def _is_measured(exp: Experiment, well: str) -> bool:
 def measure_well(
     exp: Experiment, well: str, ring_width: int = 6, ring_gap: int = 1, edge_margin: int = 1
 ) -> tuple[Path, int]:
+    """Measure the cells of a single well and write the well's cell data file.
+
+    Cells are the nuclei of the anchor round's label (segmentation mask) image, without the nuclei
+    that touch the image border (`clear_border`). Cytoplasmic rings around the nuclei are built by
+    `make_rings`. For each round, the nuclei and rings are moved into the round's frame with
+    `move_to_round`. Pixels without image data (0 in every channel of the round) are removed from
+    the nuclei and rings. The mean intensity of each channel is measured over each nucleus and each
+    ring in the round's converted images.
+
+    A cell is dropped when a pixel of its nucleus or ring, in the anchor round's frame, lies on or
+    within `edge_margin` pixels (chessboard distance) of a pixel without image data in any round.
+    The outermost rows and columns of each round's images, and the area outside the images, count as
+    pixels without image data. A cell without a ring is dropped.
+
+    For each channel, `<prefix>_covered` is True when the channel's artifact mask, read with
+    `final_masks`, shares a pixel with the cell's nucleus or ring in the round's frame. The cover
+    columns of a round without an artifact mask file are False. Build cell table removes every cell
+    with a True cover column (`fouri.artifacts.remove_covered`).
+
+    Writes the cell data file named by `cell_data_path` atomically (`written_whole`). The columns
+    are listed in the module's `Notes`. `read_round_table`, `load_transforms`, and `read_labels`
+    raise `FileNotFoundError` if the round table, the transforms file, or the anchor round's label
+    file does not exist. `final_masks` raises `ValueError` if an artifact mask file does not contain
+    a mask for a channel of the round.
+
+    Parameters
+    ----------
+    exp : Experiment
+        The Experiment that holds the well.
+    well : str
+        The well, zero-padded (e.g., `B02`).
+    ring_width : int, default=6
+        The reach of each cytoplasmic ring from the nucleus edge, in pixels, passed to `make_rings`.
+    ring_gap : int, default=1
+        The distance from a nucleus, in pixels, within which pixels are excluded from every ring,
+        passed to `make_rings`.
+    edge_margin : int, default=1
+        The margin, in pixels, around pixels without image data within which a cell is dropped.
+
+    Returns
+    -------
+    path : Path
+        The path of the cell data file written.
+    n_dropped : int
+        The number of nuclei in the anchor round's label image without a row in the file.
+
+    Raises
+    ------
+    ValueError
+        If the transforms file has fewer rounds than the round table, the anchor round's matrix is
+        not the identity matrix, a round is not aligned yet (the message names the rounds), an
+        artifact mask's shape differs from the shape of the round's images (the message names the
+        round), or no cell is left.
+
+    Notes
+    -----
+    The ring settings and `edge_margin` are not checked. `measure_wells` checks the three settings.
+    """
     round_table = read_round_table(exp, well)
     transforms = load_transforms(exp, well)
     if (tr := transforms.shape[0]) < (ta := round_table["round_index"].nunique()):

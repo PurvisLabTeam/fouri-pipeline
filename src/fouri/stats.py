@@ -1,4 +1,4 @@
-"""@TODO."""
+"""Robust estimators of location and scale."""
 
 from typing import Any, Final
 
@@ -9,7 +9,7 @@ MAD_TO_SD: Final[float] = 1.4826
 
 
 def robust_location_scale(values: npt.NDArray[Any]) -> tuple[float, float]:
-    """@TODO."""
+    """Return the median of `values` and the median absolute deviation times `MAD_TO_SD`."""
     median = np.median(values)
     absolute_deviations = np.abs(values - median)
     mad = np.median(absolute_deviations)

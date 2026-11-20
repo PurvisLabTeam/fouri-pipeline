@@ -1,8 +1,9 @@
-"""How far each step has got, read from the files on disk.
+"""Status of each pipeline step, read from the files on disk.
 
-The app's Status page and Run page read these instead of keeping their own record, so they are
-right after a crash, after a run on another PC, or after work done outside the app. Each check
-follows the rule its step uses to skip work, counted against the rounds info_exp.csv lists now.
+`step_status` returns the status of a per-well step for each well. `experiment_status` returns the
+status of each experiment-wide step. `measured_wells` divides the wells by whether Measure cells is
+complete. The status of a per-well step is computed with the step's skip rule, against the rounds
+listed in `info_exp.csv`.
 """
 
 from __future__ import annotations
@@ -36,7 +37,33 @@ from fouri.metadata import feature_prefix
 
 
 class Step(StrEnum):
-    """The steps a run can include, in their usual order."""
+    """Pipeline steps, listed in run order.
+
+    Each member's value is the step's name for `python -m fouri.run`.
+
+    Attributes
+    ----------
+    CONVERT : , default="convert"
+        Convert images.
+    SEGMENT : , default="segment"
+        Segment nuclei.
+    ALIGN : , default="align"
+        Align rounds.
+    ARTIFACTS : , default="artifacts"
+        Find artifacts.
+    MEASURE : , default="measure"
+        Measure cells.
+    TABLE : , default="table"
+        Build cell table.
+    BATCH : , default="batch"
+        Batch effects.
+    EMBEDDING : , default="embedding"
+        Embedding.
+    EXPORT : , default="export"
+        Export.
+    FINETUNE : , default="finetune"
+        Fine-tune Cellpose.
+    """
 
     CONVERT = "convert"
     SEGMENT = "segment"
@@ -55,7 +82,19 @@ WELL_STEPS = (*PER_WELL_STEPS, Step.FINETUNE)
 
 
 class State(StrEnum):
-    """Where a step stands for one well, or for the whole experiment."""
+    """State of a step for a single well or for the experiment.
+
+    Attributes
+    ----------
+    COMPLETE : , default="complete"
+        Every round is done, or the step's output exists.
+    PARTIAL : , default="partial"
+        Some but not all rounds are done, or the subsample does not have any embeddings.
+    NOT_STARTED : , default="not started"
+        No round is done, or the step's output does not exist.
+    BLOCKED : , default="blocked"
+        The step refuses the well. `WellStatus.note` states the reason.
+    """
 
     COMPLETE = "complete"
     PARTIAL = "partial"
@@ -65,7 +104,19 @@ class State(StrEnum):
 
 @dataclass(frozen=True)
 class WellStatus:
-    """One per-well step for one well: rounds done out of the rounds the step works on."""
+    """Status of a per-well step for a single well, read from the step's output files.
+
+    Attributes
+    ----------
+    state : State
+        The step's state for the well.
+    done : int
+        The number of rounds done. 0 when `state` is `BLOCKED`.
+    total : int
+        The number of rounds the step processes.
+    note : str, default=""
+        The reason for a `BLOCKED` state. Empty for any other state.
+    """
 
     state: State
     done: int
@@ -75,7 +126,19 @@ class WellStatus:
 
 @dataclass(frozen=True)
 class OutputStatus:
-    """An experiment-wide step: its output file, when it was last written, and what it holds."""
+    """Status of an experiment-wide step, read from the step's output file.
+
+    Attributes
+    ----------
+    state : State
+        The step's state.
+    path : Path
+        The path to the step's output file.
+    updated : dt.datetime | None
+        The output file's last modification time, in local time. None when `state` is `NOT_STARTED`.
+    note : str, default=""
+        A description of the output (e.g., `3 embeddings`). May be empty.
+    """
 
     state: State
     path: Path
@@ -84,6 +147,23 @@ class OutputStatus:
 
 
 def measured_wells(exp: Experiment) -> tuple[list[str], list[str]]:
+    """Return the wells for which Measure cells is complete, then the other wells.
+
+    The state of each well is the one `step_status` returns for Measure cells. Each list is sorted
+    by plate row, then by column.
+
+    Parameters
+    ----------
+    exp : Experiment
+        The Experiment that holds the cell data files.
+
+    Returns
+    -------
+    measured : list[str]
+        The wells in `well_list` whose Measure cells state is `COMPLETE`.
+    not_measured : list[str]
+        The other wells in `well_list`.
+    """
     measured_stats = step_status(exp, Step.MEASURE)
     completed = [well for well, status in measured_stats.items() if status.state is State.COMPLETE]
     not_completed = [well for well, status in measured_stats.items() if status.state is not State.COMPLETE]
@@ -92,7 +172,50 @@ def measured_wells(exp: Experiment) -> tuple[list[str], list[str]]:
 
 
 def step_status(exp: Experiment, step: Step | str, wells: Sequence[str] | None = None) -> dict[str, WellStatus]:
-    """Return each chosen well's state for one per-well step, in plate order."""
+    """Return the status of a per-well step for each chosen well.
+
+    The rounds done are counted, for each well, against the rounds listed in `info_exp.csv`:
+
+    - Convert images: the rounds in the round table. `NOT_STARTED` when the round table file does
+      not exist. `BLOCKED` when the round table's rounds are not the first rounds of `info_exp.csv`,
+      in order.
+    - Segment nuclei: the rounds with a label (segmentation mask) file.
+    - Align rounds: the rounds whose saved transform does not contain NaN. The anchor round is
+      excluded from `done` and `total`. A missing transforms file counts as no round done. `BLOCKED`
+      when the transforms file holds more rounds than `info_exp.csv`, or when the anchor round's
+      matrix is missing or is not the identity matrix.
+    - Find artifacts: the rounds with an artifact mask file. `NOT_STARTED` when neither a round
+      table file nor a mask file exists. `BLOCKED` when at least one mask file exists without a
+      round table file, or when a mask record file cannot be read as a JSON object with a boolean
+      `edited`.
+    - Measure cells: the rounds for which the cell data file has a `<prefix>_nuc_mean` column for
+      every signal of the round, `<prefix>` built by `feature_prefix` from the round name and the
+      signal (e.g., `R0_DNA_nuc_mean`). `NOT_STARTED` when the cell data file does not exist.
+
+    Otherwise, the state is `COMPLETE` when every round is done, `PARTIAL` when some rounds are
+    done, and `NOT_STARTED` when no round is done. A `step` that is not a `Step` value raises
+    `ValueError`. A well not in `well_list` raises `ValueError` from `Experiment.pick_wells`. A
+    missing `info_exp.csv` file raises `FileNotFoundError`.
+
+    Parameters
+    ----------
+    exp : Experiment
+        The Experiment that holds the files.
+    step : Step | str
+        The step, as a `Step` or a `Step` value (e.g., `measure`).
+    wells : Sequence[str] | None, default=None
+        The wells to check. None for every well in `well_list`.
+
+    Returns
+    -------
+    dict[str, WellStatus]
+        The status of each well, keyed by well, sorted by plate row, then by column.
+
+    Raises
+    ------
+    ValueError
+        If `step` is not one of `PER_WELL_STEPS`.
+    """
     step = Step(step)
     if step not in PER_WELL_STEPS:
         raise ValueError(f"{step} is not a per-well step; use experiment_status for it.")
@@ -102,7 +225,29 @@ def step_status(exp: Experiment, step: Step | str, wells: Sequence[str] | None =
 
 
 def experiment_status(exp: Experiment) -> dict[Step, OutputStatus]:
-    """Return the state of the experiment-wide steps: the cell table and the embeddings."""
+    """Return the status of Build cell table, Batch effects, and Embedding.
+
+    - Build cell table: `COMPLETE` when the `standard_adata.h5ad` file exists.
+    - Batch effects: `COMPLETE` when the `standard_adata.h5ad` file holds the layer `COMBAT_LAYER`.
+      The note is `by <batch>`, `<batch>` being the batch column saved in `.uns["batch_effects"]`.
+      The note is empty when the batch column is not saved.
+    - Embedding: `COMPLETE` when the `standard_adata_sub.h5ad` file holds at least one embedding in
+      `.obsm`. The note states the number of embeddings. `PARTIAL` when the file does not contain
+      any embedding.
+
+    Otherwise, the state is `NOT_STARTED`. The checks for Batch effects and Embedding raise
+    `OSError` for a file that exists but cannot be opened as HDF5.
+
+    Parameters
+    ----------
+    exp : Experiment
+        The Experiment that holds the files.
+
+    Returns
+    -------
+    dict[Step, OutputStatus]
+        The status of each step, keyed by `Step.TABLE`, `Step.BATCH`, and `Step.EMBEDDING`.
+    """
     return {Step.TABLE: _table(exp), Step.BATCH: _batch(exp), Step.EMBEDDING: _embedding(exp)}
 
 

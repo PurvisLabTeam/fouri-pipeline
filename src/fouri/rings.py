@@ -1,8 +1,6 @@
-"""Utils for building cytoplasmic rings around each nucleus.
+"""Cytoplasmic rings around the nuclei of a label (segmentation mask) image.
 
-Method by Katarzyna Kedziora (2021): a pixel is assigned to a nucleus's ring
-only if no other nucleus would have an overlapping ring. Reimplemented with
-OpenCV in 2026.
+Method by Katarzyna Kedziora (2021).
 """
 
 import cv2
@@ -12,19 +10,33 @@ from skimage.morphology import disk
 
 
 def make_rings(image: npt.NDArray, width: int = 5, gap: int = 0) -> npt.NDArray:
-    """Return a ring of cytoplasm around each nucleus, with its label.
+    """Return the cytoplasmic ring around each nucleus, labeled with the nucleus's label.
+
+    A pixel is added to a ring when exactly one nucleus lies within `width` pixels and no nucleus
+    lies within `gap` pixels. A pixel within `width` pixels of two or more nuclei joins no ring.
+    Distances are Euclidean, measured with a disk-shaped structuring element
+    (`skimage.morphology.disk`).
 
     Parameters
     ----------
-    image : ndarray of int
-        Label image of the nuclei: 0 for background, one number per nucleus, e.g. the anchor
-        round's segmentation after ``clear_border``.
-    width : int, optional
-        How far a ring reaches from its nucleus's edge, in pixels. A pixel within ``width`` of
-        two or more nuclei joins no ring. By default 5.
-    gap : int, optional
-        Pixels this close to any nucleus are left out, so a ring starts ``gap + 1`` pixels from
-        its nucleus's edge. By default 0, a ring touching its nucleus.
+    image : npt.NDArray
+        The label (segmentation mask) image of the nuclei, 0 for background. Must hold a distinct
+        positive integer for each nucleus.
+    width : int, default=5
+        The maximum width of the ring from the nucleus' edge.
+    gap : int, default=0
+        The width in pixels of the band around every nucleus that is left out of all rings. The ring
+        starts `gap + 1` pixels from the nucleus' edge. With 0, the ring touches the nucleus.
+
+    Returns
+    -------
+    npt.NDArray
+        The ring label image, in the shape and dtype of `image`. Each ring pixel holds the label of
+        the ring's nucleus. Every other pixel is 0.
+
+    Notes
+    -----
+    The returned image has rings only, and sets nucleus pixels to 0.
     """
     reach = disk(width)
     image_f32 = image.astype(np.float32)
