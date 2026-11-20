@@ -1,19 +1,14 @@
-"""Per-well metadata: well names, CSV import, generated sample_IDs and checks.
+"""Well names, per-well metadata tables, feature names, and sort keys.
 
-Standard metadata CSV (one row per well; only ``well`` is required)::
-
-    well,treatment,dose,treatment_time,sample_ID
-    B02,control,0,96h,
-    B03,abema_fulv,100nM,96h,
-
-- wells may be written B2 or B02
-- sample_ID is optional; if the column is missing or empty, IDs are generated
-  so that wells with the same condition share an ID, numbered in plate order
-- any other columns are kept as extra metadata
+Well names are normalized to the zero-padded form (e.g., `B02`). A metadata table has one row per
+well, with a `well` column and one column per metadata field (e.g., `sample_ID`, `treatment`,
+`dose`, `treatment_time`).
 """
 
 import os
 import re
+from collections.abc import Iterable, Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -36,22 +31,22 @@ _ND2_WELL_RE = re.compile(r"Well([A-P]\d{1,2})_Channel")
 _DIGITS_RE = re.compile(r"(\d+)")
 
 
-def normalize_well(well):
-    """'b2' / 'B2' / 'B02' -> 'B02'. Raises ValueError for anything else."""
+def normalize_well(well: str) -> str:
+    """Normalize a well name (e.g., `b2` -> `B02`), raising `ValueError` if not a valid name."""
     m = _WELL_RE.match(str(well).strip())
     if not m:
         raise ValueError(f"Not a well name: {well!r}")
     return f"{m.group(1).upper()}{int(m.group(2)):02d}"
 
 
-def plate_sort_key(well):
-    """Sort wells in plate order: A01, A02, ... B01, ..."""
+def plate_sort_key(well: str) -> tuple[str, int]:
+    """Return a key that sorts wells by plate row, then by column (e.g., `B9` before `B10`)."""
     w = normalize_well(well)
     return (w[0], int(w[1:]))
 
 
-def to_sample_id(value):
-    """Sample IDs are ints when they look like ints (the older project_config files store '1')."""
+def to_sample_id(value: Any) -> Any:
+    """Return `value` as an int if it is an integer in text or float form, else unchanged."""
     if isinstance(value, str) and value.strip().lstrip("-").isdigit():
         return int(value.strip())
     if isinstance(value, float) and value.is_integer():
@@ -59,23 +54,51 @@ def to_sample_id(value):
     return value
 
 
-def _clean(value):
-    """Blank/NaN -> '' ; everything else as a stripped string."""
+def _clean(value: Any) -> str:
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return ""
     return str(value).strip()
 
 
 def feature_prefix(round_name: str, signal: str) -> str:
-    """Return the column prefix 06 gives a round's channel, e.g. ``R0_pRB``."""
+    """Return the feature column prefix for a signal in a round (e.g., `R0`, `pRB` -> `R0_pRB`)."""
     return f"{str(round_name).zfill(2)}_{signal}"
 
 
-def read_metadata_table(source):
-    """Read per-well metadata from a CSV/TSV path or a DataFrame.
+def read_metadata_table(source: str | Path | pd.DataFrame) -> pd.DataFrame:
+    """Read a per-well metadata table from a CSV or TSV file, or from a DataFrame.
 
-    Returns a DataFrame with a normalized ``well`` column (one row per well,
-    plate order) and standard column names; values are strings ('' if blank).
+    Column names are matched to the standard names regardless of case, spaces, or dashes (e.g.,
+    `Sample ID` -> `sample_ID`, `time` -> `treatment_time`). Rows with a blank `well` are dropped.
+    Every value other than `well` becomes stripped text. A blank or missing value becomes empty
+    text.
+
+    Parameters
+    ----------
+    source : str | Path | pd.DataFrame
+        The path to a comma-separated `.csv` file or a tab-separated `.tsv` or `.txt` file, or a
+        DataFrame, which is copied.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per well, sorted by plate row, then by column, with `well` normalized (e.g., `B2` ->
+        `B02`).
+
+    Raises
+    ------
+    ValueError
+        If the table has no `well` column, or a `well` value is not a valid well name.
+
+    Notes
+    -----
+    Wells listed multiple times are kept. `check_metadata` reports them.
+
+    A file in the standard layout:
+
+        well,treatment,dose,treatment_time,sample_ID
+        B02,control,0,96h,
+        B03,abema_fulv,100nM,96h,
     """
     if isinstance(source, pd.DataFrame):
         df = source.copy()
@@ -104,21 +127,54 @@ def read_metadata_table(source):
     return df.reset_index(drop=True)
 
 
-def _listed(values):
+def _listed(values: Iterable[Any]) -> str:
     return ", ".join(str(value) for value in values)
 
 
-def _condition_text(values):
+def _condition_text(values: Any) -> str:
     return " · ".join(value for value in values if value) or "(blank)"
 
 
-def _id_order(value):
+def _id_order(value: Any) -> tuple[int, int, str]:
     text = str(value)
     return (0, int(text), "") if text.isdigit() else (1, 0, text)
 
 
-def check_metadata(table, condition_columns, wells_with_data=None):
-    """Return a list of ('error'|'warning', message) for a metadata table."""
+def check_metadata(
+    table: pd.DataFrame, condition_columns: Sequence[str], wells_with_data: Iterable[str] | None = None
+) -> list[tuple[str, str]]:
+    """Check a metadata table and return the errors and warnings found.
+
+    Errors are one of:
+
+    - A well listed multiple times.
+    - A well without ND2 files, when `wells_with_data` is given.
+
+    Warnings are one of:
+
+    - A well with ND2 files that is not in the table, when `wells_with_data` is given.
+    - A sample ID shared by wells of different conditions.
+    - A condition whose wells have different sample IDs.
+
+    A condition is a well's values in the `condition_columns` present in the table. The sample ID is
+    checked only when the table has a `sample_ID` column and at least one condition column.
+
+    Parameters
+    ----------
+    table : pd.DataFrame
+        The metadata table, as returned by `read_metadata_table`.
+    condition_columns : Sequence[str]
+        The columns whose values define a condition.
+    wells_with_data : Iterable[str] | None, default=None
+        The wells with ND2 files, as returned by `wells_in_data`. None skips the check for ND2
+        files.
+
+    Returns
+    -------
+    list[tuple[str, str]]
+        One `(level, message)` pair per problem, `level` being `"error"` or `"warning"`. Empty if
+        no problem is found.
+    """
     issues = []
     dup = sorted(table["well"][table["well"].duplicated()].unique(), key=plate_sort_key)
     if dup:
@@ -139,15 +195,36 @@ def check_metadata(table, condition_columns, wells_with_data=None):
                 if c.nunique() > 1:
                     covered = _listed(_condition_text(cond) for cond in sorted(set(c)))
                     issues.append(("warning", f"Sample ID {s} covers different conditions: {covered}."))
-            for c, s in pd.DataFrame({"s": sid, "c": conds}).groupby("c")["s"]:
-                if s.nunique() > 1:
-                    ids = _listed(sorted(set(s), key=_id_order))
-                    issues.append(("warning", f"{_condition_text(c)} has several sample IDs: {ids}."))
+            for condition, sample_ids in pd.DataFrame({"s": sid, "c": conds}).groupby("c")["s"]:
+                if sample_ids.nunique() > 1:
+                    ids = _listed(sorted(set(sample_ids), key=_id_order))
+                    issues.append(("warning", f"{_condition_text(condition)} has several sample IDs: {ids}."))
     return issues
 
 
-def table_to_config(table):
-    """DataFrame -> (well_list, well_metadata) for experiment.json."""
+def table_to_config(table: pd.DataFrame) -> tuple[list[str], dict[str, dict[str, Any]]]:
+    """Convert a metadata table to the `well_list` and `well_metadata` of `experiment.json`.
+
+    `sample_ID` is kept for every well, read as an int when an integer (`to_sample_id`). Any other
+    column is kept only when it is not blank, as stripped text.
+
+    Parameters
+    ----------
+    table : pd.DataFrame
+        The metadata table, with a `well` column.
+
+    Returns
+    -------
+    well_list : list[str]
+        The wells, in table order.
+    well_metadata : dict[str, dict[str, Any]]
+        The metadata of each well, keyed by well.
+
+    Notes
+    -----
+    A well listed multiple times appears multiple times in `well_list`. The last row's metadata is
+    kept.
+    """
     well_list = table["well"].tolist()
     meta = {}
     for _, row in table.iterrows():
@@ -164,8 +241,8 @@ def table_to_config(table):
     return well_list, meta
 
 
-def config_to_table(well_list, well_metadata):
-    """(well_list, well_metadata) -> DataFrame, the inverse of table_to_config."""
+def config_to_table(well_list: Sequence[str], well_metadata: Mapping[str, Mapping[str, Any]]) -> pd.DataFrame:
+    """Convert `well_list` and `well_metadata` to a metadata table, reversing `table_to_config`."""
     rows = [{"well": w, **(well_metadata.get(w) or {})} for w in well_list]
     df = pd.DataFrame(rows, columns=None)
     if df.empty:
@@ -181,8 +258,23 @@ def config_to_table(well_list, well_metadata):
     return df
 
 
-def wells_in_data(data_dir):
-    """Wells that have ND2 files (``Well<W>_Channel...nd2``) in any round folder."""
+def wells_in_data(data_dir: str | Path) -> list[str]:
+    """List the wells with ND2 files in any round directory of the data directory.
+
+    A file is counted when its name contains `Well<well>_Channel` (e.g., `WellB02_Channel`) and its
+    suffix is `.nd2`, regardless of case. Only the direct subdirectories of `data_dir` are searched.
+
+    Parameters
+    ----------
+    data_dir : str | Path
+        The path to the experiment's `data` directory.
+
+    Returns
+    -------
+    list[str]
+        The wells, normalized and sorted by plate row, then by column. Empty if `data_dir` does not
+        exist.
+    """
     wells = set()
     if not os.path.isdir(data_dir):
         return []
@@ -197,8 +289,8 @@ def wells_in_data(data_dir):
     return sorted(wells, key=plate_sort_key)
 
 
-def channel_names(info_file):
-    """Round/channel prefixes as notebook 06 names them, e.g. ['R0_DNA', 'R0_pRB', ...]."""
+def channel_names(info_file: str | Path) -> list[str]:
+    """List the feature prefix of each signal in `info_exp.csv`, in file order (e.g., `R0_DNA`)."""
     info = pd.read_csv(info_file)
     names = []
     for _, row in info.iterrows():
@@ -209,8 +301,8 @@ def channel_names(info_file):
     return names
 
 
-def default_derived_features(info_file):
-    """Return the starting derived features for 07, based on the channels that exist."""
+def default_derived_features(info_file: str | Path) -> list[dict[str, str]]:
+    """Return the starting derived features: `pRB_RB_ratio` when a round has both pRB and RB."""
     names = channel_names(info_file)
     features = []
     for n in names:
@@ -218,16 +310,11 @@ def default_derived_features(info_file):
         if signal == "pRB" and f"{rnd}_RB" in names:
             features.append({"name": "pRB_RB_ratio", "formula": f"{rnd}_pRB_nuc_mean / {rnd}_RB_nuc_mean"})
             break
-    # no total DNA: 06 writes every channel's total, e.g. R0_DNA_total_nuc_protein (mean x area)
     return features
 
 
 def natural_key(value: object) -> tuple[Any, ...]:
-    """Return a sort key that puts 24h before 96h before 120h.
-
-    Runs of digits compare as numbers, coming before text at the same place, and text compares
-    without regard to case, so B9 sorts before B10 and 2 before 10.
-    """
+    """Return a natural sort key: numbers by value, text regardless of case (e.g., `B9` < `B10`)."""
     parts = _DIGITS_RE.split(str(value).casefold())
     # split puts the digit runs at the odd places
     return tuple((0, int(part), "") if place % 2 else (1, 0, part) for place, part in enumerate(parts) if part)
