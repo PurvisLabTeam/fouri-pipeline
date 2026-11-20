@@ -53,13 +53,20 @@ on the included cells (every cell when the table has no `included` column).
   ComBat's value and is counted. Any other error stops the step before any write. The reference is recomputed the
   same way, without a message.
 - Warnings, the correction continuing: a condition whose share of one batch's cells is under half its share of
-  another's (`uneven_conditions`); a before classifier score at most `NEAR_CHANCE` (0.05) above chance.
-- Refusals, before any write: no two batches share a condition (`why_not_combat`); a subsample cut from another cell
-  table, or holding no id (`fouri.adata.check_subsample`); a cell (well, label) or `.X` feature of
-  `standard_adata.h5ad` that `fullest_df.csv` lacks, as from two Build cell table runs.
+  another's (`uneven_conditions`), a used condition absent from a batch counting as a share of 0 (`condition_shares`
+  still gives it empty, and the warning, in the step and on the page, reads it as 0%); a before classifier score at
+  most `NEAR_CHANCE` (0.05) above chance.
+- Refusals, before any write: no two batches share a condition (`why_not_combat`); a `standard_adata.h5ad` without a
+  cell table id, when a subsample exists (`fouri.adata.check_subsample`'s first check); a cell (well, label) or `.X`
+  feature of `standard_adata.h5ad` that `fullest_df.csv` lacks, as from two Build cell table runs.
+- A subsample cut from another cell table, or holding no id, is left as it was: the cell table is corrected, no layer
+  is written into the subsample, and after the write the step says `standard_adata_sub.h5ad was made from an earlier
+  cell table, so its corrected values were not written. Run Embedding with Overwrite to make a new subsample.` Export
+  still refuses such a subsample.
 - Output: `layers["combat"]` (float64, empty for excluded cells and excluded conditions) and
   `.uns["batch_effects"]` in `standard_adata.h5ad`; the same layer, matched by well and label, in
-  `standard_adata_sub.h5ad` when that file exists; both written through `io.written_whole`, uncompressed. In
+  `standard_adata_sub.h5ad` when that file exists and was cut from the same cell table; both written through
+  `io.written_whole`, uncompressed. In
   `.uns["batch_effects"]`, values keyed by a condition, batch or feature are saved as lists beside an array, since
   anndata refuses a key holding `/`; a None number is left out. `log_transformed` holds the names of the features
   `numpy.log1p` was applied to, in `log_columns` order, empty with `log_intensities` off or when `.var` has no such

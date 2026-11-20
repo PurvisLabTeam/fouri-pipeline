@@ -28,7 +28,11 @@ labels with one column.
 
 ## Build cell table
 
-- Build cell table (`run.build_cell_table(exp, filters=(), labels=())`) applies the saved filters named in its
+- Build cell table (`run.build_cell_table(exp, filters=(), labels=())`) refuses, before reading any cell data, a
+  derived feature named with the suffix `_covered` or with a name `features.reserved_names` gives (the measured
+  columns, every metadata column as the cell table names it, `sample_ID`, `well`, `label`, `included`). The table
+  holds every metadata column of the experiment, empty for a cell whose well has no value in it. It applies the saved
+  filters named in its
   `filters` setting after the derived features and the removal of the cells an artifact mask covers, so a
   filter may use a derived feature, and adds the result as the column `included`.
   `fouri.filters.keep` works out one rule on every cell left in the table by itself: the percentiles (numpy's

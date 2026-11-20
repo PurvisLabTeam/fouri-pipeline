@@ -44,10 +44,21 @@ earlier cell table. Run Embedding with Overwrite to update it.`
   included cells of `standard_adata.h5ad` (every cell when it has no `included` column); a sample the filters
   left with no included cell is refused, by name, before anything is sketched or written; lowered to the
   smallest sample's count of included cells (sketch would do it silently), recorded in `.uns["subsample"]`, with the
-  cell table's id in `.uns["subsample"]["cell_table"]`; a table without an id is refused. `run.make_embeddings`
-  reusing a subsample, Batch effects and Export refuse one cut from another cell table or holding no id
-  (`fouri.adata.check_subsample`), the message naming Embedding with Overwrite. Every feature stays in `.X`, so an
-  embedding can be colored by any measurement.
+  cell table's id in `.uns["subsample"]["cell_table"]`; a table without an id is refused. `subsample` is
+  `cut_subsample` (in memory) then `write_subsample`. `run.make_embeddings` reusing a subsample and Export refuse one
+  cut from another cell table or holding no id (`fouri.adata.check_subsample`), the message naming Embedding with
+  Overwrite; Batch effects corrects the cell table past such a subsample and writes no layer into it
+  (`.claude/rules/batch-effects.md`). Every feature stays in `.X`, so an embedding can be colored by any measurement.
+- `run.make_embeddings` refuses every setting before any file is written: it builds the runs (an unknown method
+  refused), cuts the new subsample in memory (with Overwrite or no file) or reads the existing one, checks it with
+  `check_ranking` and `check_runs`, and writes a newly cut subsample only after both pass, so a refusal leaves the old
+  subsample and its embeddings as they were. `check_ranking(adata, features, samples, k, values)` refuses unknown
+  `values`, a feature not in `.X`, ComBat values without the layer or without corrected cells in the chosen samples,
+  chosen samples with no cell, and a `ranking_k` below 4 (`MIN_RANKING_K`, delve's minimum) or not below the number of
+  cells ranked (the chosen samples' cells, those with corrected values for `combat`): `ranking_k must be 4 or more and
+  below the number of cells ranked (60); got 3.` `check_runs(runs, picked)` refuses a `top_n` outside 1 to the number
+  of distinct features in `picked`. `rank_features` calls `check_ranking` and `embed_grid` calls `check_runs`, so the
+  set-up tab's ranking gives the same refusal.
   The cells selected keep their rows of `layers["combat"]` when Batch effects has run.
 - `values`, taken by `rank_features`, `embed`, `embed_grid` and, after `seed`, `run.make_embeddings`: `original`
   reads `.X`, `combat` reads `layers["combat"]`, written by Batch effects (`.claude/rules/batch-effects.md`); any

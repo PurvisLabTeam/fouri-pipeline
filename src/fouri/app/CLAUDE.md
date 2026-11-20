@@ -60,17 +60,20 @@ and is the Dock icon of the app opened from the bundle; `fouri.app.main` sets no
   table lists a well twice (`B02 is listed twice.`). The standard three keep their Condition ticks whatever their
   values; an added column with no value in any well is saved in neither. With no ND2 files found, wells can be removed
   but not added, and the two ND2 checks are skipped. Import CSV replaces only the CSV's own columns for the wells it
-  lists.
+  lists (`wells.imported_rows`), a blank `sample_ID` cell read as no ID, so Save fills it as for any well without one.
 - The page keeps every sample ID already set, except one held by wells of two or more conditions (values in the
-  condition columns): on Save the ID stays with the wells of the condition first in plate order and is cleared on
-  the others (`wells.split_wells` names them). A sample ID may be typed in the table or imported (a whole number
-  above 0; a cleared one counts as none). On Save, `wells.fill_sample_ids` gives each well with none, in plate
-  order, the ID of the first well with the same condition, else one more than the largest ID in use; after the
-  write a notification names the wells whose ID was split off (`Sample IDs changed: B09, C02, whose condition
-  differs from the other wells with their ID.`).
-- The derived-features section's Save refuses a name ending in `_covered` and a measured column's name, those
-  `features.measured_columns` gives from the round tables whether or not a well is measured, as Build cell table
-  does.
+  condition columns): on Save the ID stays with the wells whose condition is unchanged since the last Save, or, when
+  none or more than one of those conditions is unchanged, with the condition first in plate order, and is cleared on
+  the others (`wells.split_wells` names them). The saved conditions are each well's condition values as experiment.json
+  holds them, read again at Save (`wells.read_saved_conditions`); a well absent from them counts as changed. A sample ID
+  may be typed in the table or imported (a whole number above 0; a cleared one counts as none). On Save,
+  `wells.fill_sample_ids` gives each well with none, in plate order, the ID of the first well with the same condition,
+  else one more than the largest ID in use; after the write a notification names the wells whose ID was split off
+  (`Sample IDs changed: B09, C02, whose condition differs from the other wells with their ID.`).
+- The derived-features section's Save refuses a name ending in `_covered`, a name `features.reserved_names` gives
+  (measured columns, metadata columns as the cell table names them, `sample_ID`, `well`, `label`, `included`) whether
+  or not a well is measured, and a column of the measured cells, as Build cell table does
+  (`treatment: the cell table already has a column with this name.`).
 - The app's Experiment page (`config_to_save` and `path_entry` in `fouri/app/wells.py`; `config_to_save` reads
   experiment.json again before the paths card's keys are written over it) writes the results folder
   to the key it is read from on that PC (`mac_base_dir` on non-Windows if set, else `base_dir`), left out
@@ -84,6 +87,12 @@ and is the Dock icon of the app opened from the bundle; `fouri.app.main` sets no
   directory holding the file sought (`pick_file`'s `name`: experiment.json beside experiment.json, info_exp.csv
   beside each info_exp.csv box, matched without regard to case, the exact spelling first) selects that file; any
   other directory, typed or clicked, is listed. Import CSV seeks no name.
+
+## Embedding page
+
+- The set-up tab's ranking k box takes a whole number, 4 or more (`fouri.embedding.MIN_RANKING_K`). A k at or above
+  the tab's cell count (the subsample's cells of the samples chosen, or cells per sample times samples with no
+  subsample) is refused for the ranking and for Save with the step's message, rechecked on every change of the samples.
 
 ## Run page
 

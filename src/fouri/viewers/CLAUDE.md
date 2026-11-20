@@ -13,12 +13,18 @@ Read with the root `CLAUDE.md` when a file under `src/fouri/viewers/` is read.
   dropdown) and before its window closes, the base frame asks Save, Discard or Cancel when `_unsaved_rounds` names any,
   naming them; a round switch shows no question, except in a viewer with `asks_on_round_switch` set (the alignment
   viewer). After Save or Discard on closing, the editor closes the window itself, so napari's own close question
-  doesn't follow (napari's Ctrl+W and Ctrl+Q still ask theirs first). `alignment.AlignmentViewer` checks Align rounds'
-  transforms and aligns rounds by hand: it starts each round from its saved transform or from none, clicks snap to cell
+  doesn't follow (napari's Ctrl+W and Ctrl+Q still ask theirs first). When Save is chosen and the save raises, the
+  rounds stay unsaved and the switch or the close does not happen: the window stays open, with the reason in the
+  prompt (`Not saved: <reason>. The window stays open.` on closing). A well or round switch that raises any error while
+  loading leaves the old one on screen, picker and editor both, and puts the reason in the prompt.
+  `alignment.AlignmentViewer` checks Align rounds'
+  transforms and aligns rounds by hand: it starts each round from its saved transform or from none (a round beyond the
+  saved transforms file, added after Align rounds ran, has none), clicks snap to cell
   centers, Fit (Shift+F) needs 3 pairs with two clicks a third of the image apart. A Fit made since the round's last
-  Save or load and not saved counts the round shown as unsaved (`unsaved_fit`), so a well switch, a round switch and
-  closing the window show the Save, Discard or Cancel question; Cancel keeps the Fit, and Discard drops the Fit. A
-  failed well or round switch leaves the old one on screen and puts the reason in the prompt; a round the viewer
+  Save or load and not saved counts the round shown as unsaved (`unsaved_fit`), so a well switch, a round switch, a
+  change of Start from and closing the window show the Save, Discard or Cancel question; Cancel keeps the Fit (and puts
+  Start from back), and Discard drops the Fit. Save of a round beyond the file adds unaligned rows up to it
+  (`align.save_manual_transform`). A round the viewer
   doesn't offer (the anchor, or one the well lacks) opens its first round instead, with the reason in the prompt.
   `segmentation.SegmentationViewer` checks and corrects the
   segmentation masks of every round, opening on the anchor: each of the round's channels is an image layer in
@@ -29,7 +35,8 @@ Read with the root `CLAUDE.md` when a file under `src/fouri/viewers/` is read.
   `selected cells` layer; a drag pans, and Escape or a click on the background clears the selection (in the
   paint, fill and polygon tools Escape stays napari's own). Delete deletes the selected cells, Shift+M merges them into the first one's
   number when they form one group touching at a side or a corner, Shift+N paints a new cell with the next free
-  number, and the brush and eraser widen and trim cells. An undo marks the round as edited, after a Save included,
+  number, and the brush and eraser widen and trim cells. An undo (Ctrl+Z) or a redo (Ctrl+Shift+Z, both bound by the
+  editor on each round's masks layer) marks the round as edited, after a Save included,
   so Save writes the round again and leaving shows the question. Save writes every round edited through
   `io.write_tiff`, first keeping each one's Cellpose original; when the write fails, a Cellpose original copied by
   that Save is removed and the error is shown. `artifacts.ArtifactViewer` is the editor for painting artifact masks by
@@ -50,7 +57,8 @@ Read with the root `CLAUDE.md` when a file under `src/fouri/viewers/` is read.
   cells left after `clear_border` with a nucleus or ring (Measure cells' default width and gap) touching, once moved
   into a round, that round's final mask in any channel: the round shown as grown now, the other rounds as saved. Without a
   transform for a round, anchor labels, or usable masks files in another round, the line gives the reason in place of
-  the count. Save writes every round edited: the `.json` with `edited` true, each channel's spread and pad as its file
+  the count. Save first runs any regrow still queued from the last stroke, so the final mask holds it, then writes
+  every round edited: the `.json` with `edited` true, each channel's spread and pad as its file
   had them and each artifact's under `artifacts`, then the `.npz` with `outlines_` and `final_` per channel, both
   through `io.written_whole`; when the `.npz` write fails, the round's previous `.json` is written back, or the new
   one removed when the round had none, and the error is shown. Find artifacts never replaces such a round. A round with an `.npz` lacking outlines for a
