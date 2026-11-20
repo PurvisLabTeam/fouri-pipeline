@@ -3,11 +3,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from builders import with_filters, with_labels
+from builders import varied_cell_data, with_filters, with_labels, with_metadata
 
 from fouri.app.batches import save_batch_setup
+from fouri.app.cells import load_cells
 from fouri.app.embeddings import save_setup
-from fouri.app.rules import save_filters, save_labels, switched_on_filters, switched_on_labels
+from fouri.app.rules import kept_cells, save_filters, save_labels, switched_on_filters, switched_on_labels
 from fouri.config import Experiment, load_config, save_config
 
 SMALL_AREAS = {"name": "small areas", "use": True, "rule": "between", "feature": "nuc_area", "low": 0, "high": 40}
@@ -75,3 +76,24 @@ def test_only_switched_on_filters_and_labels_are_sent(experiment: Experiment) ->
 
     assert switched_on_filters(exp) == ["small areas", "large areas"]
     assert switched_on_labels(exp) == ["size", "RB level"]
+
+
+PER_SAMPLE_AREAS = {
+    "name": "middle areas per sample",
+    "use": True,
+    "rule": "middle_percentiles",
+    "feature": "nuc_area",
+    "low": 10,
+    "high": 90,
+    "per_sample": True,
+}
+
+
+def test_kept_cells_returns_the_per_sample_refusal(experiment: Experiment) -> None:
+    varied_cell_data(experiment)
+    exp = with_filters(with_metadata(experiment, "B03", sample_ID=None), [PER_SAMPLE_AREAS])
+
+    kept, problem = kept_cells(load_cells(exp), exp)
+
+    assert kept is None
+    assert problem is not None

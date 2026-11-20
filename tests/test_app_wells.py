@@ -1,5 +1,6 @@
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -8,8 +9,19 @@ import pytest
 from builders import INFO_EXP, ND2_FILE, ND2_FOLDER, four_wells, with_filters, with_metadata
 
 from fouri.app import wells
-from fouri.app.wells import fill_sample_ids, in_full, new_config, path_entry, save_wells, wells_table
+from fouri.app.state import save_app_value
+from fouri.app.wells import (
+    fill_sample_ids,
+    imported_rows,
+    in_full,
+    new_config,
+    path_entry,
+    save_details,
+    save_wells,
+    wells_table,
+)
 from fouri.config import Experiment
+from fouri.metadata import read_metadata_table
 
 SMALL_AREAS = {"name": "small areas", "use": True, "rule": "between", "feature": "nuc_area", "low": 0, "high": 40}
 CONDITIONS = ["treatment", "treatment_time"]
@@ -22,6 +34,10 @@ def _saved(exp: Experiment) -> dict[str, Any]:
 
 def _sample_ids(exp: Experiment) -> dict[str, Any]:
     return {well: entry.get("sample_ID") for well, entry in _saved(exp)["well_metadata"].items()}
+
+
+def _unchanged(table: pd.DataFrame) -> dict[str, tuple[str, ...]]:
+    return {str(row["well"]): tuple(str(row[column]) for column in CONDITIONS) for _, row in table.iterrows()}
 
 
 def _set(table: pd.DataFrame, well: str, **values: Any) -> pd.DataFrame:
@@ -77,7 +93,7 @@ def test_fill_sample_ids_keeps_ids_and_numbers_in_plate_order() -> None:
         columns=["well", "sample_ID", "treatment", "treatment_time"],
     )
 
-    filled = fill_sample_ids(table, CONDITIONS)
+    filled = fill_sample_ids(table, CONDITIONS, _unchanged(table))
 
     assert dict(zip(filled["well"], filled["sample_ID"], strict=True)) == {
         "B02": 1,
@@ -141,6 +157,10 @@ def test_sample_ids_are_saved_as_numbers(experiment: Experiment) -> None:
 
 def test_new_config_refuses_an_existing_experiment_json(experiment: Experiment) -> None:
     config_path = Path(experiment.config_path)
+    folder = Path(experiment.data_dir) / ND2_FOLDER.format(round_name="R0")
+    folder.mkdir(parents=True)
+    for well in ("B02", "B03", "C02"):
+        (folder / ND2_FILE.format(well=well)).touch()
     before = config_path.read_bytes()
 
     with pytest.raises(ValueError):
@@ -185,3 +205,99 @@ def test_path_entry_writes_paths_relative_to_base_dir(tmp_path: Path) -> None:
     )
     assert with_base_dir.data_dir == Path(inside)
     assert in_folder.data_dir == Path(inside)
+
+
+def _shared_control(exp: Experiment) -> Experiment:
+    return with_metadata(exp, "B03", treatment="control", sample_ID=1)
+
+
+def test_a_split_id_stays_with_the_unchanged_wells(experiment: Experiment) -> None:
+    exp = _shared_control(experiment)
+    table = _set(wells_table(exp), "B02", treatment="abema")
+
+    save_wells(exp, table, CONDITIONS)
+
+    assert _sample_ids(exp) == {"B02": 4, "B03": 1, "C02": 3}
+
+
+def test_a_split_id_falls_back_to_plate_order(experiment: Experiment) -> None:
+    exp = _shared_control(experiment)
+    table = _set(_set(wells_table(exp), "B02", treatment="abema"), "B03", treatment="dmso")
+
+    save_wells(exp, table, CONDITIONS)
+
+    assert _sample_ids(exp) == {"B02": 1, "B03": 4, "C02": 3}
+
+
+SAVES_SINCE_LOADED = [
+    pytest.param(lambda exp: save_wells(exp, wells_table(exp), CONDITIONS), id="save-wells"),
+    pytest.param(lambda exp: save_details(exp, {"notes": "Plate rescanned."}), id="save-details"),
+    pytest.param(lambda exp: save_app_value(exp, "labels", []), id="save-app-value"),
+]
+
+
+@pytest.mark.parametrize("save", SAVES_SINCE_LOADED)
+def test_each_save_keeps_a_key_written_since_the_experiment_loaded(
+    experiment: Experiment, save: Callable[[Experiment], Experiment]
+) -> None:
+    with_filters(experiment, [SMALL_AREAS])
+
+    save(experiment)
+
+    assert _saved(experiment)["app"]["filters"] == [SMALL_AREAS]
+
+
+def _ids_table(rows: list[tuple[str, object, str, str]]) -> pd.DataFrame:
+    return pd.DataFrame(rows, columns=["well", "sample_ID", "treatment", "treatment_time"])
+
+
+def test_a_well_without_an_id_leaves_the_others_whole() -> None:
+    table = _ids_table(
+        [
+            ("B02", 1, "control", "24h"),
+            ("B03", "", "abema", "24h"),
+            ("C02", 3, "palbo", "96h"),
+            ("C03", "", "dmso", "24h"),
+        ]
+    )
+
+    filled = fill_sample_ids(table, CONDITIONS, _unchanged(table))
+
+    assert dict(zip(filled["well"], filled["sample_ID"], strict=True)) == {"B02": 1, "B03": 4, "C02": 3, "C03": 5}
+
+
+def test_an_id_already_set_is_kept_and_the_first_holder_gives_its_id() -> None:
+    table = _ids_table(
+        [
+            ("C02", "", "control", "24h"),
+            ("B03", 5, "control", "24h"),
+            ("B02", 1, "control", "24h"),
+        ]
+    )
+
+    filled = fill_sample_ids(table, CONDITIONS, _unchanged(table))
+
+    assert dict(zip(filled["well"], filled["sample_ID"], strict=True)) == {"B02": 1, "B03": 5, "C02": 1}
+
+
+IMPORTED = """\
+well,sample_ID,treatment,treatment_time
+B02,7,control,24h
+B03,,control,24h
+C02,,palbo,96h
+"""
+
+
+def test_a_blank_imported_sample_id_is_filled_on_save(experiment: Experiment, tmp_path: Path) -> None:
+    exp = experiment
+    for well in exp.well_list:
+        exp = with_metadata(exp, well, treatment=None, treatment_time=None, sample_ID=1)
+    table = wells_table(exp)
+    columns = [column for column in table.columns if column not in ("well", "sample_ID")]
+    csv = tmp_path / "metadata.csv"
+    csv.write_text(IMPORTED, encoding="utf-8")
+
+    rows = imported_rows(table.to_dict("records"), {}, read_metadata_table(csv), columns)
+    save_wells(exp, pd.DataFrame(rows, columns=["well", "sample_ID", *columns]), CONDITIONS)
+
+    assert _sample_ids(exp) == {"B02": 7, "B03": 7, "C02": 8}

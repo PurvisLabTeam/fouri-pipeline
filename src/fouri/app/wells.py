@@ -166,27 +166,64 @@ def _ids_and_conditions(
     return ids, conditions, order
 
 
-def _split_off(ids: list[object], conditions: list[tuple[str, ...]], order: list[int]) -> list[int]:
-    holders: dict[object, tuple[str, ...]] = {}
-    split = []
+def _unchanged(
+    table: pd.DataFrame, conditions: list[tuple[str, ...]], saved_conditions: Mapping[str, tuple[str, ...]]
+) -> list[bool]:
+    wells = [str(well) for well in table["well"]]
+    return [saved_conditions.get(well) == condition for well, condition in zip(wells, conditions, strict=True)]
+
+
+def _split_off(
+    ids: list[object], conditions: list[tuple[str, ...]], order: list[int], unchanged: list[bool]
+) -> list[int]:
+    holders: dict[object, list[int]] = {}
     for index in order:
-        if ids[index] != "" and holders.setdefault(ids[index], conditions[index]) != conditions[index]:
-            split.append(index)
-    return split
+        if ids[index] != "":
+            holders.setdefault(ids[index], []).append(index)
+    split: list[int] = []
+    for indices in holders.values():
+        held = list(dict.fromkeys(conditions[index] for index in indices))
+        if len(held) < 2:
+            continue
+        kept = list(dict.fromkeys(conditions[index] for index in indices if unchanged[index]))
+        keeper = kept[0] if len(kept) == 1 else held[0]
+        split.extend(index for index in indices if conditions[index] != keeper)
+    place = {index: position for position, index in enumerate(order)}
+    return sorted(split, key=place.__getitem__)
 
 
-def split_wells(table: pd.DataFrame, condition_columns: Sequence[str]) -> list[str]:
+def _conditions_in(config: Mapping[str, Any], condition_columns: Sequence[str]) -> dict[str, tuple[str, ...]]:
+    metadata = config.get("well_metadata") or {}
+    return {
+        str(well): tuple(
+            "" if blank(entry.get(column)) else str(entry.get(column)).strip() for column in condition_columns
+        )
+        for well, entry in metadata.items()
+    }
+
+
+def read_saved_conditions(exp: Experiment, condition_columns: Sequence[str]) -> dict[str, tuple[str, ...]]:
+    return _conditions_in(_read(exp), condition_columns)
+
+
+def split_wells(
+    table: pd.DataFrame, condition_columns: Sequence[str], saved_conditions: Mapping[str, tuple[str, ...]]
+) -> list[str]:
     ids, conditions, order = _ids_and_conditions(table, condition_columns)
     wells = table["well"].tolist()
-    return [str(wells[index]) for index in _split_off(ids, conditions, order)]
+    unchanged = _unchanged(table, conditions, saved_conditions)
+    return [str(wells[index]) for index in _split_off(ids, conditions, order, unchanged)]
 
 
-def fill_sample_ids(table: pd.DataFrame, condition_columns: Sequence[str]) -> pd.DataFrame:
+def fill_sample_ids(
+    table: pd.DataFrame, condition_columns: Sequence[str], saved_conditions: Mapping[str, tuple[str, ...]]
+) -> pd.DataFrame:
     filled = table.copy()
     if SAMPLE_ID not in filled.columns:
         filled[SAMPLE_ID] = ""
     ids, conditions, order = _ids_and_conditions(filled, condition_columns)
-    for index in _split_off(ids, conditions, order):
+    unchanged = _unchanged(filled, conditions, saved_conditions)
+    for index in _split_off(ids, conditions, order, unchanged):
         ids[index] = ""
     first: dict[tuple[str, ...], object] = {}
     for index in order:
@@ -204,6 +241,32 @@ def fill_sample_ids(table: pd.DataFrame, condition_columns: Sequence[str]) -> pd
     return filled
 
 
+def imported_rows(
+    rows: Sequence[Mapping[str, Any]],
+    kept: Mapping[str, Mapping[str, Any]],
+    imported: pd.DataFrame,
+    columns: Sequence[str],
+) -> list[dict[str, Any]]:
+    given = [str(column) for column in imported.columns]
+    listed = list(dict.fromkeys(str(well) for well in imported["well"]))
+    replaced: list[dict[str, Any]] = []
+    for well in listed:
+        existing = next((row for row in rows if row["well"] == well), None)
+        start: dict[str, Any] = dict(existing or kept.get(well) or {"well": well, SAMPLE_ID: ""})
+        for column in columns:
+            start.setdefault(column, "")
+        for _, line in imported[imported["well"] == well].iterrows():
+            row = dict(start)
+            for column in given:
+                if column == SAMPLE_ID:
+                    row[SAMPLE_ID] = as_sample_id(line[column])
+                elif column != "well":
+                    row[column] = line[column]
+            replaced.append(row)
+    listed_set = set(listed)
+    return [dict(row) for row in rows if row["well"] not in listed_set] + replaced
+
+
 def _read(exp: Experiment) -> dict[str, Any]:
     with open(exp.config_path, encoding="utf-8") as file:
         config: dict[str, Any] = json.load(file)
@@ -214,14 +277,14 @@ def save_wells(exp: Experiment, table: pd.DataFrame, condition_columns: Sequence
     twice = sorted(set(table.loc[table["well"].duplicated(), "well"]), key=plate_sort_key)
     if twice:
         raise ValueError(LISTED_TWICE.format(wells=", ".join(twice), verb="is" if len(twice) == 1 else "are"))
-    filled = fill_sample_ids(table, condition_columns)
+    config = _read(exp)
+    filled = fill_sample_ids(table, condition_columns, _conditions_in(config, condition_columns))
     well_list, well_metadata = table_to_config(filled)
     kept = [
         column
         for column in condition_columns
         if column in DEFAULT_CONDITION_COLUMNS or (column in filled.columns and not filled[column].map(blank).all())
     ]
-    config = _read(exp)
     config["well_list"] = well_list
     config["well_metadata"] = well_metadata
     config["condition_columns"] = kept

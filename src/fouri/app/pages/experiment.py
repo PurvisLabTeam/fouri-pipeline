@@ -26,7 +26,9 @@ from fouri.app.wells import (
     blank,
     config_to_save,
     fill_sample_ids,
+    imported_rows,
     new_config,
+    read_saved_conditions,
     save_details,
     save_wells,
     split_wells,
@@ -819,9 +821,17 @@ class _Wells:
     def _table(self) -> pd.DataFrame:
         return pd.DataFrame(self.rows, columns=[WELL, SAMPLE_ID, *self.columns])
 
+    def _saved_conditions(self, conditions: list[str]) -> dict[str, tuple[str, ...]]:
+        if self.exp is None:
+            return {}
+        try:
+            return read_saved_conditions(self.exp, conditions)
+        except (OSError, ValueError):
+            return {}
+
     def _issues(self) -> list[tuple[str, str]]:
         conditions = self._condition_list()
-        filled = fill_sample_ids(self._table(), conditions)
+        filled = fill_sample_ids(self._table(), conditions, self._saved_conditions(conditions))
         return list(check_metadata(filled, conditions, self.data_wells or None))
 
     def _draw_findings(self) -> None:
@@ -991,24 +1001,9 @@ class _Wells:
         for column in new_columns:
             self._add_row_column(column)
         listed = list(dict.fromkeys(str(well) for well in table[WELL]))
-        replaced: list[dict[str, Any]] = []
+        self.rows = imported_rows(self.rows, self.kept, table, self.columns)
         for well in listed:
-            existing = next((dict(row) for row in self.rows if row[WELL] == well), None)
-            stashed = self.kept.pop(well, None)
-            start = existing or stashed or {WELL: well, SAMPLE_ID: ""}
-            for column in self.columns:
-                start.setdefault(column, "")
-            for _, line in table[table[WELL] == well].iterrows():
-                row = dict(start)
-                for column in given:
-                    if column == SAMPLE_ID:
-                        if not blank(line[column]):
-                            row[SAMPLE_ID] = _whole(line[column])
-                    elif column != WELL:
-                        row[column] = line[column]
-                replaced.append(row)
-        listed_set = set(listed)
-        self.rows = [row for row in self.rows if row[WELL] not in listed_set] + replaced
+            self.kept.pop(well, None)
         self._sort()
         ui.notify(IMPORTED.format(wells=_count(len(listed), "well"), file=chosen), type="positive")
         self._draw_boxes()
@@ -1035,7 +1030,8 @@ class _Wells:
         if any(level == "error" for level, _ in self._issues()):
             ui.notify(FIX_PROBLEMS, type="negative")
             return
-        changed = split_wells(self._table(), self._condition_list())
+        conditions = self._condition_list()
+        changed = split_wells(self._table(), conditions, self._saved_conditions(conditions))
         try:
             saved = save_wells(exp, self._table(), self._condition_list())
         except (OSError, ValueError) as error:
