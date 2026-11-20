@@ -35,6 +35,7 @@ KEY_DELETE = "Delete"
 KEY_NEW = "Shift+N"
 KEY_MERGE = "Shift+M"
 KEY_CLEAR = "Escape"
+KEY_REDO = "Ctrl+Shift+Z"
 
 CONTRAST_PERCENTILES = (1, 99.5)
 CONTRAST_SAMPLE_STEP = 8
@@ -114,6 +115,7 @@ class SegmentationViewer(BaseViewer):
             layer.events.paint.connect(lambda _event, layer=layer: self._show_selection(layer))
             layer.mouse_drag_callbacks.append(self._on_click)
             layer.bind_key(KeyboardShortcuts.UNDO, lambda _layer: self.undo(), overwrite=True)
+            layer.bind_key(KEY_REDO, lambda _layer: self.redo(), overwrite=True)
             layer.events.mode.connect(lambda _event, layer=layer: self._bind_clear(layer))
             self._bind_clear(layer)
             self.masks[round_name] = layer
@@ -215,6 +217,13 @@ class SegmentationViewer(BaseViewer):
         layer = self.masks.get(self.round_name)
         if layer is not None:
             layer.undo()
+            self.changed.add(self.round_name)
+            self._show_selection(layer)
+
+    def redo(self) -> None:
+        layer = self.masks.get(self.round_name)
+        if layer is not None:
+            layer.redo()
             self.changed.add(self.round_name)
             self._show_selection(layer)
 

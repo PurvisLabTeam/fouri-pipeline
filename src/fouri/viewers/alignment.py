@@ -179,7 +179,7 @@ class AlignmentViewer(BaseViewer):
             transforms = None
 
         saved = None
-        if transforms is not None and not np.isnan(transforms[round_index]).any():
+        if transforms is not None and round_index < len(transforms) and not np.isnan(transforms[round_index]).any():
             saved = transform_to_napari(transforms[round_index])
         start_position = saved if self.start_from.value == SAVED_ALIGNMENT and saved is not None else np.eye(3)
 
@@ -204,6 +204,11 @@ class AlignmentViewer(BaseViewer):
     def _restart_round(self) -> None:
         current = getattr(self, "round_name", None)
         if current is None:
+            return
+        if not self._may_leave():
+            previous = SAVED_ALIGNMENT if self.start_from.value == NO_ALIGNMENT else NO_ALIGNMENT
+            with self.start_from.changed.blocked():
+                self.start_from.value = previous
             return
         self.show_round(self.round_name)
 

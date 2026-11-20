@@ -157,7 +157,7 @@ class BaseViewer(abc.ABC):
             return
         try:
             self.show_well(well)
-        except (FileNotFoundError, ValueError) as error:
+        except Exception as error:
             self.prompt(f"Could not open well {well}: {error}")
             self._set_quiet(self.well_picker, self.well)
 
@@ -172,7 +172,7 @@ class BaseViewer(abc.ABC):
             return
         try:
             self.show_round(round_name)
-        except (FileNotFoundError, ValueError) as error:
+        except Exception as error:
             self.prompt(f"Could not open round {round_name}: {error}")
             self._set_quiet(self.round_picker, self.round_name)
 
@@ -194,7 +194,7 @@ class BaseViewer(abc.ABC):
     def _unsaved_rounds(self) -> list[str]:
         return []
 
-    def _may_leave(self) -> bool:
+    def _may_leave(self, *, closing: bool = False) -> bool:
         unsaved = self._unsaved_rounds()
         if unsaved == []:
             return True
@@ -208,7 +208,11 @@ class BaseViewer(abc.ABC):
 
         match result:
             case QMessageBox.StandardButton.Save:
-                self.save()
+                try:
+                    self.save()
+                except Exception as error:
+                    self.prompt(f"Not saved: {error}." + (" The window stays open." if closing else ""))
+                    return False
                 return not self._unsaved_rounds()
             case QMessageBox.StandardButton.Discard:
                 return True
@@ -289,7 +293,7 @@ class _CloseGuard(QObject):
             return False
         if self.editor._self_close or self.editor._unsaved_rounds() == []:
             return False
-        may_leave = self.editor._may_leave()
+        may_leave = self.editor._may_leave(closing=True)
         if may_leave:
             self.editor._self_close = True
             QTimer.singleShot(0, self.editor.viewer.close)

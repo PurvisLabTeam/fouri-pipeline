@@ -342,3 +342,16 @@ def test_overwrite_after_an_anchor_change_writes_the_identity_at_the_anchor(expe
     np.testing.assert_array_equal(transforms[1], np.eye(3))
     assert np.isfinite(transforms).all()
     assert io.cell_data_path(exp, "B02").exists()
+
+
+def test_a_hand_alignment_beyond_a_shorter_file_pads_it_with_unaligned_rows(experiment: Experiment) -> None:
+    converted(experiment, "B02")
+    io.save_transforms(experiment, "B02", np.stack([np.eye(3)]))
+
+    align.save_manual_transform(experiment, "B02", 2, HAND_AFFINE)
+
+    transforms = io.load_transforms(experiment, "B02")
+    assert transforms.shape == (3, 3, 3)
+    np.testing.assert_array_equal(transforms[0], np.eye(3))
+    assert np.isnan(transforms[1]).all()
+    assert np.isfinite(transforms[2]).all()

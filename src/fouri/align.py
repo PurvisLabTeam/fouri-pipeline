@@ -306,6 +306,9 @@ def save_manual_transform(
     except FileNotFoundError:
         n_rounds = read_round_table(exp, well)["round_index"].nunique()
         transforms = _unaligned(n_rounds, exp.anchor_round)
+    if len(transforms) <= round_index:
+        padding = np.full((round_index + 1 - len(transforms), 3, 3), np.nan)
+        transforms = np.concatenate([transforms, padding])
     transforms[round_index] = manual
     return save_transforms(exp, well, transforms)
 

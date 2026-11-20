@@ -349,6 +349,8 @@ class ArtifactViewer(BaseViewer):
         return _Round(index=index, align_signal=align_signal, paths=paths, channels=channels)
 
     def save(self) -> None:
+        for key in list(self._edits_due):
+            self._after_edit(*key)
         unsaved = self._unsaved_rounds()
         if not unsaved:
             self.prompt(f"{self.well} has no unsaved edits.")
