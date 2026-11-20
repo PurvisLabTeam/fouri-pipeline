@@ -180,14 +180,10 @@ def _record_readable(path: Path) -> bool:
 def _artifacts(exp: Experiment, well: str, rounds: pd.DataFrame) -> WellStatus:
     total = len(rounds)
     done = sum(mask_path(exp, well, round_index).exists() for round_index in range(total))
-    try:
-        table = read_round_table(exp, well)
-    except FileNotFoundError:
+    if not round_table_path(exp, well).exists():
         if done:
             return WellStatus(State.BLOCKED, 0, total, "masks saved but no round table; rerun Convert images")
         return WellStatus(State.NOT_STARTED, 0, total)
-    if "raw_file_name" not in table.columns:
-        return WellStatus(State.BLOCKED, 0, total, "round table made by an older version; rerun Convert images")
     unreadable = [
         str(round_index)
         for round_index in range(total)

@@ -19,6 +19,7 @@ from fouri.config import Experiment
 from fouri.io import (
     cell_data_path,
     label_path,
+    label_paths,
     mask_paths,
     mask_record_path,
     nd2_metadata,
@@ -44,8 +45,42 @@ class ChangedWell:
     outputs: list[Path]
 
 
+def _hand_edited(exp: Experiment, well: str, round_index: int) -> bool:
+    return original_label_path(exp, well, round_index).exists() or is_mask_edited(
+        mask_record_path(exp, well, round_index)
+    )
+
+
 def changed_wells(exp: Experiment, wells: Sequence[str] | None = None) -> list[ChangedWell]:
-    """@TODO."""
+    """Find the converted wells whose rounds no longer match `info_exp.csv`.
+
+    A well is changed when a round of the well's round table is renamed, moved, given other
+    channels or signals, or no longer listed in `info_exp.csv`. A round added at the end of
+    `info_exp.csv` is not a change. A well without a round table file is changed when
+    `df_<well>.pkl` exists. All rounds of such a well are reported changed. Each hand-edited round
+    of such a well is named `round N`, with `N` the 0-based round index. A well with neither file
+    is not reported. Reads mask records with `is_mask_edited`, which raises `ValueError` if a
+    record's `edited` is not true or false.
+
+    Parameters
+    ----------
+    exp : Experiment
+        The Experiment that holds the files.
+    wells : Sequence[str] | None, default=None
+        The wells to check. None checks every well of the experiment.
+
+    Returns
+    -------
+    list[ChangedWell]
+        One entry per changed well, in plate order.
+
+    Notes
+    -----
+    A round is hand-edited when the round has an original Cellpose label file or a mask record
+    with `edited` true. The outputs listed are those that exist among the round table file,
+    `df_<well>.pkl`, the well's images directory, labels directory, transforms files (`.npy` and
+    `.pkl`), masks directory, and cell data file.
+    """
     wells = exp.pick_wells(wells)
     table = read_info_file(exp)
     listed: dict[int, tuple[str, dict[str, str]]] = {}
@@ -60,41 +95,52 @@ def changed_wells(exp: Experiment, wells: Sequence[str] | None = None) -> list[C
     changed = []
     for well in wells:
         rtable_path = round_table_path(exp, well)
-        if not rtable_path.exists():
-            continue
-        round_info = read_round_table(exp, well)
-        saved: dict[int, tuple[str, dict[str, str]]] = {}
-        for idx, rows in round_info.groupby("round_index"):
-            rname = str(rows["round_name"].iloc[0])
-            channel_signals = {
-                str(channel): str(signal) for channel, signal in zip(rows["channel_name"], rows["signal"], strict=True)
-            }
-            saved[cast(int, idx)] = (rname, channel_signals)
+        old_table_path = Path(exp.output_df) / f"df_{well}.pkl"
+        if rtable_path.exists():
+            round_info = read_round_table(exp, well)
+            saved: dict[int, tuple[str, dict[str, str]]] = {}
+            for idx, rows in round_info.groupby("round_index"):
+                rname = str(rows["round_name"].iloc[0])
+                channel_signals = {
+                    str(channel): str(signal)
+                    for channel, signal in zip(rows["channel_name"], rows["signal"], strict=True)
+                }
+                saved[cast(int, idx)] = (rname, channel_signals)
 
-        rounds_changed = {idx: entry[0] for idx, entry in saved.items() if idx not in listed or entry != listed[idx]}
-        if rounds_changed:
-            hand_edited = [
-                round_name
-                for idx, (round_name, _) in saved.items()
-                if original_label_path(exp, well, idx).exists() or is_mask_edited(mask_record_path(exp, well, idx))
+            rounds_changed = [entry[0] for idx, entry in saved.items() if idx not in listed or entry != listed[idx]]
+            if not rounds_changed:
+                continue
+            hand_edited = [round_name for idx, (round_name, _) in saved.items() if _hand_edited(exp, well, idx)]
+        elif old_table_path.exists():
+            rounds_changed = [round_name for round_name, _ in listed.values()]
+            masks_dir = Path(exp.masks) / well
+            round_files = [
+                *label_paths(exp.segmented, well),
+                *(mask_paths(exp.masks, well) if masks_dir.is_dir() else []),
             ]
-            outputs: list[Path] = [
-                rtable_path,
-                Path(exp.output_images) / well,
-                Path(exp.segmented) / well,
-                tmat_path(exp, well, ".npy"),
-                Path(exp.masks) / well,
-                cell_data_path(exp, well),
-            ]
-            outputs = [output for output in outputs if output.exists()]
-            changed.append(
-                ChangedWell(
-                    well=well,
-                    rounds=list(rounds_changed.values()),
-                    hand_edited=hand_edited,
-                    outputs=outputs,
-                )
+            indices = sorted({int(path.stem[-3:]) for path in round_files})
+            hand_edited = [f"round {idx}" for idx in indices if _hand_edited(exp, well, idx)]
+        else:
+            continue
+
+        outputs: list[Path] = [
+            rtable_path,
+            old_table_path,
+            Path(exp.output_images) / well,
+            Path(exp.segmented) / well,
+            tmat_path(exp, well, ".npy"),
+            tmat_path(exp, well, ".pkl"),
+            Path(exp.masks) / well,
+            cell_data_path(exp, well),
+        ]
+        changed.append(
+            ChangedWell(
+                well=well,
+                rounds=rounds_changed,
+                hand_edited=hand_edited,
+                outputs=[output for output in outputs if output.exists()],
             )
+        )
 
     return changed
 
@@ -166,16 +212,18 @@ def preprocess(
         changed_info = changed.get(well)
         if changed_info is not None:
             if not reconvert_changed:
-                refused.append(
-                    Failed(
-                        well,
-                        (
-                            f"Converted rounds no longer match info_exp.csv: rounds {', '.join(changed_info.rounds)} "
-                            "have changed. Convert images again from the Run page and confirm or run python -m "
-                            "fouri.run reconvert."
-                        ),
+                if round_table_path(exp, well).exists():
+                    reason = (
+                        f"Converted rounds no longer match info_exp.csv: rounds {', '.join(changed_info.rounds)} "
+                        "have changed. Convert images again from the Run page and confirm or run python -m "
+                        "fouri.run reconvert."
                     )
-                )
+                else:
+                    reason = (
+                        "Converted by an older version of the pipeline (every round). Convert images again from "
+                        "the Run page and confirm, or run python -m fouri.run reconvert."
+                    )
+                refused.append(Failed(well, reason))
                 continue
             for output in changed_info.outputs:
                 if output.is_dir():

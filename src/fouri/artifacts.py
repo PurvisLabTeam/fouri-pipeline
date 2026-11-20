@@ -277,7 +277,6 @@ def _plan_wells(exp: Experiment, overwrite: bool = False, wells: Sequence[str] |
     for well in wells:
         try:
             round_table = io.read_round_table(exp, well)
-            io.require_raw_files(round_table, well)
 
             to_write: dict[int, dict[str, Path]] = {}
             well_painted: list[int] = []

@@ -1,5 +1,6 @@
 """Convert images refuses only the well whose converted rounds no longer match info_exp.csv."""
 
+import pickle
 from collections.abc import Callable
 from pathlib import Path
 
@@ -285,5 +286,65 @@ def test_reconvert_changed_deletes_the_outputs_and_converts_again(
     assert not io.tmat_path(experiment, "B02", ".npy").exists()
     assert not (Path(experiment.masks) / "B02").exists()
     assert not io.cell_data_path(experiment, "B02").exists()
+    table = io.read_round_table(experiment, "B02")
+    assert all((Path(experiment.output_images) / "B02" / str(name)).exists() for name in table["raw_file_name"])
+
+
+def _old_files(exp: Experiment, well: str, *, keep_new: bool) -> list[Path]:
+    table = io.read_round_table(exp, well).rename(
+        columns={"round_name": "nameRound", "round_index": "alignRound", "is_align_channel": "alignIm"}
+    )
+    old_table = Path(exp.output_df) / f"df_{well}.pkl"
+    table.drop(columns="raw_file_name").to_pickle(old_table)
+    old_transforms = io.tmat_path(exp, well, ".pkl")
+    with open(old_transforms, "wb") as fh:
+        pickle.dump(list(io.load_transforms(exp, well)), fh)
+    if not keep_new:
+        io.round_table_path(exp, well).unlink()
+        io.tmat_path(exp, well, ".npy").unlink()
+    return [old_table, old_transforms]
+
+
+def _with_bytes(exp: Experiment, well: str, paths: list[Path]) -> dict[Path, bytes]:
+    return {**well_outputs(exp, well), **{path: path.read_bytes() for path in paths if path.exists()}}
+
+
+def test_a_well_with_only_an_old_round_table_is_refused_as_changed(
+    experiment: Experiment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fully_processed(experiment, monkeypatch, "B02")
+    old = _old_files(experiment, "B02", keep_new=False)
+    before = _with_bytes(experiment, "B02", old)
+
+    changed = preprocess.changed_wells(experiment)
+    with pytest.raises(StepFailed) as raised:
+        preprocess.preprocess(experiment, wells=["B02", "B03"])
+
+    assert [well.well for well in changed] == ["B02"]
+    assert changed[0].rounds == ["R0", "R1", "R2"]
+    assert changed[0].hand_edited == ["round 0", "round 1"]
+    assert raised.value.failed == ["B02"]
+    assert _with_bytes(experiment, "B02", old) == before
+    assert not io.round_table_path(experiment, "B02").exists()
+    assert io.round_table_path(experiment, "B03").exists()
+
+
+@pytest.mark.parametrize("keep_new", [False, True], ids=["only-the-old-files", "old-files-beside-a-changed-well"])
+def test_reconverting_deletes_the_old_pkl_files(
+    experiment: Experiment, monkeypatch: pytest.MonkeyPatch, keep_new: bool
+) -> None:
+    _fully_processed(experiment, monkeypatch, "B02")
+    old = _old_files(experiment, "B02", keep_new=keep_new)
+    if keep_new:
+        with_info(experiment, SWAPPED_INFO)
+
+    preprocess.preprocess(experiment, wells=["B02"], reconvert_changed=True)
+
+    assert [path for path in old if path.exists()] == []
+    assert not (Path(experiment.segmented) / "B02").exists()
+    assert not io.tmat_path(experiment, "B02", ".npy").exists()
+    assert not (Path(experiment.masks) / "B02").exists()
+    assert not io.cell_data_path(experiment, "B02").exists()
+    assert _round_order(experiment, "B02") == (["R0", "R2", "R1"] if keep_new else ["R0", "R1", "R2"])
     table = io.read_round_table(experiment, "B02")
     assert all((Path(experiment.output_images) / "B02" / str(name)).exists() for name in table["raw_file_name"])

@@ -1,12 +1,10 @@
 """Readers, writers, and paths for the pipeline's input and output files.
 
 Paths derive from the directories of a `fouri.config.Experiment`. Writes use `written_whole` for
-atomic writes. `read_round_table` and `load_transforms` read legacy `df_{well}.pkl` and
-`tmat_{well}.pkl` when the current file is absent.
+atomic writes.
 """
 
 import os
-import pickle
 import re
 import sys
 from collections.abc import Generator, Mapping, Sequence
@@ -434,29 +432,35 @@ def save_round_table(exp: Experiment, well: str, table: pd.DataFrame) -> None:
 
 
 def read_round_table(exp: Experiment, well: str) -> pd.DataFrame:
-    current = round_table_path(exp, well)
-    deprecated = current.parent / f"df_{well}.pkl"
+    """Read the round table for a single well.
 
-    if current.is_file():
-        return pd.read_csv(current)
+    Parameters
+    ----------
+    exp : Experiment
+        The Experiment that holds the file.
+    well : str
+        The well, zero-padded (e.g., `B02`).
 
-    if deprecated.is_file():
-        table = pd.read_pickle(deprecated)
-        table = table.rename(
-            columns={"nameRound": "round_name", "alignRound": "round_index", "alignIm": "is_align_channel"}
-        )
-        table["is_align_channel"] = table["is_align_channel"].astype(bool)
-        table["round_index"] = table["round_index"].astype(int)
-        return table
+    Returns
+    -------
+    pd.DataFrame
+        The round table as a pandas DataFrame.
 
-    raise FileNotFoundError(f"Could not find the round table .csv or .pkl for well {well}")
+    Raises
+    ------
+    FileNotFoundError
+        If the round table file does not exist.
 
-
-def require_raw_files(table: pd.DataFrame, well: str) -> None:
-    if "raw_file_name" not in table.columns:
-        raise ValueError(
-            f"Well {well}'s round table was made using an old version of the pipeline. Rerun Convert images first."
-        )
+    Notes
+    -----
+    The file is the one `round_table_path` names. The file has one row per channel of each round
+    listed in `info_exp.csv`. Each row holds the round's ND2 file, the image size, the acquisition
+    settings, the signal, `is_align_channel`, and `raw_file_name` (the converted image's file name).
+    """
+    path = round_table_path(exp, well)
+    if not path.is_file():
+        raise FileNotFoundError(f"Could not find the round table for well {well}. Run Convert images on it.")
+    return pd.read_csv(path)
 
 
 def cell_data_path(exp: Experiment, well: str) -> Path:
@@ -465,8 +469,29 @@ def cell_data_path(exp: Experiment, well: str) -> Path:
 
 
 def alignment_paths(exp: Experiment, well: str) -> list[Path]:
+    """List the converted images of the alignment channel for a well, in round order.
+
+    Reads the round table with `read_round_table`, which raises `FileNotFoundError` if the round
+    table file does not exist.
+
+    Parameters
+    ----------
+    exp : Experiment
+        The Experiment that holds the files.
+    well : str
+        The well, zero-padded (e.g., `B02`).
+
+    Returns
+    -------
+    list[Path]
+        Paths to the alignment channel images, sorted by round index.
+
+    Notes
+    -----
+    Each path is `<output_images>/<well>/<raw_file_name>` for a row of the round table with
+    `is_align_channel` true. The files are not checked for existence.
+    """
     table = read_round_table(exp, well)
-    require_raw_files(table, well)
     parent = Path(exp.output_images) / well
     return [
         parent / str(row.raw_file_name)
@@ -508,16 +533,33 @@ def save_transforms(exp: Experiment, well: str, transforms: npt.NDArray[np.float
 
 
 def load_transforms(exp: Experiment, well: str) -> npt.NDArray[np.float64]:
-    current_path = tmat_path(exp, well, ".npy")
-    deprecated_path = tmat_path(exp, well, ".pkl")
+    """Read the alignment transforms for a single well from the `.npy` transforms file.
 
-    if current_path.exists():
-        transforms = np.load(current_path)
-    elif deprecated_path.exists():
-        with open(deprecated_path, "rb") as fh:
-            transforms = pickle.load(fh)
-        transforms = np.array([getattr(transform, "params", transform) for transform in transforms])
-    else:
-        raise FileNotFoundError(f"Could not find transforms for well {well}")
+    Parameters
+    ----------
+    exp : Experiment
+        The Experiment that holds the file.
+    well : str
+        The well, zero-padded (e.g., `B02`).
 
+    Returns
+    -------
+    npt.NDArray[np.float64]
+        The transforms found in the file, with shape (rounds, 3, 3) and indexed by round index.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the transforms file does not exist.
+
+    Notes
+    -----
+    The file is the one `tmat_path` names with the suffix `.npy`. Each matrix maps (x, y, 1) pixel
+    coordinates in the anchor round to those in its round. The anchor round's matrix is the identity
+    matrix. A round that is not yet aligned is a matrix of NaN.
+    """
+    path = tmat_path(exp, well, ".npy")
+    if not path.exists():
+        raise FileNotFoundError(f"Could not find transforms for well {well}. Run Align rounds on it.")
+    transforms: npt.NDArray[np.float64] = np.load(path)
     return transforms

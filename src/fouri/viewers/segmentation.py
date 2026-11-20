@@ -92,7 +92,6 @@ class SegmentationViewer(BaseViewer):
         self.highlight.data = np.zeros((1, 1), dtype=np.uint8)
 
     def _round_channels(self, round_name: str) -> list[tuple[str, Path]]:
-        io.require_raw_files(self.round_table, self.well)
         row = self.round_table[self.round_table["round_name"] == round_name]
         base_path = Path(self.exp.output_images) / self.well
         return [

@@ -16,7 +16,7 @@ from tifffile import imread
 from fouri.align import move_to_anchor, move_to_round
 from fouri.artifacts import final_masks
 from fouri.config import Experiment
-from fouri.io import cell_data_path, load_transforms, read_labels, read_round_table, require_raw_files, written_whole
+from fouri.io import cell_data_path, load_transforms, read_labels, read_round_table, written_whole
 from fouri.metadata import feature_prefix
 from fouri.parallel import Dropped, Failed, check_results, parallel_map
 from fouri.report import say, say_skipped
@@ -96,7 +96,6 @@ def measure_well(
     exp: Experiment, well: str, ring_width: int = 6, ring_gap: int = 1, edge_margin: int = 1
 ) -> tuple[Path, int]:
     round_table = read_round_table(exp, well)
-    require_raw_files(round_table, well)
     transforms = load_transforms(exp, well)
     if (tr := transforms.shape[0]) < (ta := round_table["round_index"].nunique()):
         raise ValueError(

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from fouri.config import Experiment
 from fouri.finetune import training_squares
-from fouri.io import read_round_table, require_raw_files
+from fouri.io import read_round_table
 from fouri.models import models_dir
 
 SEPARATORS = ("/", "\\")
@@ -24,10 +24,6 @@ def corrected_regions(exp: Experiment) -> Regions:
         try:
             table = read_round_table(exp, well)
         except FileNotFoundError:
-            continue
-        try:
-            require_raw_files(table, well)
-        except ValueError:
             continue
         squares = training_squares(exp, [well])
         if not squares:

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import logging
-import pickle
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -18,7 +17,6 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 import pytest
-from skimage.transform import EuclideanTransform
 from tifffile import imread
 
 from fouri import io, measure, preprocess
@@ -315,23 +313,6 @@ def with_metadata(exp: Experiment, well: str, **values: Any) -> Experiment:
             entry[name] = value
     save_config({**exp.config, "well_metadata": metadata}, exp.config_path)
     return load_config(exp.config_path, announce=False)
-
-
-def old_format(exp: Experiment, well: str) -> None:
-    table_path = io.round_table_path(exp, well)
-    table = io.read_round_table(exp, well).rename(
-        columns={"round_name": "nameRound", "round_index": "alignRound", "is_align_channel": "alignIm"}
-    )
-    table["alignRound"] = table["alignRound"].astype(float)
-    table["alignIm"] = table["alignIm"].astype(int)
-    table.drop(columns="raw_file_name").to_pickle(table_path.with_name(f"df_{well}.pkl"))
-    table_path.unlink()
-
-    transforms_path = io.tmat_path(exp, well, ".npy")
-    transforms = io.load_transforms(exp, well)
-    with open(io.tmat_path(exp, well, ".pkl"), "wb") as fh:
-        pickle.dump([EuclideanTransform(matrix) for matrix in transforms], fh)
-    transforms_path.unlink()
 
 
 def in_process_map(

@@ -3,9 +3,8 @@
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 import pytest
-from builders import REMOVED_NUCLEUS, aligned, converted, measured, old_format, segmented
+from builders import REMOVED_NUCLEUS, aligned, converted, measured, segmented
 from tifffile import imread
 
 from fouri import io, status
@@ -131,31 +130,3 @@ def test_read_labels_reads_rounds_by_name(experiment: Experiment) -> None:
     np.testing.assert_array_equal(read, np.stack([round_1, round_2]))
     with pytest.raises(FileNotFoundError):
         io.read_labels(experiment.segmented, "B02", [0])
-
-
-def test_the_old_round_table_is_read_with_the_new_names(experiment: Experiment) -> None:
-    converted(experiment, "B02")
-    aligned(experiment, "B02")
-    columns = ["round_name", "round_index", "is_align_channel", "signal"]
-    table = io.read_round_table(experiment, "B02")[columns]
-
-    old_format(experiment, "B02")
-
-    read = io.read_round_table(experiment, "B02")
-    assert not io.round_table_path(experiment, "B02").exists()
-    assert read["round_index"].dtype == table["round_index"].dtype
-    assert read["is_align_channel"].dtype == bool
-    pd.testing.assert_frame_equal(read[columns].reset_index(drop=True), table.reset_index(drop=True))
-
-
-def test_the_old_transforms_are_read(experiment: Experiment) -> None:
-    converted(experiment, "B02")
-    transforms = np.stack([np.eye(3), np.eye(3), np.eye(3)])
-    transforms[1, :2, 2] = (2.5, -1.25)
-    transforms[2, :2, :2] = [[0.0, -1.0], [1.0, 0.0]]
-    io.save_transforms(experiment, "B02", transforms)
-
-    old_format(experiment, "B02")
-
-    assert not io.tmat_path(experiment, "B02", ".npy").exists()
-    np.testing.assert_array_equal(io.load_transforms(experiment, "B02"), transforms)

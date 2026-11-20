@@ -633,7 +633,6 @@ class ArtifactViewer(BaseViewer):
     ) -> _Masks:
         rows = round_table[round_table["round_name"] == round_name]
         index = int(rows["round_index"].iloc[0])
-        io.require_raw_files(round_table, well)
         shapes = {
             str(signal): _image_shape(Path(self.exp.output_images) / well / str(file_name))
             for signal, file_name in zip(rows["signal"], rows["raw_file_name"], strict=True)
@@ -656,7 +655,6 @@ class ArtifactViewer(BaseViewer):
         return int(rows["round_index"].iloc[0]), str(rows["signal"].iloc[0])
 
     def _round_paths(self, round_name: str) -> dict[str, Path]:
-        io.require_raw_files(self.round_table, self.well)
         rows = self.round_table[self.round_table["round_name"] == round_name]
         base_path = Path(self.exp.output_images) / self.well
         return {
